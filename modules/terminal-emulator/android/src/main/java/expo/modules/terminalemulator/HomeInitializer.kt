@@ -607,10 +607,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // extracted cli.js paths past 2.1.112 don't ReferenceError on
     // Bun.hash(input); record native-tier crashes to
     // ~/.shelly-runtime/.runtime-failures with a `<tier>` column so the
-    // updater can route per-tier cooldowns. Bumps 73 -> 76 (skipping 74/75
+    // updater can route per-tier cooldowns. Bumps 73 -> 77 (skipping 74/75
     // which lived only on a feature branch) so devices that ran v75 from
     // that branch regenerate fresh.
-    private const val BASHRC_VERSION = 76
+    private const val BASHRC_VERSION = 77
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1323,6 +1323,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // already has the heap the relaunch would have given it —
             // gemini-cli's heap-size check (target > current) then stays
             // false and the no-op guard holds. Belt + suspenders.
+            //
+            // Gemini CLI 0.41.x currently defaults Shelly's OAuth/Code Assist
+            // path to gemini-3-flash-preview, which can return transient 429
+            // MODEL_CAPACITY_EXHAUSTED and leave the TUI looking stuck. Unless
+            // the user explicitly picks a model, route normal interactive and
+            // prompt calls to the stable flash alias; keep diagnostic commands
+            // (`--version`, `--help`, etc.) untouched.
             sb.appendLine("gemini() {")
             sb.appendLine("  local __gemini_pkg=\"\$__cli_dir/@google/gemini-cli/package.json\"")
             sb.appendLine("  local __gemini_bin=\"bundle/gemini.js\"")
@@ -1335,8 +1342,27 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    echo \"gemini: package bin not found: \$__gemini_entry\" >&2")
             sb.appendLine("    return 127")
             sb.appendLine("  fi")
+            sb.appendLine("  local __has_model=0")
+            sb.appendLine("  local __skip_default_model=0")
+            sb.appendLine("  local __prev_arg=\"\"")
+            sb.appendLine("  local __arg")
+            sb.appendLine("  for __arg in \"\$@\"; do")
+            sb.appendLine("    if [ \"\$__prev_arg\" = \"-m\" ] || [ \"\$__prev_arg\" = \"--model\" ]; then")
+            sb.appendLine("      __has_model=1")
+            sb.appendLine("      break")
+            sb.appendLine("    fi")
+            sb.appendLine("    case \"\$__arg\" in")
+            sb.appendLine("      -m|--model|--model=*) __has_model=1; break ;;")
+            sb.appendLine("      -h|--help|--version|version|help|auth|mcp) __skip_default_model=1 ;;")
+            sb.appendLine("    esac")
+            sb.appendLine("    __prev_arg=\"\$__arg\"")
+            sb.appendLine("  done")
+            sb.appendLine("  local __gemini_args=(\"\$@\")")
+            sb.appendLine("  if [ \"\$__has_model\" -eq 0 ] && [ \"\$__skip_default_model\" -eq 0 ] && [ -z \"\${GEMINI_MODEL:-}\" ]; then")
+            sb.appendLine("    __gemini_args=(--model flash \"\${__gemini_args[@]}\")")
+            sb.appendLine("  fi")
             sb.appendLine("  __shelly_paste_tui_begin")
-            sb.appendLine("  GEMINI_CLI_NO_RELAUNCH=true _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\$@\"")
+            sb.appendLine("  GEMINI_CLI_NO_RELAUNCH=true _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("  local __gemini_rc=\$?")
             sb.appendLine("  __shelly_paste_tui_end")
             sb.appendLine("  return \"\$__gemini_rc\"")

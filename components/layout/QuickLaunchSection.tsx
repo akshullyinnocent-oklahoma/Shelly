@@ -15,7 +15,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useAddPane } from '@/hooks/use-add-pane';
 import { useTerminalStore } from '@/store/terminal-store';
 import { SidebarSection } from './SidebarSection';
-import { colors as C, fonts as F, padding as P, sizes as S } from '@/theme.config';
+import { colors as C, fonts as F, padding as P, radii as R } from '@/theme.config';
 import { neonGlowSky } from '@/lib/neon-glow';
 
 type Cli = 'claude' | 'codex' | 'gemini';
@@ -98,7 +98,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'nowrap',
     gap: 6,
-    paddingHorizontal: P.sm,
+    paddingHorizontal: P.sidebarItem.px,
     paddingVertical: 4,
   },
   chip: {
@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
     gap: 3,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: S.radius,
+    borderRadius: R.agentTab,
     borderWidth: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
     lineHeight: 11,
   },
   chipLabel: {
-    fontFamily: F.mono,
+    fontFamily: F.family,
     fontSize: 9,
     fontWeight: '600',
   },

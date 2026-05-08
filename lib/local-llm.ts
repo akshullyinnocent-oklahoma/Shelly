@@ -834,7 +834,7 @@ function buildClaudeCommand(userInput: string): string {
 
 function buildGeminiCommand(userInput: string): string {
   const escaped = userInput.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-  return `gemini --prompt "${escaped}"`;
+  return `gemini -p "${escaped}"`;
 }
 
 function buildCodexCommand(userInput: string): string {

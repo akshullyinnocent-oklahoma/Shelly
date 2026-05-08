@@ -89,7 +89,7 @@ export const CLI_TOOLS: Record<CliTool, CliToolConfig> = {
       'npm install -g @google/gemini-cli',
     setupCommands: ['npm install -g @google/gemini-cli'],
     isInteractive: true,
-    nonInteractiveFlag: '--prompt',
+    nonInteractiveFlag: '-p',
   },
   codex: {
     id: 'codex',
@@ -193,8 +193,9 @@ export function buildCliCommand(req: CliRunRequest): CliRunPlan {
         'ターミナルで直接 `claude` を実行するか、もっとシンプルな指示で試してみて。';
     }
   } else if (req.tool === 'gemini') {
-    // gemini --prompt "<prompt>" in the target directory
-    command = `cd "${req.targetPath}" && gemini --prompt ${escapeShellArg(prompt)}`;
+    // gemini -p "<prompt>" in the target directory. The Shelly shell wrapper
+    // adds a stable default model unless the user explicitly supplies one.
+    command = `cd "${req.targetPath}" && gemini -p ${escapeShellArg(prompt)}`;
     if (req.userInput.length > 300) {
       isInteractiveFallback = true;
       fallbackSuggestion =
