@@ -268,7 +268,7 @@ export function interpretCheckResult(
 
   if (needsAuth) {
     const authGuide = tool === 'claude'
-      ? 'Claude Codeの認証が必要だよ。\nターミナルで `claude auth login` を実行するか、\n環境変数 ANTHROPIC_API_KEY を設定してね。\n（APIキーはShellyには保存しないよ。ターミナル側で管理してね。）'
+      ? 'Claude Codeの認証が必要だよ。\nターミナルで `claude` を起動して `/login` を実行するか、\n環境変数 ANTHROPIC_API_KEY を設定してね。\n（APIキーはShellyには保存しないよ。ターミナル側で管理してね。）'
       : 'Gemini CLIの認証が必要だよ。\nターミナルで `gemini auth login` を実行するか、\n環境変数 GEMINI_API_KEY を設定してね。\n（APIキーはShellyには保存しないよ。ターミナル側で管理してね。）';
 
     return {
@@ -276,7 +276,7 @@ export function interpretCheckResult(
       needsAuth: true,
       message: authGuide,
       setupCommands: tool === 'claude'
-        ? ['claude auth login']
+        ? ['claude']
         : ['gemini auth login'],
     };
   }

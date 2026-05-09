@@ -47,7 +47,7 @@ export const AUTH_TOOL_CONFIGS: AuthToolConfig[] = [
     secureStoreKey: 'claudeAuthToken',
     apiKeyUrl: 'https://console.anthropic.com/settings/keys',
     checkInstalled: 'which claude 2>/dev/null',
-    loginCommand: 'claude auth login 2>&1',
+    loginCommand: 'claude',
     color: '#F59E0B',
     icon: 'code',
   },
@@ -69,7 +69,7 @@ export const AUTH_TOOL_CONFIGS: AuthToolConfig[] = [
     secureStoreKey: 'codexAuthToken',
     apiKeyUrl: 'https://platform.openai.com/api-keys',
     checkInstalled: 'which codex 2>/dev/null',
-    loginCommand: 'codex login 2>&1',
+    loginCommand: 'codex-login --open',
     color: '#10B981',
     icon: 'terminal',
   },
@@ -169,7 +169,9 @@ export async function verifyAuth(
 
 /**
  * Extract an OAuth URL from CLI login command output.
- * Claude Code outputs a URL during `claude auth login`.
+ * Claude Code emits a URL during its REPL login flow; Gemini emits a
+ * Google OAuth URL during `gemini auth login`; Codex emits a device-code
+ * verification URL during `codex-login --open`.
  */
 export function extractOAuthUrl(output: string): string | null {
   // Match common URL patterns from CLI output

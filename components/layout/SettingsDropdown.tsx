@@ -1032,9 +1032,9 @@ function CodexLoginSection({ onClose }: { onClose: () => void }) {
 
 // ─── Claude / Gemini login (loopback OAuth via xdg-open shim) ───────────────
 // Phase 1 of bug #102 / #115: Bionic Android has no native xdg-open, so
-// Claude Code's `/login` (i3 opener) and Gemini CLI's `/auth` both fail
-// silently with ENOENT and fall through to manual paste — except the
-// user has nowhere to actually open the URL without leaving Shelly.
+// Claude Code's `/login` (i3 opener) and Gemini CLI's `auth login`
+// both fail silently with ENOENT and fall through to manual paste —
+// except the user has nowhere to actually open the URL without leaving Shelly.
 // HomeInitializer.kt now installs a `$HOME/bin/xdg-open` shim that
 // fires the `shelly://browser?url=…` deep link, so the auth URL opens
 // in Shelly's Browser Pane. The user signs in there, copies the
@@ -1042,17 +1042,16 @@ function CodexLoginSection({ onClose }: { onClose: () => void }) {
 // the CLI's manual-paste UI.
 //
 // These buttons are pure UX shortcuts — they spawn a fresh terminal
-// pane and queue the slash command (`claude /login` / `gemini /auth`).
+// pane and queue the actual auth command (`claude` -> then /login,
+// `gemini auth login`).
 // No new auth logic, no token exchange. Loopback automation (the
 // callback intercept inside Browser Pane) is intentionally deferred
 // to Phase 2 once we've verified Phase 1 on hardware.
 
 // We deliberately spawn the bare REPL (`claude\n` / `gemini\n`) instead
-// of `claude /login` / `gemini /auth` as args. Both CLIs treat their
-// argv as initial prompts, not slash commands — `claude /login` would
-// be sent to the model as a chat message, not invoke the auth flow.
-// The user types the slash command in the REPL after the prompt
-// appears. The Alert spells this out so the user knows the next move.
+// `claude` still needs the REPL prompt and a manual `/login`, but
+// Gemini CLI exposes a real `auth login` subcommand that we can launch
+// directly. The Alert spells this out so the user knows the next move.
 
 function ClaudeLoginSection({ onClose }: { onClose: () => void }) {
   const addPane = useAddPane();
@@ -1060,7 +1059,7 @@ function ClaudeLoginSection({ onClose }: { onClose: () => void }) {
   const start = React.useCallback(() => {
     Alert.alert(
       'Start Claude sign-in?',
-      'Spawns a fresh terminal pane with the Claude REPL. After the prompt appears, type /login to begin sign-in. The auth URL will open in Shelly\'s Browser Pane via the xdg-open shim.\n\nPhase 1 (beta): browser-launch assist only. OAuth completion on-device is still under hardware verification — if it fails, fall back to credential transplant (see README).',
+      'Spawns a fresh terminal pane with the Claude REPL. After the prompt appears, type /login to begin sign-in. The auth URL will open in Shelly\'s Browser Pane via the xdg-open shim.\n\nIf the flow fails on-device, fall back to credential transplant (see README).',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1105,7 +1104,7 @@ function GeminiLoginSection({ onClose }: { onClose: () => void }) {
   const start = React.useCallback(() => {
     Alert.alert(
       'Start Gemini sign-in?',
-      'Spawns a fresh terminal pane with the Gemini REPL. After the prompt appears, type /auth to begin sign-in. The auth URL will open in Shelly\'s Browser Pane via the xdg-open shim.\n\nPhase 1 (beta): browser-launch assist only. OAuth completion on-device is still under hardware verification — if it fails, fall back to credential transplant (see README).',
+      'Spawns a fresh terminal pane and runs Gemini CLI\'s auth subcommand. Shelly opens the verification URL in the Browser Pane via the xdg-open shim and the CLI finishes the loopback flow on-device.\n\nIf the flow fails, fall back to credential transplant (see README).',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1113,8 +1112,8 @@ function GeminiLoginSection({ onClose }: { onClose: () => void }) {
           onPress: () => {
             const result = addPane('terminal');
             if (result !== null) return; // useAddPane already alerted
-            useTerminalStore.getState().insertCommand('gemini\n');
-            logInfo('SettingsDropdown', 'gemini REPL launched for /auth');
+            useTerminalStore.getState().insertCommand('gemini auth login\n');
+            logInfo('SettingsDropdown', 'gemini auth login launched');
             onClose();
           },
         },

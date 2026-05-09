@@ -745,7 +745,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //        NB: this is a PURELY DIAGNOSTIC bump. PR #52's bare-TUI →
     //        legacy fallback is the user-facing fix until root cause is
     //        identified.
-    private const val BASHRC_VERSION = 86
+    private const val BASHRC_VERSION = 87
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2588,7 +2588,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             //     authenticate codex on-device because codex-termux has
             //     the login subcommand compiled out.
             sb.appendLine("  printf '    \\033[90m\$\\033[0m claude           \\033[90m(then type /login)\\033[0m\\n'")
-            sb.appendLine("  printf '    \\033[90m\$\\033[0m gemini           \\033[90m(then /auth)\\033[0m\\n'")
+            sb.appendLine("  printf '    \\033[90m\$\\033[0m gemini auth login \\033[90m(Google OAuth)\\033[0m\\n'")
             sb.appendLine("  printf '    \\033[90m\$\\033[0m codex-login      \\033[90m(ChatGPT subscription)\\033[0m\\n'")
             sb.appendLine("  printf '\\n'")
             sb.appendLine("  printf '\\033[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\033[0m\\n'")
