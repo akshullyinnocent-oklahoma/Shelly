@@ -20,7 +20,7 @@ export interface CliToolConfig {
   id: CliTool;
   label: string;
   description: string;
-  checkCommand: string;       // which claude / which gemini
+    checkCommand: string;       // claude / gemini / codex --version
   installGuide: string;       // 自然言語インストール案内
   setupCommands: string[];    // セットアップコマンド列（確認後実行）
   isInteractive: boolean;     // 対話型UIが必要か
@@ -69,7 +69,7 @@ export const CLI_TOOLS: Record<CliTool, CliToolConfig> = {
     id: 'claude',
     label: 'Claude Code',
     description: 'Anthropicが作ったAIコーディングアシスタント',
-    checkCommand: 'which claude',
+    checkCommand: 'claude --version 2>/dev/null',
     installGuide:
       'Claude Codeがインストールされていないよ。\n' +
       'ターミナルで以下を実行してインストールしてね：\n' +
@@ -82,7 +82,7 @@ export const CLI_TOOLS: Record<CliTool, CliToolConfig> = {
     id: 'gemini',
     label: 'Gemini CLI',
     description: 'GoogleのAI CLIツール',
-    checkCommand: 'which gemini',
+    checkCommand: 'gemini --version 2>/dev/null',
     installGuide:
       'Gemini CLIがインストールされていないよ。\n' +
       'ターミナルで以下を実行してインストールしてね：\n' +
@@ -95,7 +95,7 @@ export const CLI_TOOLS: Record<CliTool, CliToolConfig> = {
     id: 'codex',
     label: 'Codex CLI',
     description: 'OpenAIのAI CLIツール',
-    checkCommand: 'which codex',
+    checkCommand: 'codex --version 2>/dev/null',
     installGuide:
       'Codex CLIがインストールされていないよ。\n' +
       'ターミナルで以下を実行してインストールしてね：\n' +

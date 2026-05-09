@@ -106,12 +106,12 @@ export async function claudeCliStream(
 }
 
 /**
- * Quick availability check — runs `which claude` and returns true if
- * the CLI is on PATH.
+ * Quick availability check — runs `claude --version` and returns true if
+ * the CLI responds. This works for Shelly's shell-function wrapper too.
  */
 export async function claudeCliAvailable(): Promise<boolean> {
   try {
-    const r = await execCommand('which claude 2>/dev/null', 5000);
+    const r = await execCommand('claude --version 2>/dev/null', 5000);
     return r.exitCode === 0 && (r.stdout ?? '').trim().length > 0;
   } catch {
     return false;

@@ -44,7 +44,7 @@ useSettingsStore.getState().updateSettings({ fontSize: 16 });
 ## Task 2: cli-runner.ts — Termux messages
 - **File**: `lib/cli-runner.ts`
 - **Problem**: 13+ Termux string references, bridge-based CLI launching
-- **Fix**: Replace all "Termux" → "terminal", use `execCommand('which claude')` for detection
+- **Fix**: Replace all "Termux" → "terminal", use `execCommand('claude --version')` / `execCommand('gemini --version')` for detection
 
 ## Task 3: PackageManager.tsx — pkg hardcoded
 - **File**: `components/PackageManager.tsx`
