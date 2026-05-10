@@ -741,7 +741,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //        NB: this bump forces devices to regenerate ~/.bashrc so the
     //        latest claude() / gemini() launch rules and IME behavior land
     //        immediately after upgrade.
-    private const val BASHRC_VERSION = 90
+    private const val BASHRC_VERSION = 91
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
