@@ -71,6 +71,16 @@ class TerminalImeHostView private constructor(context: Context) : View(context) 
         applyImeFocus(terminal, "onAttachedToWindow")
     }
 
+    override fun onDetachedFromWindow() {
+        synchronized(this) {
+            if (instance === this) {
+                instance = null
+            }
+        }
+        activeTerminal = null
+        super.onDetachedFromWindow()
+    }
+
     private fun applyImeFocus(terminal: TerminalView, reason: String) {
         // Intentionally steals Android view focus from the pane — this is
         // the whole point of the design. Pane "active" state lives
