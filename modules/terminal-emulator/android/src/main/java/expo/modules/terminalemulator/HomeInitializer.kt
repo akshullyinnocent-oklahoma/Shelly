@@ -741,7 +741,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //        NB: this bump forces devices to regenerate ~/.bashrc so the
     //        latest claude() / gemini() launch rules and IME behavior land
     //        immediately after upgrade.
-    private const val BASHRC_VERSION = 91
+    private const val BASHRC_VERSION = 92
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -965,6 +965,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // routes the execve through /system/bin/linker64 for SELinux.
             sb.appendLine("export SHELL=\"$libDir/shelly_shell\"")
             sb.appendLine("export BASH=\"\$SHELL\"")
+            sb.appendLine("export BASHRC_VERSION=\"$BASHRC_VERSION\"")
             sb.appendLine("export PATH=\"${home.absolutePath}/bin:\${PATH:-$libDir}:/system/bin:/vendor/bin\"")
             sb.appendLine("export LD_LIBRARY_PATH=\"\${LD_LIBRARY_PATH:-$libDir}\"")
             // bug #128 (2026-04-27): tell git where to find its
