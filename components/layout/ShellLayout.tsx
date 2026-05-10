@@ -26,6 +26,7 @@ import { useSettingsStore } from '@/store/settings-store';
 import { ConfigTUI } from '@/components/config/ConfigTUI';
 import { SaveBadge } from '@/components/SaveBadge';
 import { useFocusStore } from '@/store/focus-store';
+import { createTerminalSessionForFocusedPane } from '@/lib/terminal-session-actions';
 
 const LAST_UNFOLDED_PRESET_KEY = 'shelly:lastUnfoldedPreset';
 const FALLBACK_UNFOLDED_PRESET: PresetId = 'p3l';
@@ -56,18 +57,11 @@ export function ShellLayout() {
     });
   }, []);
 
-  // Responsive sidebar mode — always expanded (Superset-style)
+  // Sidebar starts closed by default and now stays under user control.
+  // Swipes / open actions can still expand it, but we no longer force-open
+  // it on startup or on layout changes.
   useEffect(() => {
-    let mode: string;
-    if (layout.isWide) {
-      mode = 'expanded';
-      setMode('expanded');
-    } else {
-      // Even on narrow screens, show sidebar expanded (user can swipe to hide)
-      mode = 'expanded';
-      setMode('expanded');
-    }
-    logInfo('ShellLayout', 'Sidebar mode: ' + mode);
+    logInfo('ShellLayout', 'Sidebar mode: ' + useSidebarStore.getState().mode);
   }, [layout.isWide, layout.isLandscape]);
 
   // Responsive max panes
@@ -198,7 +192,7 @@ export function ShellLayout() {
         useCommandPaletteStore.getState().toggle();
         break;
       case 'new_session':
-        useTerminalStore.getState().addSession();
+        createTerminalSessionForFocusedPane();
         break;
       case 'clear_terminal':
         useTerminalStore.getState().clearSession();

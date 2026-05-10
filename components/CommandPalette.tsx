@@ -19,6 +19,7 @@ import { useTerminalStore } from '@/store/terminal-store';
 import { useFocusStore } from '@/store/focus-store';
 import { useAddPane } from '@/hooks/use-add-pane';
 import { useDeviceLayout } from '@/hooks/use-device-layout';
+import { createTerminalSessionForFocusedPane } from '@/lib/terminal-session-actions';
 import { buildTmuxListCommand } from '@/lib/session-restore';
 import { useTranslation } from '@/lib/i18n';
 import { suggestFeatures } from '@/lib/feature-catalog';
@@ -78,7 +79,7 @@ export function CommandPalette() {
         } },
       { id: 'action-new-session', label: t('palette.new_session'), hint: t('palette.hint_new_session'), icon: 'add-box', category: 'action',
         onExecute: () => {
-          useTerminalStore.getState().addSession();
+          createTerminalSessionForFocusedPane();
           close();
         } },
       { id: 'action-tmux-list', label: t('palette.restore_tmux'), hint: t('palette.hint_restore_tmux'), icon: 'restore', category: 'action',

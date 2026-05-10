@@ -30,7 +30,7 @@ interface SidebarState {
 export const useSidebarStore = create<SidebarState>()(
   persist(
     (set, get) => ({
-  mode: 'expanded',
+      mode: 'hidden',
   openSections: { tasks: true, repos: true, files: true, device: false, ports: false, profiles: false, worktrees: true, quickLaunch: true },
   activeRepoPath: null,
   repoPaths: [],
@@ -95,7 +95,17 @@ export const useSidebarStore = create<SidebarState>()(
         activeRepoPath: s.activeRepoPath,
         repoPaths: s.repoPaths,
       }),
-      version: 1,
+      version: 2,
+      migrate: (persistedState) => {
+        const state = (persistedState ?? {}) as Partial<Pick<
+          SidebarState,
+          'mode' | 'openSections' | 'activeRepoPath' | 'repoPaths'
+        >>;
+        return {
+          ...state,
+          mode: 'hidden',
+        };
+      },
     }
   )
 );
