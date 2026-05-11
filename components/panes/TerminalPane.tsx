@@ -515,24 +515,37 @@ export default function TerminalScreen() {
     }
   }, [pendingResetId, sessions, resetSession]);
 
-  // Consume pendingCommand writes from the rest of the app (Sidebar profile
-  // rows, Command Palette git/tmux shortcuts, Sidebar Tasks run-now, …).
-  // These sources call useTerminalStore.insertCommand() which stages a
-  // command here; TerminalPane is the only consumer of the channel because
-  // it owns the PTY native session handle. Writes are type-them-don't-run:
-  // the user still has to press Enter (this matches the historical behavior
-  // of the tmux/git palette shortcuts and lets profile rows insert an ssh
-  // command without executing it on devices where Enter is unreliable).
+  // Consume staged writes from the rest of the app. Quick-launch/login callers
+  // scope the command to the newly created session; legacy unscoped inserts are
+  // consumed only by the globally active terminal so mounted panes cannot race.
   const pendingCommand = useTerminalStore((s) => s.pendingCommand);
   useEffect(() => {
     if (!pendingCommand) return;
-    if (!activeSession?.nativeSessionId) return;
+    if (!activeSession?.id || !activeSession.nativeSessionId) return;
+
+    const command = typeof pendingCommand === 'string'
+      ? pendingCommand
+      : pendingCommand.command;
+    const pendingId = typeof pendingCommand === 'string'
+      ? undefined
+      : pendingCommand.id;
+    const targetSessionId = typeof pendingCommand === 'string'
+      ? null
+      : pendingCommand.sessionId ?? null;
+
+    if (targetSessionId) {
+      if (activeSession.id !== targetSessionId) return;
+    } else {
+      const globallyActiveSessionId = useTerminalStore.getState().activeSessionId;
+      if (activeSession.id !== globallyActiveSessionId) return;
+    }
+
     const target = activeSession.nativeSessionId;
-    TerminalEmulator.writeToSession(target, pendingCommand).catch((err) => {
+    TerminalEmulator.writeToSession(target, command).catch((err) => {
       console.warn('[Terminal] pendingCommand writeToSession failed:', err);
     });
-    useTerminalStore.getState().clearPendingCommand();
-  }, [pendingCommand, activeSession?.nativeSessionId]);
+    useTerminalStore.getState().clearPendingCommand(pendingId);
+  }, [pendingCommand, activeSession?.id, activeSession?.nativeSessionId]);
 
   // FirstMate disabled — CLI tools are pre-installed, MOTD is sufficient
   // useEffect(() => {

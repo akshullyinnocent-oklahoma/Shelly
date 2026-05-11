@@ -1,12 +1,12 @@
 // components/layout/QuickLaunchSection.tsx
 //
 // One-tap CLI launchers in the sidebar. Spawns a fresh Terminal pane and
-// queues the matching CLI as a pendingCommand so it runs as soon as the
-// new session is alive. Mirrors the WorktreesSection chip styling but
+// queues the matching CLI for the exact new session so it runs as soon as
+// that session is alive. Mirrors the WorktreesSection chip styling but
 // skips the worktree-binding dance — this is for "I just want a Codex
 // REPL right now" use cases.
 //
-// Trigger: tapping a chip → addPane('terminal') → insertCommand(cli).
+// Trigger: tapping a chip → addPane('terminal') → insertCommand(cli, sessionId).
 // If the terminal pane cap (3) is hit the underlying useAddPane shows
 // the standard alert and we bail without queuing the command.
 
@@ -53,11 +53,12 @@ export function QuickLaunchSection({ isOpen, onToggle, iconsOnly }: Props) {
     (cli: Cli) => {
       const result = addPane('terminal');
       if (result !== null) return; // useAddPane already alerted
+      const sessionId = useTerminalStore.getState().activeSessionId;
       // The shell function name on the user's $PATH matches the cli token
       // (claude/codex/gemini are all bashrc-defined functions in
       // HomeInitializer.kt). Trailing newline so bash auto-runs it the
-      // moment the new pane's TerminalPane effect picks pendingCommand up.
-      useTerminalStore.getState().insertCommand(`${cli}\n`);
+      // moment the new pane's TerminalPane effect picks the command up.
+      useTerminalStore.getState().insertCommand(`${cli}\n`, sessionId);
     },
     [addPane],
   );

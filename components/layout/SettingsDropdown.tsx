@@ -999,7 +999,8 @@ function CodexLoginSection({ onClose }: { onClose: () => void }) {
           onPress: () => {
             const result = addPane('terminal');
             if (result !== null) return; // useAddPane already alerted
-            useTerminalStore.getState().insertCommand('codex-login --open\n');
+            const sessionId = useTerminalStore.getState().activeSessionId;
+            useTerminalStore.getState().insertCommand('codex-login --open\n', sessionId);
             logInfo('SettingsDropdown', 'codex-login launched');
             onClose();
           },
@@ -1067,7 +1068,8 @@ function ClaudeLoginSection({ onClose }: { onClose: () => void }) {
           onPress: () => {
             const result = addPane('terminal');
             if (result !== null) return; // useAddPane already alerted
-            useTerminalStore.getState().insertCommand('claude\n');
+            const sessionId = useTerminalStore.getState().activeSessionId;
+            useTerminalStore.getState().insertCommand('claude\n', sessionId);
             logInfo('SettingsDropdown', 'claude REPL launched for /login');
             onClose();
           },
@@ -1112,7 +1114,8 @@ function GeminiLoginSection({ onClose }: { onClose: () => void }) {
           onPress: () => {
             const result = addPane('terminal');
             if (result !== null) return; // useAddPane already alerted
-            useTerminalStore.getState().insertCommand('gemini auth login\n');
+            const sessionId = useTerminalStore.getState().activeSessionId;
+            useTerminalStore.getState().insertCommand('gemini auth login\n', sessionId);
             logInfo('SettingsDropdown', 'gemini auth login launched');
             onClose();
           },

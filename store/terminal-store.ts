@@ -22,6 +22,14 @@ import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorMo
 const MAX_SESSIONS = 4;
 const SESSION_NAMES = ['shelly-1', 'shelly-2', 'shelly-3', 'shelly-4'];
 
+export type PendingCommand =
+  | string
+  | {
+      id: string;
+      command: string;
+      sessionId?: string | null;
+    };
+
 function allocateSessionName(sessions: TabSession[]): string | null {
   const used = new Set(sessions.map((s) => s.nativeSessionId));
   for (const name of SESSION_NAMES) {
@@ -58,8 +66,12 @@ type TerminalState = {
   // Connection mode (always 'native' — JNI forkpty, no Termux bridge)
   connectionMode: ConnectionMode;
 
-  /** Snippet insert-only: command to pre-fill in the input field */
-  pendingCommand: string | null;
+  /**
+   * Snippet / quick-launch command staged for TerminalPane to write to a PTY.
+   * Quick-launch callers can scope this to a newly created session to avoid
+   * every mounted terminal racing to consume the same global command.
+   */
+  pendingCommand: PendingCommand | null;
 
   /** Last input mode: 'shell' for commands, 'natural' for natural language */
   lastInputMode: 'shell' | 'natural';
@@ -109,10 +121,10 @@ type TerminalState = {
   setConnectionMode: (mode: ConnectionMode) => void;
 
   // Actions — pending command (Creator / Snippet insert)
-  /** Pre-fill the Terminal input field without running */
-  insertCommand: (command: string) => void;
+  /** Write a command into a terminal; optionally scope it to one session. */
+  insertCommand: (command: string, sessionId?: string | null) => void;
   /** Clear the pending command after it has been consumed */
-  clearPendingCommand: () => void;
+  clearPendingCommand: (id?: string) => void;
 
   /** Session ID pending reset (consumed by terminal.tsx) */
   pendingResetSessionId: string | null;
@@ -513,12 +525,25 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   // ── Pending command (Creator / Snippet insert) ─────────────────────────────────────────
 
-  insertCommand: (command: string) => {
-    set({ pendingCommand: command });
+  insertCommand: (command: string, sessionId?: string | null) => {
+    set({
+      pendingCommand: {
+        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        command,
+        sessionId: sessionId ?? null,
+      },
+    });
   },
 
-  clearPendingCommand: () => {
-    set({ pendingCommand: null });
+  clearPendingCommand: (id?: string) => {
+    set((state) => {
+      if (!id) return { pendingCommand: null };
+      const pending = state.pendingCommand;
+      if (!pending || typeof pending === 'string' || pending.id === id) {
+        return { pendingCommand: null };
+      }
+      return {};
+    });
   },
 
   // ── Session reset (consumed by terminal.tsx) ────────────────────────────────
