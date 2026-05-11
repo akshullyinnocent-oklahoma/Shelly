@@ -760,7 +760,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      must therefore be a hermetic APK-bundled Node launch: no Bun env,
     //      no updater env, no extracted/native tier env. Experimental runtime
     //      launch remains opt-in via the existing SHELLY_* debug flags.
-    private const val BASHRC_VERSION = 102
+    // 103: Gemini bare TUI regression fix. The hermetic Node launcher used
+    //      env -i and accidentally dropped TERMUX_VERSION, re-triggering
+    //      Gemini's Android/Termux guard in the APK-bundled bundle. Keep the
+    //      clean launcher, but explicitly re-add the harmless compatibility
+    //      marker and patch the APK-bundled Gemini bundle once per bashrc
+    //      version, not only the npm staging tree.
+    private const val BASHRC_VERSION = 103
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1189,9 +1195,20 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    PATH=\"\$PATH\" LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\" ANDROID_DATA=\"\${ANDROID_DATA:-/data}\" ANDROID_ROOT=\"\${ANDROID_ROOT:-/system}\" \\")
             sb.appendLine("    TMPDIR=\"\$__shelly_tmp\" \\")
             sb.appendLine("    NPM_CONFIG_PREFIX=\"\${NPM_CONFIG_PREFIX:-\$HOME/.npm-global}\" XDG_CONFIG_HOME=\"\${XDG_CONFIG_HOME:-\$HOME/.config}\" XDG_CACHE_HOME=\"\${XDG_CACHE_HOME:-\$HOME/.cache}\" XDG_DATA_HOME=\"\${XDG_DATA_HOME:-\$HOME/.local/share}\" \\")
-            sb.appendLine("    GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 SHELLY_AUTO_UPDATE_CLIS=0 \\")
+            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 SHELLY_AUTO_UPDATE_CLIS=0 \\")
             sb.appendLine("    /system/bin/linker64 $libDir/node \"\$@\"")
             sb.appendLine("}")
+            sb.appendLine("__shelly_patch_bundled_gemini_once() {")
+            sb.appendLine("  local __stamp=\"\$HOME/.shelly-cli/.bundled-gemini-patched-v\$BASHRC_VERSION\"")
+            sb.appendLine("  [ -f \"\$__stamp\" ] && return 0")
+            sb.appendLine("  [ -f \"\$HOME/.shelly-patcher.js\" ] || return 0")
+            sb.appendLine("  [ -d \"$libDir/node_modules/@google/gemini-cli/bundle\" ] || return 0")
+            sb.appendLine("  mkdir -p \"\$HOME/.shelly-cli\" 2>/dev/null || true")
+            sb.appendLine("  if _run $libDir/node \"\$HOME/.shelly-patcher.js\" gemini \"$libDir/node_modules\" >/dev/null 2>&1; then")
+            sb.appendLine("    : > \"\$__stamp\" 2>/dev/null || true")
+            sb.appendLine("  fi")
+            sb.appendLine("}")
+            sb.appendLine("__shelly_patch_bundled_gemini_once")
             sb.appendLine("__shelly_run_claude_musl_clean() {")
             sb.appendLine("  local __trampoline=\"\$1\"")
             sb.appendLine("  local __musl_ld=\"\$2\"")
@@ -2027,7 +2044,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  fi")
             sb.appendLine("  mkdir -p \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
             sb.appendLine("  __shelly_paste_tui_begin")
-            sb.appendLine("  GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
+            sb.appendLine("  TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("  local __gemini_rc=\$?")
             sb.appendLine("  __shelly_paste_tui_end")
             sb.appendLine("  return \"\$__gemini_rc\"")
@@ -2515,7 +2532,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // function already sets GEMINI_CLI_NO_RELAUNCH=true and
             // --max-old-space-size=5557; the bg updater smoke probe must
             // do the same or every Gemini upgrade smoke test fails.
-            sb.appendLine("        if ! GEMINI_CLI_NO_RELAUNCH=true timeout 30 /system/bin/linker64 \"$libDir/node\" --max-old-space-size=5557 \"\$__gemini_abs\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
+            sb.appendLine("        if ! TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true timeout 30 /system/bin/linker64 \"$libDir/node\" --max-old-space-size=5557 \"\$__gemini_abs\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
             sb.appendLine("          echo '[health] gemini --version FAILED' >&2")
             sb.appendLine("          __healthy=0")
             sb.appendLine("        else")
