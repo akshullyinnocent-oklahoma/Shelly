@@ -766,7 +766,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      clean launcher, but explicitly re-add the harmless compatibility
     //      marker and patch the APK-bundled Gemini bundle once per bashrc
     //      version, not only the npm staging tree.
-    private const val BASHRC_VERSION = 103
+    // 104: Gemini bare TUI now prefers the runtime-updated package again.
+    //      BASHRC 103 kept an emergency APK-bundled foreground route, which
+    //      pinned bare gemini to the stale APK version and let Gemini's own
+    //      self-updater run. Keep the APK bundle only as explicit fallback or
+    //      SHELLY_PREFER_BUNDLED_GEMINI=1, and suppress Gemini self-update
+    //      checks because Shelly owns runtime updates.
+    private const val BASHRC_VERSION = 104
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1985,22 +1991,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __gemini_base=\"\$__gemini_runtime_base\"")
             sb.appendLine("  local __gemini_bare_tui=0")
             sb.appendLine("  [ \"\$#\" -eq 0 ] && __gemini_bare_tui=1")
-            // Emergency stable foreground route for the bare Gemini TUI.
-            // This intentionally mirrors the old known-good direct launcher:
-            // no runtime package, no package.json bin probing, no default
-            // model injection, no paste marker. Prompt/diagnostic invocations
-            // continue through the richer wrapper below.
-            sb.appendLine("  if [ \"\$__gemini_bare_tui\" -eq 1 ] && [ \"\${SHELLY_EXPERIMENTAL_GEMINI_LAUNCH:-0}\" != \"1\" ]; then")
-            sb.appendLine("    local __stable_gemini_entry=\"$libDir/node_modules/@google/gemini-cli/bundle/gemini.js\"")
-            sb.appendLine("    if [ -f \"\$__stable_gemini_entry\" ]; then")
-            sb.appendLine("      __shelly_paste_tui_begin")
-            sb.appendLine("      __shelly_run_node_clean --max-old-space-size=5557 \"\$__stable_gemini_entry\"")
-            sb.appendLine("      local __stable_gemini_rc=\$?")
-            sb.appendLine("      __shelly_paste_tui_end")
-            sb.appendLine("      return \"\$__stable_gemini_rc\"")
-            sb.appendLine("    fi")
-            sb.appendLine("  fi")
-            sb.appendLine("  if [ \"\$__gemini_bare_tui\" -eq 1 ] && [ \"\${SHELLY_PREFER_RUNTIME_GEMINI:-0}\" != \"1\" ] && [ -f \"\$__gemini_bundle_base/package.json\" ]; then")
+            sb.appendLine("  if [ \"\${SHELLY_PREFER_BUNDLED_GEMINI:-0}\" = \"1\" ] && [ -f \"\$__gemini_bundle_base/package.json\" ]; then")
             sb.appendLine("    __gemini_base=\"\$__gemini_bundle_base\"")
             sb.appendLine("  elif [ ! -f \"\$__gemini_runtime_base/package.json\" ] && [ -f \"\$__gemini_bundle_base/package.json\" ]; then")
             sb.appendLine("    __gemini_base=\"\$__gemini_bundle_base\"")
@@ -2016,11 +2007,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    echo \"gemini: package bin not found: \$__gemini_entry\" >&2")
             sb.appendLine("    return 127")
             sb.appendLine("  fi")
-            sb.appendLine("  if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ] && [ \"\$__gemini_base\" = \"\$__gemini_bundle_base\" ]; then")
-            sb.appendLine("    if [ \"\$__gemini_bare_tui\" -eq 1 ] && [ -f \"\$__gemini_runtime_base/package.json\" ]; then")
-            sb.appendLine("      echo '[shelly] gemini: bare TUI uses APK bundle; set SHELLY_PREFER_RUNTIME_GEMINI=1 to test runtime package' >&2")
+            sb.appendLine("  if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
+            sb.appendLine("    if [ \"\$__gemini_base\" = \"\$__gemini_runtime_base\" ]; then")
+            sb.appendLine("      echo \"[shelly] gemini: using runtime-updated tier (\$__gemini_entry)\" >&2")
+            sb.appendLine("    elif [ \"\${SHELLY_PREFER_BUNDLED_GEMINI:-0}\" = \"1\" ]; then")
+            sb.appendLine("      echo \"[shelly] gemini: forced APK bundle tier (\$__gemini_entry)\" >&2")
             sb.appendLine("    else")
-            sb.appendLine("      echo '[shelly] gemini: APK bundle fallback (runtime package missing)' >&2")
+            sb.appendLine("      echo \"[shelly] gemini: APK bundle fallback; runtime package missing (\$__gemini_entry)\" >&2")
             sb.appendLine("    fi")
             sb.appendLine("  fi")
             sb.appendLine("  local __has_model=0")
@@ -2044,7 +2037,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  fi")
             sb.appendLine("  mkdir -p \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
             sb.appendLine("  __shelly_paste_tui_begin")
-            sb.appendLine("  TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
+            sb.appendLine("  TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("  local __gemini_rc=\$?")
             sb.appendLine("  __shelly_paste_tui_end")
             sb.appendLine("  return \"\$__gemini_rc\"")
@@ -2532,7 +2525,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // function already sets GEMINI_CLI_NO_RELAUNCH=true and
             // --max-old-space-size=5557; the bg updater smoke probe must
             // do the same or every Gemini upgrade smoke test fails.
-            sb.appendLine("        if ! TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true timeout 30 /system/bin/linker64 \"$libDir/node\" --max-old-space-size=5557 \"\$__gemini_abs\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
+            sb.appendLine("        if ! TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 timeout 30 /system/bin/linker64 \"$libDir/node\" --max-old-space-size=5557 \"\$__gemini_abs\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
             sb.appendLine("          echo '[health] gemini --version FAILED' >&2")
             sb.appendLine("          __healthy=0")
             sb.appendLine("        else")
