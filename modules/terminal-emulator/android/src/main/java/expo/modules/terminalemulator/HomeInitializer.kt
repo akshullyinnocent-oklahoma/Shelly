@@ -741,7 +741,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //        NB: this bump forces devices to regenerate ~/.bashrc so the
     //        latest claude() / gemini() launch rules and IME behavior land
     //        immediately after upgrade.
-    private const val BASHRC_VERSION = 94
+    private const val BASHRC_VERSION = 95
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1624,6 +1624,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __apk_extracted_cli_js=\"\$(__shelly_resolve_claude_extracted_bin \"\$__apk_extracted_pkg\" \"$libDir/node_modules/@anthropic-ai/claude-code-extracted\")\"")
             sb.appendLine("  local __extracted_cli_js=\"\"")
             sb.appendLine("  local __bun_tmp=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\"")
+            sb.appendLine("  local __claude_tmp=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\"")
             sb.appendLine("  local __claude_bare_tui=0")
             sb.appendLine("  local __claude_prefer_bundled_legacy=0")
             sb.appendLine("  [ \"\$#\" -eq 0 ] && __claude_bare_tui=1")
@@ -1631,7 +1632,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    SHELLY_FORCE_LEGACY_CLAUDE=1")
             sb.appendLine("    __claude_prefer_bundled_legacy=1")
             sb.appendLine("  fi")
-            sb.appendLine("  mkdir -p \"\$__bun_tmp\" 2>/dev/null")
+            sb.appendLine("  mkdir -p \"\$__bun_tmp\" \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
             // PR #48: Drain runtime-failures into failed-versions BEFORE
             // deciding the tier. Without this, a freshly-crashed native
             // version keeps getting re-tried until the next background
@@ -1790,7 +1791,6 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("        echo '[shelly] claude: APK extracted Bun cli.js (Node)' >&2")
             sb.appendLine("      fi")
             sb.appendLine("    fi")
-            sb.appendLine("    local __claude_tmp=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\"")
             sb.appendLine("    mkdir -p \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" \"\$__bun_tmp\"")
             sb.appendLine("    __shelly_paste_tui_begin")
             sb.appendLine("    USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_claude_node_preload\" _run $libDir/node \"\$__extracted_cli_js\" \"\$@\"")
@@ -1830,8 +1830,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  if [ \"\$__tier\" != 'auto' ] && [ -z \"\$SHELLY_SILENT_CLI_TIER\" ]; then")
             sb.appendLine("    echo \"[shelly] claude: using \$__tier tier (\$__cli_js)\" >&2")
             sb.appendLine("  fi")
+            sb.appendLine("  mkdir -p \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" \"\$__bun_tmp\" 2>/dev/null")
             sb.appendLine("  __shelly_paste_tui_begin")
-            sb.appendLine("  _run $libDir/node \"\$__cli_js\" \"\$@\"")
+            sb.appendLine("  USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_claude_node_preload\" _run $libDir/node \"\$__cli_js\" \"\$@\"")
             sb.appendLine("  local __legacy_rc=\$?")
             sb.appendLine("  __shelly_paste_tui_end")
             sb.appendLine("  return \"\$__legacy_rc\"")
@@ -1894,8 +1895,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  if [ \"\$__has_model\" -eq 0 ] && [ \"\$__skip_default_model\" -eq 0 ] && [ -z \"\${GEMINI_MODEL:-}\" ]; then")
             sb.appendLine("    __gemini_args=(--model flash \"\${__gemini_args[@]}\")")
             sb.appendLine("  fi")
+            sb.appendLine("  mkdir -p \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
             sb.appendLine("  __shelly_paste_tui_begin")
-            sb.appendLine("  GEMINI_CLI_NO_RELAUNCH=true _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
+            sb.appendLine("  GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("  local __gemini_rc=\$?")
             sb.appendLine("  __shelly_paste_tui_end")
             sb.appendLine("  return \"\$__gemini_rc\"")
