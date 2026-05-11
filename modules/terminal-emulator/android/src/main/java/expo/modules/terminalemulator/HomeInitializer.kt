@@ -754,7 +754,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //     explicitly requested. Also add a non-auth-destructive runtime/cache
     //     reset command for devices whose persisted ~/.shelly-cli tree was
     //     poisoned by earlier launcher experiments.
-    private const val BASHRC_VERSION = 98
+    private const val BASHRC_VERSION = 99
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1655,6 +1655,22 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __claude_bare_tui=0")
             sb.appendLine("  [ \"\$#\" -eq 0 ] && __claude_bare_tui=1")
             sb.appendLine("  mkdir -p \"\$__bun_tmp\" \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
+            // Emergency stable foreground route for the bare Claude TUI.
+            //
+            // The runtime/extracted/native tier resolver below is useful for
+            // one-shot prompts and updater smoke tests, but real devices have
+            // shown blank foreground TUI launches after the wrapper prints its
+            // tier banner. For `claude` with no args, minimize side effects:
+            // APK-bundled legacy cli.js, no package probing, no tier banner,
+            // no paste marker, no NODE_OPTIONS preload. Non-bare invocations
+            // still use the fuller tier chain below.
+            sb.appendLine("  if [ \"\$__claude_bare_tui\" -eq 1 ] && [ \"\${SHELLY_EXPERIMENTAL_CLAUDE_LAUNCH:-0}\" != \"1\" ]; then")
+            sb.appendLine("    local __stable_claude_cli=\"$libDir/node_modules/@anthropic-ai/claude-code/cli.js\"")
+            sb.appendLine("    if [ -f \"\$__stable_claude_cli\" ]; then")
+            sb.appendLine("      USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" _run $libDir/node \"\$__stable_claude_cli\"")
+            sb.appendLine("      return \$?")
+            sb.appendLine("    fi")
+            sb.appendLine("  fi")
             // PR #48: Drain runtime-failures into failed-versions BEFORE
             // deciding the tier. Without this, a freshly-crashed native
             // version keeps getting re-tried until the next background
@@ -1884,6 +1900,18 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __gemini_base=\"\$__gemini_runtime_base\"")
             sb.appendLine("  local __gemini_bare_tui=0")
             sb.appendLine("  [ \"\$#\" -eq 0 ] && __gemini_bare_tui=1")
+            // Emergency stable foreground route for the bare Gemini TUI.
+            // This intentionally mirrors the old known-good direct launcher:
+            // no runtime package, no package.json bin probing, no default
+            // model injection, no paste marker. Prompt/diagnostic invocations
+            // continue through the richer wrapper below.
+            sb.appendLine("  if [ \"\$__gemini_bare_tui\" -eq 1 ] && [ \"\${SHELLY_EXPERIMENTAL_GEMINI_LAUNCH:-0}\" != \"1\" ]; then")
+            sb.appendLine("    local __stable_gemini_entry=\"$libDir/node_modules/@google/gemini-cli/bundle/gemini.js\"")
+            sb.appendLine("    if [ -f \"\$__stable_gemini_entry\" ]; then")
+            sb.appendLine("      GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__stable_gemini_entry\"")
+            sb.appendLine("      return \$?")
+            sb.appendLine("    fi")
+            sb.appendLine("  fi")
             sb.appendLine("  if [ \"\$__gemini_bare_tui\" -eq 1 ] && [ \"\${SHELLY_PREFER_RUNTIME_GEMINI:-0}\" != \"1\" ] && [ -f \"\$__gemini_bundle_base/package.json\" ]; then")
             sb.appendLine("    __gemini_base=\"\$__gemini_bundle_base\"")
             sb.appendLine("  elif [ ! -f \"\$__gemini_runtime_base/package.json\" ] && [ -f \"\$__gemini_bundle_base/package.json\" ]; then")
@@ -2137,12 +2165,12 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  fi")
             sb.appendLine("  echo \"\$__shelly_runtime_now\" > \"\$__shelly_runtime_quick_marker\"")
             sb.appendLine("}")
-            sb.appendLine("if [ \$(( __shelly_runtime_now - __shelly_runtime_last_quick )) -ge \$__shelly_runtime_quick_interval ]; then")
+            sb.appendLine("if [ \"\${SHELLY_AUTO_UPDATE_CLIS:-0}\" = \"1\" ] && [ \$(( __shelly_runtime_now - __shelly_runtime_last_quick )) -ge \$__shelly_runtime_quick_interval ]; then")
             sb.appendLine("  ( __shelly_runtime_quick_check & )")
             sb.appendLine("fi")
             // Original 24h gate kept as belt-and-suspenders fallback for offline
             // pathology (every quick-check fetch failed all day).
-            sb.appendLine("if [ \$(( __shelly_runtime_now - __shelly_runtime_last_update )) -ge \$__shelly_runtime_update_interval ]; then")
+            sb.appendLine("if [ \"\${SHELLY_AUTO_UPDATE_CLIS:-0}\" = \"1\" ] && [ \$(( __shelly_runtime_now - __shelly_runtime_last_update )) -ge \$__shelly_runtime_update_interval ]; then")
             sb.appendLine("  ( __shelly_bg_runtime_update & )")
             sb.appendLine("fi")
             sb.appendLine()
@@ -2580,7 +2608,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // pathology — even if quick check never gets to run a successful
             // npm view, the daily marker eventually triggers a full attempt.
             sb.appendLine("__shelly_last_quick_check=\$(cat \"\$__shelly_quick_check_marker\" 2>/dev/null || echo 0)")
-            sb.appendLine("if [ \$(( __shelly_now - __shelly_last_quick_check )) -ge \$__shelly_quick_check_interval ]; then")
+            sb.appendLine("if [ \"\${SHELLY_AUTO_UPDATE_CLIS:-0}\" = \"1\" ] && [ \$(( __shelly_now - __shelly_last_quick_check )) -ge \$__shelly_quick_check_interval ]; then")
             sb.appendLine("  ( __shelly_quick_check_clis & )")
             sb.appendLine("fi")
             // Original 24h gate kept as fallback (e.g. when quick check is
@@ -2588,7 +2616,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // check fails network). Quick check fires __shelly_bg_cli_update
             // directly when an upgrade is available, so this branch only
             // matters when the user has been offline for 24h.
-            sb.appendLine("if [ \$(( __shelly_now - __shelly_last_update )) -ge \$__shelly_update_interval ]; then")
+            sb.appendLine("if [ \"\${SHELLY_AUTO_UPDATE_CLIS:-0}\" = \"1\" ] && [ \$(( __shelly_now - __shelly_last_update )) -ge \$__shelly_update_interval ]; then")
             sb.appendLine("  ( __shelly_bg_cli_update & )")
             sb.appendLine("fi")
             sb.appendLine()
