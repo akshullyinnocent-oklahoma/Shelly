@@ -729,6 +729,37 @@ jobs:
             sed -i "s|process.env.TERMUX_VERSION === undefined|false|g" "$f"
             echo "Patched TERMUX_VERSION in: $f"
           done
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const bundleDir = path.join('cli-bundle', 'lib', 'node_modules', '@google', 'gemini-cli', 'bundle');
+          if (!fs.existsSync(bundleDir)) {
+            console.log(`[gemini] bundle dir missing at ${bundleDir}`);
+            process.exit(0);
+          }
+          const files = fs.readdirSync(bundleDir).filter((f) => (f.startsWith('chunk-') || f.startsWith('gemini-')) && f.endsWith('.js'));
+          let termuxPatched = 0;
+          let shellPatched = 0;
+          let commandExistsPatched = 0;
+          for (const file of files) {
+            const filePath = path.join(bundleDir, file);
+            const before = fs.readFileSync(filePath, 'utf8');
+            let after = before;
+            after = after.replace(/throw new Error\("You need to install Termux[^"]*"\)/g, 'undefined');
+            after = after.replace(/shell:\s*true([,}])/g, 'shell:"/system/bin/sh"$1');
+            after = after.replace(
+              /execSync\(getCommandExistsCmd\(cmd\),\s*\{\s*stdio:\s*"ignore"\s*\}\)/g,
+              'execSync(getCommandExistsCmd(cmd),{stdio:"ignore",shell:"/system/bin/sh"})'
+            );
+            if (after !== before) {
+              if (/throw new Error\("You need to install Termux[^"]*"\)/.test(before)) termuxPatched++;
+              if (/shell:\s*true[,}]/.test(before)) shellPatched++;
+              if (/execSync\(getCommandExistsCmd\(cmd\),\s*\{\s*stdio:\s*"ignore"\s*\}\)/.test(before)) commandExistsPatched++;
+              fs.writeFileSync(filePath, after);
+            }
+          }
+          console.log(`[gemini] patched termux=${termuxPatched} shellTrue=${shellPatched} commandExists=${commandExistsPatched} files=${files.length}`);
+          NODE
           # Tar them up for APK assets (LibExtractor will extract on first launch)
           cd cli-bundle/lib
           tar czf ../../modules/terminal-emulator/android/src/main/assets/cli-tools.tar.gz node_modules

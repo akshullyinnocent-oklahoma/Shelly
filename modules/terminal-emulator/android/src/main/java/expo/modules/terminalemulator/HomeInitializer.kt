@@ -741,7 +741,14 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //        NB: this bump forces devices to regenerate ~/.bashrc so the
     //        latest claude() / gemini() launch rules and IME behavior land
     //        immediately after upgrade.
-    private const val BASHRC_VERSION = 95
+    //    87: bare `claude` / `gemini` launchers now prefer the extracted
+    //        runtime-updated tree by default. Claude no longer forces the
+    //        legacy cli.js tier on bare TUI launch, and Gemini falls back
+    //        to the APK bundle only when the runtime package is missing.
+    //        This keeps the interactive shell in sync with the verified
+    //        auto-updated tree instead of shadowing it with stale bundled
+    //        binaries.
+    private const val BASHRC_VERSION = 96
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1626,12 +1633,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __bun_tmp=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\"")
             sb.appendLine("  local __claude_tmp=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\"")
             sb.appendLine("  local __claude_bare_tui=0")
-            sb.appendLine("  local __claude_prefer_bundled_legacy=0")
             sb.appendLine("  [ \"\$#\" -eq 0 ] && __claude_bare_tui=1")
-            sb.appendLine("  if [ \"\$__claude_bare_tui\" -eq 1 ] && [ \"\${SHELLY_PREFER_EXTRACTED_CLAUDE:-0}\" != \"1\" ] && [ \"\${SHELLY_PREFER_NATIVE_CLAUDE:-0}\" != \"1\" ] && [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" != \"1\" ]; then")
-            sb.appendLine("    SHELLY_FORCE_LEGACY_CLAUDE=1")
-            sb.appendLine("    __claude_prefer_bundled_legacy=1")
-            sb.appendLine("  fi")
             sb.appendLine("  mkdir -p \"\$__bun_tmp\" \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
             // PR #48: Drain runtime-failures into failed-versions BEFORE
             // deciding the tier. Without this, a freshly-crashed native
@@ -1776,11 +1778,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    fi")
             sb.appendLine("  fi")
             sb.appendLine("  if [ \"\$__claude_bare_tui\" -eq 1 ] && [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
-            sb.appendLine("    if [ \"\${SHELLY_FORCE_LEGACY_CLAUDE:-0}\" = \"1\" ]; then")
-            sb.appendLine("      echo '[shelly] claude: bare TUI uses legacy cli.js by default; set SHELLY_PREFER_EXTRACTED_CLAUDE=1 to debug extracted Bun cli.js' >&2")
-            sb.appendLine("    else")
-            sb.appendLine("      echo '[shelly] claude: bare TUI uses extracted/native tier by request' >&2")
-            sb.appendLine("    fi")
+            sb.appendLine("    echo '[shelly] claude: bare TUI uses extracted Bun cli.js by default; legacy cli.js is fallback only' >&2")
             sb.appendLine("  fi")
             sb.appendLine("  if [ \"\${SHELLY_FORCE_LEGACY_CLAUDE:-0}\" != \"1\" ] && [ \"\${SHELLY_DISABLE_EXTRACTED_CLAUDE:-0}\" != \"1\" ] && [ -n \"\$__extracted_cli_js\" ]; then")
             sb.appendLine("    if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ] && [ -z \"\$SHELLY_CLAUDE_TIER_ANNOUNCED\" ]; then")
@@ -1811,9 +1809,6 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __cli_js=\"\"")
             sb.appendLine("  local __tier=\"\"")
             sb.appendLine("  local __legacy_pairs=\"\$HOME/.shelly-cli/node_modules/@anthropic-ai/claude-code/cli.js|auto \$HOME/.shelly-cli.prev/node_modules/@anthropic-ai/claude-code/cli.js|prev $libDir/node_modules/@anthropic-ai/claude-code/cli.js|bundled\"")
-            sb.appendLine("  if [ \"\$__claude_prefer_bundled_legacy\" -eq 1 ]; then")
-            sb.appendLine("    __legacy_pairs=\"$libDir/node_modules/@anthropic-ai/claude-code/cli.js|bundled \$HOME/.shelly-cli/node_modules/@anthropic-ai/claude-code/cli.js|auto \$HOME/.shelly-cli.prev/node_modules/@anthropic-ai/claude-code/cli.js|prev\"")
-            sb.appendLine("  fi")
             sb.appendLine("  for __pair in \$__legacy_pairs; do")
             sb.appendLine("    local __path=\"\${__pair%|*}\"")
             sb.appendLine("    local __tname=\"\${__pair##*|}\"")
@@ -1859,11 +1854,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // prompt calls to the stable flash alias; keep diagnostic commands
             // (`--version`, `--help`, etc.) untouched.
             sb.appendLine("gemini() {")
-            sb.appendLine("  local __gemini_base=\"\$__cli_dir/@google/gemini-cli\"")
-            sb.appendLine("  local __gemini_bare_tui=0")
-            sb.appendLine("  [ \"\$#\" -eq 0 ] && __gemini_bare_tui=1")
-            sb.appendLine("  if [ \"\$__gemini_bare_tui\" -eq 1 ] && [ \"\${SHELLY_PREFER_RUNTIME_GEMINI:-0}\" != \"1\" ] && [ -f \"$libDir/node_modules/@google/gemini-cli/package.json\" ]; then")
-            sb.appendLine("    __gemini_base=\"$libDir/node_modules/@google/gemini-cli\"")
+            sb.appendLine("  local __gemini_runtime_base=\"\$__cli_dir/@google/gemini-cli\"")
+            sb.appendLine("  local __gemini_bundle_base=\"$libDir/node_modules/@google/gemini-cli\"")
+            sb.appendLine("  local __gemini_base=\"\$__gemini_runtime_base\"")
+            sb.appendLine("  if [ ! -f \"\$__gemini_runtime_base/package.json\" ] && [ -f \"\$__gemini_bundle_base/package.json\" ]; then")
+            sb.appendLine("    __gemini_base=\"\$__gemini_bundle_base\"")
             sb.appendLine("  fi")
             sb.appendLine("  local __gemini_pkg=\"\$__gemini_base/package.json\"")
             sb.appendLine("  local __gemini_bin=\"bundle/gemini.js\"")
@@ -1875,6 +1870,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  if [ ! -f \"\$__gemini_entry\" ]; then")
             sb.appendLine("    echo \"gemini: package bin not found: \$__gemini_entry\" >&2")
             sb.appendLine("    return 127")
+            sb.appendLine("  fi")
+            sb.appendLine("  if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ] && [ \"\$__gemini_base\" = \"\$__gemini_bundle_base\" ]; then")
+            sb.appendLine("    echo '[shelly] gemini: APK bundle fallback (runtime package missing)' >&2")
             sb.appendLine("  fi")
             sb.appendLine("  local __has_model=0")
             sb.appendLine("  local __skip_default_model=0")
