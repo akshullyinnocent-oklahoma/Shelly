@@ -805,7 +805,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      Gemini makes stdin non-TTY and can stall the interactive auth path,
     //      so send the auto-confirm newline to /dev/tty from a short-lived
     //      background task instead.
-    private const val BASHRC_VERSION = 112
+    // 113: Same as 112, but keep the helper off bash job control so
+    //      `gemini auth login` does not print a noisy `[1] PID` notification
+    //      before the auth UI is fully visible.
+    private const val BASHRC_VERSION = 113
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2157,8 +2160,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  __shelly_paste_tui_begin")
             sb.appendLine("  local __gemini_rc=0")
             sb.appendLine("  if [ \"\$__gemini_auth_login\" -eq 1 ]; then")
-            sb.appendLine("    ( sleep 0.8; printf '\\n' > /dev/tty 2>/dev/null || true; sleep 1.2; printf '\\n' > /dev/tty 2>/dev/null || true; sleep 2; printf '\\n' > /dev/tty 2>/dev/null || true ) &")
+            sb.appendLine("    local __gemini_job_control=\"\$(set -o | awk '\$1 == \"monitor\" { print \$2 }' 2>/dev/null || echo on)\"")
+            sb.appendLine("    [ \"\$__gemini_job_control\" = on ] && set +m")
+            sb.appendLine("    ( sleep 0.8; printf '\\n' > /dev/tty 2>/dev/null || true; sleep 1.2; printf '\\n' > /dev/tty 2>/dev/null || true; sleep 2; printf '\\n' > /dev/tty 2>/dev/null || true ) >/dev/null 2>&1 &")
             sb.appendLine("    local __gemini_auth_confirm_pid=\$!")
+            sb.appendLine("    [ \"\$__gemini_job_control\" = on ] && set -m")
             sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("    __gemini_rc=\$?")
             sb.appendLine("    wait \"\$__gemini_auth_confirm_pid\" 2>/dev/null || true")
