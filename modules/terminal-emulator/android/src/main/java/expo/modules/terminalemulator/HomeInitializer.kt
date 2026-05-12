@@ -822,7 +822,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      preselect Google auth in ~/.gemini/settings.json, patch Gemini's
     //      local OAuth consent gate, and keep Gemini on the foreground PTY
     //      from the start.
-    private const val BASHRC_VERSION = 114
+    // 115: Re-apply the Gemini bundle patch to the selected runtime tier at
+    //      launch time. Existing devices can keep a runtime-updated Gemini
+    //      tree from older bashrc versions, and gemini() prefers that tree
+    //      over the freshly patched APK bundle.
+    private const val BASHRC_VERSION = 115
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2137,6 +2141,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  if [ ! -f \"\$__gemini_entry\" ]; then")
             sb.appendLine("    echo \"gemini: package bin not found: \$__gemini_entry\" >&2")
             sb.appendLine("    return 127")
+            sb.appendLine("  fi")
+            sb.appendLine("  if [ -f \"\$HOME/.shelly-patcher.js\" ] && [ -d \"\$__gemini_base/bundle\" ]; then")
+            sb.appendLine("    local __gemini_nm_root=\"\$(dirname \"\$(dirname \"\$__gemini_base\")\")\"")
+            sb.appendLine("    _run $libDir/node \"\$HOME/.shelly-patcher.js\" gemini \"\$__gemini_nm_root\" >/dev/null 2>&1 || true")
             sb.appendLine("  fi")
             sb.appendLine("  if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("    if [ \"\$__gemini_base\" = \"\$__gemini_runtime_base\" ]; then")
