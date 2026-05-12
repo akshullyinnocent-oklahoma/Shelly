@@ -793,7 +793,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      hint. On mobile, Gemini's post-auth "Press R" prompt can remain on
     //      screen even though the process has returned, making typed R/Ctrl-C
     //      look ignored.
-    private const val BASHRC_VERSION = 109
+    // 110: Let Gemini use Shelly's browser bridge for Google OAuth. Gemini
+    //      suppresses browser launch on Linux when DISPLAY/WAYLAND_DISPLAY are
+    //      absent; Shelly has an xdg-open bridge instead, so provide a harmless
+    //      DISPLAY marker for the Gemini process.
+    private const val BASHRC_VERSION = 110
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2143,7 +2147,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  fi")
             sb.appendLine("  mkdir -p \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
             sb.appendLine("  __shelly_paste_tui_begin")
-            sb.appendLine("  TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
+            sb.appendLine("  TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("  local __gemini_rc=\$?")
             sb.appendLine("  __shelly_paste_tui_end")
             sb.appendLine("  if [ \"\$__gemini_auth_login\" -eq 1 ]; then")

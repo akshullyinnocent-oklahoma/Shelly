@@ -14,10 +14,12 @@
  * (2147483646)`, regardless of the target scheme (https, shelly).
  *
  * The bridge is therefore: this binary writes the requested URL to
- * `$HOME/.shelly-deep-link-queue` (one URL per line, append mode), and
+ * `$HOME/.shelly-deep-link-queue` (one entry per line, append mode), and
  * exits. The RN-side poller in app/_layout.tsx reads + truncates the
  * queue every ~250 ms and dispatches each URL to the Browser Pane
- * store.
+ * store. Google OAuth URLs are written as JSON entries requesting
+ * `external-browser`, because Google blocks Android WebView sign-in via
+ * X-Requested-With; the RN poller routes those to Custom Tabs / Chrome.
  *
  * Why a queue file instead of single-URL drop:
  *   - `O_APPEND | O_WRONLY` is atomic for ≤ PIPE_BUF (4 KB) writes per
@@ -101,6 +103,44 @@ static int starts_with(const char *s, const char *prefix) {
     return strncmp(s, prefix, n) == 0;
 }
 
+static int is_google_auth_url(const char *url) {
+    return strstr(url, "://accounts.google.com/") != NULL ||
+           strstr(url, "://codeassist.google.com/") != NULL;
+}
+
+static char *json_open_url_entry(const char *url) {
+    size_t url_len = strlen(url);
+    size_t cap = url_len * 6 + 96;
+    char *out = (char *) malloc(cap);
+    if (out == NULL) return NULL;
+
+    const char *prefix = "{\"type\":\"open-url\",\"url\":\"";
+    const char *suffix = "\",\"provider\":\"google\",\"authMode\":\"external-browser\"}";
+    size_t j = 0;
+    for (const char *p = prefix; *p && j + 1 < cap; p++) out[j++] = *p;
+
+    for (size_t i = 0; url[i] && j + 7 < cap; i++) {
+        unsigned char c = (unsigned char) url[i];
+        if (c == '"' || c == '\\') {
+            out[j++] = '\\';
+            out[j++] = (char) c;
+        } else if (c < 0x20) {
+            out[j++] = '\\';
+            out[j++] = 'u';
+            out[j++] = '0';
+            out[j++] = '0';
+            out[j++] = hex[c >> 4];
+            out[j++] = hex[c & 0xF];
+        } else {
+            out[j++] = (char) c;
+        }
+    }
+
+    for (const char *p = suffix; *p && j + 1 < cap; p++) out[j++] = *p;
+    out[j] = 0;
+    return out;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2 || argv[1] == NULL || argv[1][0] == 0) {
         fprintf(stderr, "xdg-open: missing URL argument\n");
@@ -133,35 +173,49 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Append URL + newline to the queue file. O_APPEND + writes ≤
+    char *json_entry = NULL;
+    const char *payload = url;
+    if (is_google_auth_url(url)) {
+        json_entry = json_open_url_entry(url);
+        if (json_entry == NULL) {
+            fprintf(stderr, "xdg-open: out of memory\n");
+            return 1;
+        }
+        payload = json_entry;
+    }
+
+    /* Append entry + newline to the queue file. O_APPEND + writes ≤
      * PIPE_BUF (4 KB) are atomic per POSIX, so concurrent invocations
      * don't interleave. mode 0600 keeps the queue private to the app
      * uid. Newline is the separator the RN poller splits on. */
     int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
     if (fd < 0) {
         fprintf(stderr, "xdg-open: open(%s): %s\n", path, strerror(errno));
+        free(json_entry);
         return 1;
     }
 
-    size_t url_len = strlen(url);
-    /* Writev as one call to keep URL + newline atomic together. */
+    size_t payload_len = strlen(payload);
+    /* Writev as one call to keep entry + newline atomic together. */
     struct iovec iov[2];
-    iov[0].iov_base = (void *) url;
-    iov[0].iov_len = url_len;
+    iov[0].iov_base = (void *) payload;
+    iov[0].iov_len = payload_len;
     iov[1].iov_base = (void *) "\n";
     iov[1].iov_len = 1;
     ssize_t got = writev(fd, iov, 2);
     int saved_errno = errno;
     close(fd);
 
-    if (got < 0 || (size_t) got != url_len + 1) {
+    if (got < 0 || (size_t) got != payload_len + 1) {
         fprintf(stderr, "xdg-open: writev(%s): %s\n", path,
                 got < 0 ? strerror(saved_errno) : "short write");
+        free(json_entry);
         return 1;
     }
 
     /* Best-effort note on stderr so the calling CLI's logs show that
      * the queue was written. The CLI ignores xdg-open output anyway. */
     fprintf(stderr, "xdg-open: queued %s\n", url);
+    free(json_entry);
     return 0;
 }
