@@ -785,7 +785,15 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      Claude/Gemini/Codex auth state into timestamped snapshots and can
     //      restore it later, so testers can prove Shelly authenticates each
     //      CLI without reusing old Termux/imported credentials.
-    private const val BASHRC_VERSION = 108
+    // 108: Suppress OSC 11 background-color query replies. Gemini 0.41 emits
+    //      that query during trust/auth restarts, and Android mobile input can
+    //      leave the raw `^[]11;rgb:...` answer visible in the foreground PTY.
+    // 109: After `gemini auth login`, force the terminal back out of any stale
+    //      alternate-screen/raw-mode state and print an actionable restart
+    //      hint. On mobile, Gemini's post-auth "Press R" prompt can remain on
+    //      screen even though the process has returned, making typed R/Ctrl-C
+    //      look ignored.
+    private const val BASHRC_VERSION = 109
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2126,6 +2134,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    __prev_arg=\"\$__arg\"")
             sb.appendLine("  done")
             sb.appendLine("  local __gemini_args=(\"\$@\")")
+            sb.appendLine("  local __gemini_auth_login=0")
+            sb.appendLine("  if [ \"\${__gemini_args[0]:-}\" = 'auth' ] && [ \"\${__gemini_args[1]:-}\" = 'login' ]; then")
+            sb.appendLine("    __gemini_auth_login=1")
+            sb.appendLine("  fi")
             sb.appendLine("  if [ \"\$__has_model\" -eq 0 ] && [ \"\$__skip_default_model\" -eq 0 ] && [ -z \"\${GEMINI_MODEL:-}\" ] && [ \"\$#\" -gt 0 ]; then")
             sb.appendLine("    __gemini_args=(--model flash \"\${__gemini_args[@]}\")")
             sb.appendLine("  fi")
@@ -2134,6 +2146,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("  local __gemini_rc=\$?")
             sb.appendLine("  __shelly_paste_tui_end")
+            sb.appendLine("  if [ \"\$__gemini_auth_login\" -eq 1 ]; then")
+            sb.appendLine("    stty sane 2>/dev/null || true")
+            sb.appendLine("    printf '\\033[?1049l\\033[?25h\\033[0m\\033[2J\\033[H'")
+            sb.appendLine("    if [ \"\$__gemini_rc\" -eq 0 ]; then")
+            sb.appendLine("      echo '[shelly] gemini auth login completed. Run: gemini'")
+            sb.appendLine("    fi")
+            sb.appendLine("  fi")
             sb.appendLine("  return \"\$__gemini_rc\"")
             sb.appendLine("}")
             // codex: route `codex` (no args / options / bare prompt) to the
