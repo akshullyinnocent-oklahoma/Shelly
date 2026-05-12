@@ -832,7 +832,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      blank out before drawing. Also pin Gemini's auth browser bridge
     //      command-locally so child launch code cannot lose Shelly's xdg-open
     //      bridge and sit on a blank PTY.
-    private const val BASHRC_VERSION = 116
+    // 117: Real-device adb evidence showed the extracted Claude cli.js exists
+    //      even when package.json/bin resolution fails, causing claude() to
+    //      fall through to the fragile legacy bundled tier. Add a direct
+    //      cli.js fallback. Also make Gemini default back to the APK-bundled
+    //      package so stale ~/.shelly-cli runtime trees cannot blank the PTY;
+    //      runtime Gemini remains opt-in for diagnostics.
+    private const val BASHRC_VERSION = 117
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1859,6 +1865,8 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __apk_extracted_pkg=\"$libDir/node_modules/@anthropic-ai/claude-code-extracted/package.json\"")
             sb.appendLine("  local __runtime_extracted_cli_js=\"\$(__shelly_resolve_claude_extracted_bin \"\$__runtime_extracted_pkg\" \"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted\")\"")
             sb.appendLine("  local __apk_extracted_cli_js=\"\$(__shelly_resolve_claude_extracted_bin \"\$__apk_extracted_pkg\" \"$libDir/node_modules/@anthropic-ai/claude-code-extracted\")\"")
+            sb.appendLine("  [ -z \"\$__runtime_extracted_cli_js\" ] && [ -f \"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\" ] && __runtime_extracted_cli_js=\"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
+            sb.appendLine("  [ -z \"\$__apk_extracted_cli_js\" ] && [ -f \"$libDir/node_modules/@anthropic-ai/claude-code-extracted/cli.js\" ] && __apk_extracted_cli_js=\"$libDir/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
             sb.appendLine("  local __extracted_cli_js=\"\"")
             sb.appendLine("  local __bun_tmp=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\"")
             sb.appendLine("  local __claude_tmp=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\"")
@@ -2129,13 +2137,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("gemini() {")
             sb.appendLine("  local __gemini_runtime_base=\"\$__cli_dir/@google/gemini-cli\"")
             sb.appendLine("  local __gemini_bundle_base=\"$libDir/node_modules/@google/gemini-cli\"")
-            sb.appendLine("  local __gemini_base=\"\$__gemini_runtime_base\"")
+            sb.appendLine("  local __gemini_base=\"\$__gemini_bundle_base\"")
             sb.appendLine("  local __gemini_bare_tui=0")
             sb.appendLine("  [ \"\$#\" -eq 0 ] && __gemini_bare_tui=1")
-            sb.appendLine("  if [ \"\${SHELLY_PREFER_BUNDLED_GEMINI:-0}\" = \"1\" ] && [ -f \"\$__gemini_bundle_base/package.json\" ]; then")
-            sb.appendLine("    __gemini_base=\"\$__gemini_bundle_base\"")
-            sb.appendLine("  elif [ ! -f \"\$__gemini_runtime_base/package.json\" ] && [ -f \"\$__gemini_bundle_base/package.json\" ]; then")
-            sb.appendLine("    __gemini_base=\"\$__gemini_bundle_base\"")
+            sb.appendLine("  if [ \"\${SHELLY_PREFER_RUNTIME_GEMINI:-0}\" = \"1\" ] && [ -f \"\$__gemini_runtime_base/package.json\" ]; then")
+            sb.appendLine("    __gemini_base=\"\$__gemini_runtime_base\"")
+            sb.appendLine("  elif [ ! -f \"\$__gemini_bundle_base/package.json\" ] && [ -f \"\$__gemini_runtime_base/package.json\" ]; then")
+            sb.appendLine("    __gemini_base=\"\$__gemini_runtime_base\"")
             sb.appendLine("  fi")
             sb.appendLine("  local __gemini_pkg=\"\$__gemini_base/package.json\"")
             sb.appendLine("  local __gemini_bin=\"bundle/gemini.js\"")
@@ -2154,11 +2162,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  fi")
             sb.appendLine("  if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("    if [ \"\$__gemini_base\" = \"\$__gemini_runtime_base\" ]; then")
-            sb.appendLine("      echo \"[shelly] gemini: using runtime-updated tier (\$__gemini_entry)\" >&2")
-            sb.appendLine("    elif [ \"\${SHELLY_PREFER_BUNDLED_GEMINI:-0}\" = \"1\" ]; then")
-            sb.appendLine("      echo \"[shelly] gemini: forced APK bundle tier (\$__gemini_entry)\" >&2")
+            sb.appendLine("      if [ \"\${SHELLY_PREFER_RUNTIME_GEMINI:-0}\" = \"1\" ]; then")
+            sb.appendLine("        echo \"[shelly] gemini: forced runtime-updated tier (\$__gemini_entry)\" >&2")
+            sb.appendLine("      else")
+            sb.appendLine("        echo \"[shelly] gemini: runtime package fallback; APK bundle missing (\$__gemini_entry)\" >&2")
+            sb.appendLine("      fi")
             sb.appendLine("    else")
-            sb.appendLine("      echo \"[shelly] gemini: APK bundle fallback; runtime package missing (\$__gemini_entry)\" >&2")
+            sb.appendLine("      echo \"[shelly] gemini: using APK bundle tier (\$__gemini_entry)\" >&2")
             sb.appendLine("    fi")
             sb.appendLine("  fi")
             sb.appendLine("  local __has_model=0")
