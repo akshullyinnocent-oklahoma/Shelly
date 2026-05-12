@@ -2103,6 +2103,19 @@ public final class TerminalEmulator {
                         try {
                             String colorSpec = textParameter.substring(lastSemiIndex, charIndex);
                             if ("?".equals(colorSpec)) {
+                                if (specialIndex == TextStyle.COLOR_INDEX_BACKGROUND) {
+                                    // Gemini CLI queries OSC 11 while restarting after trust
+                                    // changes. On Android PTYs that reply can race with the
+                                    // child process exit and get echoed visibly by the shell as
+                                    // "^[]11;rgb:...". Shelly owns pane backgrounds anyway, so
+                                    // suppress the background-color report.
+                                    android.util.Log.d(LOG_TAG, "Ignoring OSC " + value + " default background color query");
+                                    specialIndex++;
+                                    if (endOfInput || (specialIndex > TextStyle.COLOR_INDEX_CURSOR) || ++charIndex >= textParameter.length())
+                                        break;
+                                    lastSemiIndex = charIndex;
+                                    continue;
+                                }
                                 // Report current color in the same format xterm and gnome-terminal does.
                                 int rgb = mColors.mCurrentColors[specialIndex];
                                 int r = (65535 * ((rgb & 0x00FF0000) >> 16)) / 255;

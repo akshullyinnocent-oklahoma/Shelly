@@ -785,7 +785,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      Claude/Gemini/Codex auth state into timestamped snapshots and can
     //      restore it later, so testers can prove Shelly authenticates each
     //      CLI without reusing old Termux/imported credentials.
-    private const val BASHRC_VERSION = 107
+    private const val BASHRC_VERSION = 108
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1998,10 +1998,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    esac")
             sb.appendLine("    fi")
             sb.appendLine("  fi")
-            sb.appendLine("  if [ \"\$__claude_bare_tui\" -eq 1 ] && [ \"\${SHELLY_CLAUDE_EXTRACTED_TUI:-0}\" != \"1\" ] && [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
-            sb.appendLine("    echo '[shelly] claude: bare TUI uses bundled legacy cli.js; set SHELLY_CLAUDE_EXTRACTED_TUI=1 to debug extracted Bun cli.js' >&2")
+            sb.appendLine("  if [ \"\$__claude_bare_tui\" -eq 1 ] && [ \"\${SHELLY_CLAUDE_LEGACY_TUI:-0}\" = \"1\" ] && [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
+            sb.appendLine("    echo '[shelly] claude: bare TUI forced to bundled legacy cli.js' >&2")
             sb.appendLine("  fi")
-            sb.appendLine("  if [ \"\${SHELLY_FORCE_LEGACY_CLAUDE:-0}\" != \"1\" ] && [ \"\${SHELLY_DISABLE_EXTRACTED_CLAUDE:-0}\" != \"1\" ] && { [ \"\$__claude_bare_tui\" -ne 1 ] || [ \"\${SHELLY_CLAUDE_EXTRACTED_TUI:-0}\" = \"1\" ]; } && [ -n \"\$__extracted_cli_js\" ]; then")
+            sb.appendLine("  if [ \"\${SHELLY_FORCE_LEGACY_CLAUDE:-0}\" != \"1\" ] && [ \"\${SHELLY_DISABLE_EXTRACTED_CLAUDE:-0}\" != \"1\" ] && { [ \"\$__claude_bare_tui\" -ne 1 ] || [ \"\${SHELLY_CLAUDE_LEGACY_TUI:-0}\" != \"1\" ]; } && [ -n \"\$__extracted_cli_js\" ]; then")
             sb.appendLine("    if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ] && [ -z \"\$SHELLY_CLAUDE_TIER_ANNOUNCED\" ]; then")
             sb.appendLine("      export SHELLY_CLAUDE_TIER_ANNOUNCED=1")
             sb.appendLine("      if [ \"\$__extracted_cli_js\" = \"\$__runtime_extracted_cli_js\" ]; then")
