@@ -838,7 +838,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      cli.js fallback. Also make Gemini default back to the APK-bundled
     //      package so stale ~/.shelly-cli runtime trees cannot blank the PTY;
     //      runtime Gemini remains opt-in for diagnostics.
-    private const val BASHRC_VERSION = 117
+    // 118: Add a shared Node compatibility preload for Claude and Gemini.
+    //      AnyClaw/proot evidence showed modern CLIs expect a Linux-looking
+    //      Node runtime; Shelly's bionic Node can report Android and send
+    //      startup down unsupported branches. For CLI launches only, expose
+    //      process.platform/os.platform() as linux while retaining the real
+    //      platform in SHELLY_REAL_PLATFORM for diagnostics.
+    private const val BASHRC_VERSION = 118
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1572,6 +1578,38 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("else")
             sb.appendLine("  __cli_dir=\"$libDir/node_modules\"")
             sb.appendLine("fi")
+            sb.appendLine("__shelly_node_compat_preload=\"\$HOME/.shelly-node-compat-preload.js\"")
+            sb.appendLine("cat > \"\$__shelly_node_compat_preload\" <<'__SHELLY_NODE_COMPAT_PRELOAD__'")
+            sb.appendLine("(function() {")
+            sb.appendLine("  const realPlatform = process.platform;")
+            sb.appendLine("  const realArch = process.arch;")
+            sb.appendLine("  try { process.env.SHELLY_REAL_PLATFORM = process.env.SHELLY_REAL_PLATFORM || realPlatform; } catch (_) {}")
+            sb.appendLine("  try { process.env.SHELLY_NODE_PLATFORM_COMPAT = 'linux'; } catch (_) {}")
+            sb.appendLine("  try { Object.defineProperty(process, 'platform', { value: 'linux' }); } catch (_) {}")
+            sb.appendLine("  try {")
+            sb.appendLine("    const os = require('node:os');")
+            sb.appendLine("    const setFn = function(name, fn) {")
+            sb.appendLine("      try { Object.defineProperty(os, name, { value: fn, configurable: true }); }")
+            sb.appendLine("      catch (_) { try { os[name] = fn; } catch (_) {} }")
+            sb.appendLine("    };")
+            sb.appendLine("    const realRelease = typeof os.release === 'function' ? os.release.bind(os) : null;")
+            sb.appendLine("    const realCpus = typeof os.cpus === 'function' ? os.cpus.bind(os) : null;")
+            sb.appendLine("    const realNetworkInterfaces = typeof os.networkInterfaces === 'function' ? os.networkInterfaces.bind(os) : null;")
+            sb.appendLine("    setFn('platform', function() { return 'linux'; });")
+            sb.appendLine("    setFn('type', function() { return 'Linux'; });")
+            sb.appendLine("    setFn('release', function() { try { return realRelease ? realRelease() : '6.1.0-shelly'; } catch (_) { return '6.1.0-shelly'; } });")
+            sb.appendLine("    setFn('cpus', function() {")
+            sb.appendLine("      try { const cpus = realCpus ? realCpus() : null; if (Array.isArray(cpus) && cpus.length) return cpus; } catch (_) {}")
+            sb.appendLine("      return [{ model: 'shelly', speed: 0, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }];")
+            sb.appendLine("    });")
+            sb.appendLine("    setFn('networkInterfaces', function() { try { return realNetworkInterfaces ? realNetworkInterfaces() : {}; } catch (_) { return {}; } });")
+            sb.appendLine("    if (process.env.SHELLY_NODE_COMPAT_DIAG === '1') {")
+            sb.appendLine("      process.stderr.write('[SHELLY-NODE-COMPAT] ' + JSON.stringify({ realPlatform, platform: process.platform, realArch, arch: process.arch, osPlatform: os.platform(), argv: process.argv }) + '\\n');")
+            sb.appendLine("    }")
+            sb.appendLine("  } catch (_) {}")
+            sb.appendLine("})();")
+            sb.appendLine("__SHELLY_NODE_COMPAT_PRELOAD__")
+            sb.appendLine("chmod 600 \"\$__shelly_node_compat_preload\" 2>/dev/null || true")
             sb.appendLine("__shelly_claude_node_preload=\"\$HOME/.shelly-claude-node-preload.js\"")
             sb.appendLine("cat > \"\$__shelly_claude_node_preload\" <<'__SHELLY_CLAUDE_NODE_PRELOAD__'")
             sb.appendLine("if (!globalThis.Bun) globalThis.Bun = {};")
@@ -2067,7 +2105,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    fi")
             sb.appendLine("    mkdir -p \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" \"\$__bun_tmp\"")
             sb.appendLine("    __shelly_paste_tui_begin")
-            sb.appendLine("    USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_claude_node_preload\" _run $libDir/node \"\$__extracted_cli_js\" \"\$@\"")
+            sb.appendLine("    USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_node_compat_preload --require=\$__shelly_claude_node_preload\" _run $libDir/node \"\$__extracted_cli_js\" \"\$@\"")
             sb.appendLine("    local __extracted_rc=\$?")
             sb.appendLine("    __shelly_paste_tui_end")
             sb.appendLine("    case \"\$__extracted_rc\" in")
@@ -2108,7 +2146,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  fi")
             sb.appendLine("  mkdir -p \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" \"\$__bun_tmp\" 2>/dev/null")
             sb.appendLine("  __shelly_paste_tui_begin")
-            sb.appendLine("  USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_claude_node_preload\" _run $libDir/node \"\$__cli_js\" \"\$@\"")
+            sb.appendLine("  USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_node_compat_preload --require=\$__shelly_claude_node_preload\" _run $libDir/node \"\$__cli_js\" \"\$@\"")
             sb.appendLine("  local __legacy_rc=\$?")
             sb.appendLine("  __shelly_paste_tui_end")
             sb.appendLine("  return \"\$__legacy_rc\"")
@@ -2200,10 +2238,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  if [ \"\$__gemini_auth_login\" -eq 1 ]; then")
             sb.appendLine("    mkdir -p \"\$HOME/.gemini\" 2>/dev/null || true")
             sb.appendLine("    _run $libDir/node -e 'const fs=require(\"fs\");const p=process.env.HOME+\"/.gemini/settings.json\";let j={};try{j=JSON.parse(fs.readFileSync(p,\"utf8\"))}catch{};j.security={...(j.security||{}),auth:{...((j.security||{}).auth||{}),selectedType:\"oauth-personal\"}};fs.writeFileSync(p,JSON.stringify(j,null,2)+\"\\n\")' 2>/dev/null || true")
-            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" BROWSER=\"\$HOME/bin/xdg-open\" GEMINI_DEFAULT_AUTH_TYPE=oauth-personal GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
+            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" BROWSER=\"\$HOME/bin/xdg-open\" GEMINI_DEFAULT_AUTH_TYPE=oauth-personal GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_node_compat_preload\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("    __gemini_rc=\$?")
             sb.appendLine("  else")
-            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" BROWSER=\"\$HOME/bin/xdg-open\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
+            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" BROWSER=\"\$HOME/bin/xdg-open\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_node_compat_preload\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("    __gemini_rc=\$?")
             sb.appendLine("  fi")
             sb.appendLine("  __shelly_paste_tui_end")
