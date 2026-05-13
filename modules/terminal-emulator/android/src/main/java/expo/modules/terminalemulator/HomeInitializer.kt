@@ -857,6 +857,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      shelly-runtime-update.js quick/update path run by default and skip
     //      stale runtime current when the APK native version is newer.
     //
+    // 123: Pre-clear Bun native addon cache before native foreground Claude.
+    //      Runtime/APK 2.1.140 selection works, but Bun 1.3.14 can emit a
+    //      0x10 crash banner on the first attempt when reusing .bun-tmp
+    //      .*.node cache; the existing retry clears it after the user has
+    //      already seen the panic. Clear it before launch instead. Keep an
+    //      opt-out for diagnostics.
+    //
     // 121: Make bare-Claude native foreground honour runtime crash cooldown
     //      before tier selection. v120 proved trust seed works: Claude can
     //      answer after the wrapper's cache-clear retry, but runtime current
@@ -872,7 +879,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      exact state in ~/.claude.json under projects[path], and trusts
     //      child paths by walking parents. Seed only HOME, preserve
     //      oauthAccount and credentials, and keep an opt-out for diagnostics.
-    private const val BASHRC_VERSION = 122
+    private const val BASHRC_VERSION = 123
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2055,6 +2062,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    fi")
             sb.appendLine("    if [ -n \"\$__foreground_claude_bin\" ]; then")
             sb.appendLine("      __shelly_paste_tui_begin")
+            sb.appendLine("      if [ \"\${SHELLY_CLAUDE_KEEP_BUN_NODE_CACHE:-0}\" != \"1\" ]; then")
+            sb.appendLine("        rm -f \"\$__bun_tmp\"/.*.node 2>/dev/null")
+            sb.appendLine("      fi")
             sb.appendLine("      __shelly_run_claude_musl_clean \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_exec_wrapper\" \"\$__foreground_claude_bin\" \"\$@\"")
             sb.appendLine("      local __foreground_claude_rc=\$?")
             sb.appendLine("      local __foreground_claude_retried=0")
