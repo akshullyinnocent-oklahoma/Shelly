@@ -173,6 +173,47 @@ function authJsonSummary(p) {
   }
 }
 
+function claudeTrustSummary() {
+  const configPath = process.env.CLAUDE_CONFIG_DIR
+    ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json')
+    : path.join(HOME, '.claude.json');
+  const info = statInfo(configPath);
+  if (!info.exists) return { ...info, path: configPath, parse: 'missing', home_trusted: false, hooks_trusted: false, project_onboarded: false };
+  try {
+    const parsed = JSON.parse(readText(configPath));
+    const literalHome = path.resolve(HOME).replace(/\\/g, '/');
+    let realHome = literalHome;
+    try { realHome = fs.realpathSync(HOME).replace(/\\/g, '/'); } catch {}
+    const keys = Array.from(new Set([literalHome, realHome]));
+    let homeTrusted = false;
+    let hooksTrusted = false;
+    let projectOnboarded = false;
+    for (const key of keys) {
+      let cursor = key;
+      while (true) {
+        const project = parsed.projects?.[cursor];
+        if (project?.hasTrustDialogAccepted === true) homeTrusted = true;
+        if (project?.hasTrustDialogHooksAccepted === true) hooksTrusted = true;
+        if (project?.hasCompletedProjectOnboarding === true) projectOnboarded = true;
+        const parent = path.resolve(cursor, '..').replace(/\\/g, '/');
+        if (parent === cursor) break;
+        cursor = parent;
+      }
+    }
+    return {
+      ...info,
+      path: configPath,
+      parse: 'ok',
+      home_keys: keys,
+      home_trusted: homeTrusted,
+      hooks_trusted: hooksTrusted,
+      project_onboarded: projectOnboarded,
+    };
+  } catch (e) {
+    return { ...info, path: configPath, parse: `invalid json: ${e.message}`, home_trusted: false, hooks_trusted: false, project_onboarded: false };
+  }
+}
+
 function collect() {
   const runtimeClaude = path.join(HOME, '.shelly-runtime/claude/current/claude');
   const runtimeClaudeExtracted = path.join(HOME, '.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js');
@@ -219,6 +260,7 @@ function collect() {
       legacy_version: nodeScriptVersion(path.join(LIB, 'node_modules/@anthropic-ai/claude-code/cli.js')),
       auth_root: statInfo(path.join(HOME, '.claude.json')),
       auth_credentials: statInfo(path.join(HOME, '.claude/.credentials.json')),
+      trust: claudeTrustSummary(),
     },
     codex: {
       runtime_current: readlink(path.join(HOME, '.shelly-runtime/codex/current')) || null,
@@ -260,6 +302,7 @@ function printHuman(d) {
   line('claude legacy', `${mark(d.claude.legacy_version.ok)} ${d.claude.legacy_version.stdout || d.claude.legacy_version.stderr}`);
   line('claude auth root', d.claude.auth_root.exists ? `${d.claude.auth_root.mtime} ${d.claude.auth_root.mode}` : 'missing');
   line('claude credentials', d.claude.auth_credentials.exists ? `${d.claude.auth_credentials.mtime} ${d.claude.auth_credentials.mode}` : 'missing');
+  line('claude home trust', d.claude.trust.exists ? `${mark(d.claude.trust.home_trusted && d.claude.trust.hooks_trusted && d.claude.trust.project_onboarded)} ${d.claude.trust.parse} trust=${d.claude.trust.home_trusted} hooks=${d.claude.trust.hooks_trusted} onboard=${d.claude.trust.project_onboarded} ${d.claude.trust.path}` : 'missing');
   process.stdout.write('\n');
 
   line('codex runtime', `${mark(d.codex.runtime_version.ok)} ${d.codex.runtime_version.stdout || d.codex.runtime_version.stderr}`);

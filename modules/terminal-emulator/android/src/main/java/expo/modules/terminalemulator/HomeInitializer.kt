@@ -849,7 +849,14 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      Claude Code successfully. Make bare `claude` prefer that native
     //      foreground route by default, keeping Node tiers for non-TUI
     //      commands and as an opt-out path via SHELLY_DISABLE_NATIVE_CLAUDE=1.
-    private const val BASHRC_VERSION = 119
+    // 120: Pre-seed Claude Code workspace trust for Shelly's app-private HOME
+    //      before launching Claude. v119's native route reaches `/login`, but
+    //      Claude Code's post-login trust prompt trips a Bun SEA segfault at
+    //      address 0x10 before the user can answer. Claude 2.1.140 stores this
+    //      exact state in ~/.claude.json under projects[path], and trusts
+    //      child paths by walking parents. Seed only HOME, preserve
+    //      oauthAccount and credentials, and keep an opt-out for diagnostics.
+    private const val BASHRC_VERSION = 120
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1867,26 +1874,69 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("}")
             sb.appendLine("__SHELLY_CLAUDE_NODE_PRELOAD__")
             sb.appendLine("chmod 600 \"\$__shelly_claude_node_preload\" 2>/dev/null || true")
-            // @anthropic-ai/claude-code dispatch. As of 2026-05-08 (BASHRC
-            // v83), the **default route is the extracted Node tier**
-            // (cli.js + Bun.* polyfill via $libDir/node) — Bun 1.3.14 +
-            // Claude Code 2.1.133 panic-crashes the native musl Bun SEA on
-            // Galaxy Z Fold6 with exit 133 (SIGTRAP) / 135 (SIGBUS) AFTER
-            // drawing a partial TUI banner, polluting the foreground REPL
-            // even though the tier-fallback eventually succeeds.
-            //
-            // The native Bun SEA tiers (latest under
-            // ~/.shelly-runtime/claude/current/, and the APK-bundled
-            // Path C-bis under $libDir/claude) remain available but are
-            // gated behind SHELLY_PREFER_NATIVE_CLAUDE=1. Set the env var
-            // to opt back in for testing / smoke-validation. The runtime
-            // updater's background smoke is the right end-state for
-            // promoting "known good" native binaries (deferred, see PR
-            // description follow-up).
-            //
-            // Earlier comment said the opposite (native default, Node
-            // fallback). It was correct until 2.1.133; do not revert
-            // without re-validating both tiers on a real device.
+            sb.appendLine("__shelly_seed_claude_home_trust() {")
+            sb.appendLine("  [ \"\${SHELLY_DISABLE_CLAUDE_HOME_TRUST_SEED:-0}\" = \"1\" ] && return 0")
+            sb.appendLine("  [ -n \"\$HOME\" ] || return 0")
+            sb.appendLine("  [ -x \"$libDir/node\" ] || return 0")
+            sb.appendLine("  mkdir -p \"\$HOME/.claude\" 2>/dev/null || true")
+            sb.appendLine("  /system/bin/linker64 \"$libDir/node\" - \"\$HOME\" <<'__SHELLY_CLAUDE_HOME_TRUST__' >/dev/null || true")
+            sb.appendLine("const fs = require('fs');")
+            sb.appendLine("const path = require('path');")
+            sb.appendLine("const homeArg = process.argv[2];")
+            sb.appendLine("if (!homeArg) process.exit(0);")
+            sb.appendLine("const verbose = Boolean(process.env.SHELLY_VERBOSE_CLI_TIER);")
+            sb.appendLine("const literalHome = path.resolve(homeArg);")
+            sb.appendLine("let realHome = literalHome;")
+            sb.appendLine("try { realHome = fs.realpathSync(literalHome); } catch (_) {}")
+            sb.appendLine("const projectKeys = Array.from(new Set([literalHome, realHome].map((p) => p.replace(/\\\\/g, '/'))));")
+            sb.appendLine("const configDir = process.env.CLAUDE_CONFIG_DIR || literalHome;")
+            sb.appendLine("const target = path.join(configDir, '.claude.json');")
+            sb.appendLine("let cfg = {};")
+            sb.appendLine("try {")
+            sb.appendLine("  const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';")
+            sb.appendLine("  if (existing.trim()) cfg = JSON.parse(existing);")
+            sb.appendLine("} catch (err) {")
+            sb.appendLine("  try { fs.copyFileSync(target, target + '.shelly-trust-seed-corrupt.' + Date.now()); } catch (_) {}")
+            sb.appendLine("  try {")
+            sb.appendLine("    const dir = path.dirname(target);")
+            sb.appendLine("    const prefix = path.basename(target) + '.shelly-trust-seed-corrupt.';")
+            sb.appendLine("    const stale = fs.readdirSync(dir).filter((name) => name.startsWith(prefix)).sort().reverse().slice(3);")
+            sb.appendLine("    for (const name of stale) { try { fs.unlinkSync(path.join(dir, name)); } catch (_) {} }")
+            sb.appendLine("  } catch (_) {}")
+            sb.appendLine("  if (verbose) process.stderr.write('[shelly] claude: trust seed skipped (malformed config: ' + err.message + ')\\n');")
+            sb.appendLine("  process.exit(0);")
+            sb.appendLine("}")
+            sb.appendLine("const baseProject = {")
+            sb.appendLine("  allowedTools: [],")
+            sb.appendLine("  mcpContextUris: [],")
+            sb.appendLine("  mcpServers: {},")
+            sb.appendLine("  enabledMcpjsonServers: [],")
+            sb.appendLine("  disabledMcpjsonServers: [],")
+            sb.appendLine("  projectOnboardingSeenCount: 0,")
+            sb.appendLine("  hasClaudeMdExternalIncludesApproved: false,")
+            sb.appendLine("  hasClaudeMdExternalIncludesWarningShown: false,")
+            sb.appendLine("  hasTrustDialogAccepted: true,")
+            sb.appendLine("  hasTrustDialogHooksAccepted: true,")
+            sb.appendLine("  hasCompletedProjectOnboarding: true,")
+            sb.appendLine("};")
+            sb.appendLine("cfg.projects = { ...(cfg.projects || {}) };")
+            sb.appendLine("for (const key of projectKeys) {")
+            sb.appendLine("  cfg.projects[key] = { ...baseProject, ...(cfg.projects[key] || {}), hasTrustDialogAccepted: true, hasTrustDialogHooksAccepted: true, hasCompletedProjectOnboarding: true };")
+            sb.appendLine("}")
+            sb.appendLine("fs.mkdirSync(path.dirname(target), { recursive: true });")
+            sb.appendLine("const tmp = target + '.shelly-trust-seed.' + process.pid + '.tmp';")
+            sb.appendLine("fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), { mode: 0o600 });")
+            sb.appendLine("fs.renameSync(tmp, target);")
+            sb.appendLine("try { fs.chmodSync(target, 0o600); } catch (_) {}")
+            sb.appendLine("if (verbose) process.stderr.write('[shelly] claude: trust seeded (proj=' + projectKeys.join(',') + ', fields=4)\\n');")
+            sb.appendLine("__SHELLY_CLAUDE_HOME_TRUST__")
+            sb.appendLine("}")
+            // @anthropic-ai/claude-code dispatch. v119 real-device triage
+            // showed the native musl Bun SEA route is currently the only
+            // route that draws the Claude TUI reliably in Shelly. Keep that
+            // native foreground route for bare `claude`, but v120 seeds
+            // Shelly HOME trust first so post-login onboarding does not enter
+            // the Bun-crashing trust prompt.
             sb.appendLine("claude() {")
             sb.appendLine("  local __trampoline=\"$libDir/shelly_musl_exec\"")
             sb.appendLine("  local __musl_claude=\"$libDir/claude\"")
@@ -1911,11 +1961,19 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  [ -z \"\$__runtime_extracted_cli_js\" ] && [ -f \"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\" ] && __runtime_extracted_cli_js=\"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
             sb.appendLine("  [ -z \"\$__apk_extracted_cli_js\" ] && [ -f \"$libDir/node_modules/@anthropic-ai/claude-code-extracted/cli.js\" ] && __apk_extracted_cli_js=\"$libDir/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
             sb.appendLine("  local __extracted_cli_js=\"\"")
+            sb.appendLine("  if [ -f \"\$__runtime_extracted_cli_js\" ]; then")
+            sb.appendLine("    __extracted_cli_js=\"\$__runtime_extracted_cli_js\"")
+            sb.appendLine("  elif [ -f \"\$__apk_extracted_cli_js\" ]; then")
+            sb.appendLine("    __extracted_cli_js=\"\$__apk_extracted_cli_js\"")
+            sb.appendLine("  fi")
             sb.appendLine("  local __bun_tmp=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\"")
             sb.appendLine("  local __claude_tmp=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\"")
             sb.appendLine("  local __claude_bare_tui=0")
             sb.appendLine("  [ \"\$#\" -eq 0 ] && __claude_bare_tui=1")
             sb.appendLine("  mkdir -p \"\$__bun_tmp\" \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
+            sb.appendLine("  if [ \"\$__claude_bare_tui\" -eq 1 ] || [ \"\${SHELLY_CLAUDE_SEED_HOME_TRUST_FOR_ARGS:-0}\" = \"1\" ]; then")
+            sb.appendLine("    __shelly_seed_claude_home_trust")
+            sb.appendLine("  fi")
             // v119: real-device triage showed the Node-based tiers hang before
             // rendering, while the musl Bun SEA tier reaches the Claude TUI.
             // Prefer native for bare TUI launches, but keep an explicit opt-out
@@ -1946,6 +2004,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("          __foreground_claude_rc=\$?")
             sb.appendLine("          ;;")
             sb.appendLine("      esac")
+            sb.appendLine("      if [ \"\$__foreground_claude_rc\" -eq 139 ] && [ \"\$__claude_bare_tui\" -eq 1 ] && [ ! -f \"\$HOME/.claude/.credentials.json\" ]; then")
+            sb.appendLine("        echo '[shelly] claude: native exit 139 during /login. Trust seed may not have applied. Run shelly-doctor to inspect ~/.claude.json state.' >&2")
+            sb.appendLine("      fi")
             sb.appendLine("      __shelly_paste_tui_end")
             sb.appendLine("      if [ \"\$__foreground_claude_rc\" -ne 0 ] && [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("        echo \"[shelly] claude: native foreground exited \$__foreground_claude_rc; not falling back to Node tiers\" >&2")
