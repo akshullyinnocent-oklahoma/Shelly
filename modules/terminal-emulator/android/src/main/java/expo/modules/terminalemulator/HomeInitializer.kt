@@ -844,7 +844,12 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      startup down unsupported branches. For CLI launches only, expose
     //      process.platform/os.platform() as linux while retaining the real
     //      platform in SHELLY_REAL_PLATFORM for diagnostics.
-    private const val BASHRC_VERSION = 118
+    // 119: Real-device v118 triage showed both extracted Node and legacy
+    //      cli.js hang before rendering, while the musl Bun SEA route renders
+    //      Claude Code successfully. Make bare `claude` prefer that native
+    //      foreground route by default, keeping Node tiers for non-TUI
+    //      commands and as an opt-out path via SHELLY_DISABLE_NATIVE_CLAUDE=1.
+    private const val BASHRC_VERSION = 119
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1911,13 +1916,12 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __claude_bare_tui=0")
             sb.appendLine("  [ \"\$#\" -eq 0 ] && __claude_bare_tui=1")
             sb.appendLine("  mkdir -p \"\$__bun_tmp\" \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" 2>/dev/null")
-            // Native Bun SEA can render Claude Code and then crash with a Bun
-            // panic dump in the foreground PTY. That dump corrupts the user's
-            // visible terminal even when a later tier recovers. Keep native
-            // available for explicit diagnostics, but do not use it for normal
-            // bare TUI launches.
+            // v119: real-device triage showed the Node-based tiers hang before
+            // rendering, while the musl Bun SEA tier reaches the Claude TUI.
+            // Prefer native for bare TUI launches, but keep an explicit opt-out
+            // for diagnostics or future upstream regressions.
             sb.appendLine("  local __claude_foreground_native=0")
-            sb.appendLine("  if [ \"\${SHELLY_CLAUDE_NATIVE_TUI:-0}\" = \"1\" ] || [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ]; then")
+            sb.appendLine("  if { [ \"\$__claude_bare_tui\" -eq 1 ] && [ \"\${SHELLY_DISABLE_NATIVE_CLAUDE:-0}\" != \"1\" ]; } || [ \"\${SHELLY_CLAUDE_NATIVE_TUI:-0}\" = \"1\" ] || [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ]; then")
             sb.appendLine("    __claude_foreground_native=1")
             sb.appendLine("  fi")
             sb.appendLine("  if [ \"\$__claude_foreground_native\" -eq 1 ] && [ \"\${SHELLY_FORCE_LEGACY_CLAUDE:-0}\" != \"1\" ] && [ -x \"\$__trampoline\" ] && [ -x \"\$__musl_ld\" ] && [ -f \"\$__musl_exec_wrapper\" ]; then")
