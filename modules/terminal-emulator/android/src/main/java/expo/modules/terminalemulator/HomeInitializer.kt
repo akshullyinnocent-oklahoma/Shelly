@@ -72,12 +72,13 @@ function patchCodex(libDir) {
 function patchGemini() {
   const d = NM + "/@google/gemini-cli/bundle";
   if (!fs.existsSync(d)) { console.log("[patch] gemini bundle not found at " + d); return; }
-  // Widen the file glob from chunk-*.js to include the gemini-*.js
-  // launchers — the shell:true patterns flagged by the 2026-04-24
-  // subprocess audit live in BOTH chunk bundles and the top-level
-  // gemini-*.js entry points.
-  const files = fs.readdirSync(d).filter(f => (f.startsWith("chunk-") || f.startsWith("gemini-")) && f.endsWith(".js"));
-  let termuxPatched = 0, shellPatched = 0, commandExistsPatched = 0, oauthConsentPatched = 0, capabilityPatched = 0, capabilityPresent = 0;
+  // Gemini 0.42 moved some startup/TUI code outside chunk-* and gemini-*
+  // files (for example interactiveCli-*.js and gemini.js). Scan every
+  // bundle-root JS file so upstream filename churn cannot silently bypass
+  // the Android patches.
+  const files = fs.readdirSync(d).filter(f => f.endsWith(".js") && fs.statSync(d + "/" + f).isFile());
+  let termuxPatched = 0, shellPatched = 0, commandExistsPatched = 0, oauthConsentPatched = 0, capabilityPatched = 0;
+  let postShellPresent = 0, postCommandExistsPresent = 0, postOauthConsentPresent = 0, postCapabilityPresent = 0, termuxGuardPresent = 0;
   for (const f of files) {
     const p = d + "/" + f;
     let s = fs.readFileSync(p, "utf8");
@@ -117,7 +118,7 @@ function patchGemini() {
     const capabilityRe = /process\.on\("SIGINT", cleanupTerminalOnExit\);\n    return new Promise\(\(resolve\d+\) => \{/g;
     const capabilityMatches = s.match(capabilityRe);
     if (s.includes("SHELLY_SKIP_GEMINI_CAPABILITY_DETECT")) {
-      capabilityPresent++;
+      // Already patched.
     } else if (capabilityMatches) {
       s = s.replace(
         capabilityRe,
@@ -126,7 +127,6 @@ function patchGemini() {
           'if (process.env.SHELLY_SKIP_GEMINI_CAPABILITY_DETECT === "1") {\n      this.detectionComplete = true;\n      return;\n    }\n    ${'$'}&'
         ));
       capabilityPatched += capabilityMatches.length;
-      capabilityPresent++;
     }
     if (s !== before) {
       // Reconcile counters after all three passes.
@@ -139,9 +139,14 @@ function patchGemini() {
       if (before.match(/const userConsent = await getConsentForOauth\(""\);\n\s*if \(!userConsent\) \{/)) oauthConsentPatched++;
       fs.writeFileSync(p, s);
     }
+    if (s.includes('shell:"/system/bin/sh"')) postShellPresent++;
+    if (s.includes('execSync(getCommandExistsCmd(cmd),{stdio:"ignore",shell:"/system/bin/sh"})')) postCommandExistsPresent++;
+    if (s.includes('const userConsent = true;')) postOauthConsentPresent++;
+    if (s.includes('SHELLY_SKIP_GEMINI_CAPABILITY_DETECT === "1"')) postCapabilityPresent++;
+    if (s.includes("You need to install Termux")) termuxGuardPresent++;
   }
-  if (capabilityPresent === 0) {
-    throw new Error("[patch] gemini drift: terminal capability detector not found or patched at " + d);
+  if (termuxGuardPresent !== 0 || postShellPresent === 0 || postCommandExistsPresent === 0 || postOauthConsentPresent === 0 || postCapabilityPresent === 0) {
+    throw new Error("[patch] gemini drift: expected bundle markers missing at " + d + " termuxGuard=" + termuxGuardPresent + " shell=" + postShellPresent + " commandExists=" + postCommandExistsPresent + " oauthConsent=" + postOauthConsentPresent + " capability=" + postCapabilityPresent + " files=" + files.length);
   }
   console.log("[patch] gemini termux=" + termuxPatched + " shellTrue=" + shellPatched + " commandExists=" + commandExistsPatched + " oauthConsent=" + oauthConsentPatched + " capability=" + capabilityPatched + " /" + files.length + " files (at " + d + ")");
 }
@@ -941,7 +946,14 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      app-private ELF path instead of applying the linker64 route. Node
     //      child_process.spawn("bash") surfaced this as EACCES, and Gemini's
     //      Shell tool reported signal 11 for simple commands.
-    private const val BASHRC_VERSION = 133
+    // 134: Gemini 0.42 bare TUI can hang blank while the generic Node
+    //      compatibility preload forces process.platform/os.platform to
+    //      linux. Keep the Gemini raw-mode guard, but make the Linux compat
+    //      preload opt-in for Gemini via SHELLY_GEMINI_LINUX_COMPAT=1.
+    // 135: Gemini 0.42 moved entry/TUI code outside chunk-* and gemini-*
+    //      bundle files. Scan every bundle-root JS file and fail/stamp only
+    //      when the expected Android patch markers are actually present.
+    private const val BASHRC_VERSION = 135
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2494,11 +2506,16 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  fi")
             sb.appendLine("  __shelly_paste_tui_begin")
             sb.appendLine("  local __gemini_rc=0")
+            sb.appendLine("  local __gemini_node_options=\"\${NODE_OPTIONS:-}\"")
+            sb.appendLine("  if [ \"\${SHELLY_GEMINI_LINUX_COMPAT:-0}\" = \"1\" ]; then")
+            sb.appendLine("    __gemini_node_options=\"\${__gemini_node_options:+\$__gemini_node_options }--require=\$__shelly_node_compat_preload\"")
+            sb.appendLine("  fi")
+            sb.appendLine("  __gemini_node_options=\"\${__gemini_node_options:+\$__gemini_node_options }--require=\$__shelly_gemini_raw_mode_preload\"")
             sb.appendLine("  if [ \"\$__gemini_auth_login\" -eq 1 ]; then")
-            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" BROWSER=\"\$HOME/bin/xdg-open\" SHELLY_SKIP_GEMINI_CAPABILITY_DETECT=1 GEMINI_DEFAULT_AUTH_TYPE=oauth-personal GEMINI_CLI_TRUST_WORKSPACE=true OAUTH_CALLBACK_PORT=\"\${OAUTH_CALLBACK_PORT:-43217}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_node_compat_preload --require=\$__shelly_gemini_raw_mode_preload\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
+            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" BROWSER=\"\$HOME/bin/xdg-open\" SHELLY_SKIP_GEMINI_CAPABILITY_DETECT=1 GEMINI_DEFAULT_AUTH_TYPE=oauth-personal GEMINI_CLI_TRUST_WORKSPACE=true OAUTH_CALLBACK_PORT=\"\${OAUTH_CALLBACK_PORT:-43217}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" NODE_OPTIONS=\"\$__gemini_node_options\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("    __gemini_rc=\$?")
             sb.appendLine("  else")
-            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" BROWSER=\"\$HOME/bin/xdg-open\" SHELLY_SKIP_GEMINI_CAPABILITY_DETECT=1 GEMINI_CLI_TRUST_WORKSPACE=true GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" NODE_OPTIONS=\"\${NODE_OPTIONS:+\$NODE_OPTIONS }--require=\$__shelly_node_compat_preload --require=\$__shelly_gemini_raw_mode_preload\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
+            sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" DISPLAY=\"\${DISPLAY:-shelly}\" BROWSER=\"\$HOME/bin/xdg-open\" SHELLY_SKIP_GEMINI_CAPABILITY_DETECT=1 GEMINI_CLI_TRUST_WORKSPACE=true GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" NODE_OPTIONS=\"\$__gemini_node_options\" _run $libDir/node --max-old-space-size=5557 \"\$__gemini_entry\" \"\${__gemini_args[@]}\"")
             sb.appendLine("    __gemini_rc=\$?")
             sb.appendLine("  fi")
             sb.appendLine("  __shelly_paste_tui_end")
