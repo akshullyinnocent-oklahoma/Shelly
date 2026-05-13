@@ -849,6 +849,14 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      Claude Code successfully. Make bare `claude` prefer that native
     //      foreground route by default, keeping Node tiers for non-TUI
     //      commands and as an opt-out path via SHELLY_DISABLE_NATIVE_CLAUDE=1.
+    // 122: Separate native runtime updates from noisy npm CLI auto-update and
+    //      prefer the newest healthy native Claude binary. v121 still chose
+    //      runtime current 2.1.138 over APK-bundled 2.1.140 because tier
+    //      selection only checked "runtime exists". Keep SHELLY_AUTO_UPDATE_CLIS
+    //      disabled for foreground TUI hygiene, but let the isolated
+    //      shelly-runtime-update.js quick/update path run by default and skip
+    //      stale runtime current when the APK native version is newer.
+    //
     // 121: Make bare-Claude native foreground honour runtime crash cooldown
     //      before tier selection. v120 proved trust seed works: Claude can
     //      answer after the wrapper's cache-clear retry, but runtime current
@@ -864,7 +872,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      exact state in ~/.claude.json under projects[path], and trusts
     //      child paths by walking parents. Seed only HOME, preserve
     //      oauthAccount and credentials, and keep an opt-out for diagnostics.
-    private const val BASHRC_VERSION = 121
+    private const val BASHRC_VERSION = 122
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1964,6 +1972,33 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __runtime_claude=\"\$HOME/.shelly-runtime/claude/current/claude\"")
             sb.appendLine("  local __runtime_extracted_pkg=\"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/package.json\"")
             sb.appendLine("  local __apk_extracted_pkg=\"$libDir/node_modules/@anthropic-ai/claude-code-extracted/package.json\"")
+            sb.appendLine("  __shelly_semver_gt() {")
+            sb.appendLine("    case \"\$1\" in [0-9]*.[0-9]*.[0-9]*) ;; *) return 1 ;; esac")
+            sb.appendLine("    case \"\$2\" in [0-9]*.[0-9]*.[0-9]*) ;; *) return 1 ;; esac")
+            sb.appendLine("    local __a1 __a2 __a3 __b1 __b2 __b3")
+            sb.appendLine("    IFS=. read -r __a1 __a2 __a3 <<EOF")
+            sb.appendLine("\$1")
+            sb.appendLine("EOF")
+            sb.appendLine("    IFS=. read -r __b1 __b2 __b3 <<EOF")
+            sb.appendLine("\$2")
+            sb.appendLine("EOF")
+            sb.appendLine("    [ \"\$__a1\" -gt \"\$__b1\" ] && return 0")
+            sb.appendLine("    [ \"\$__a1\" -lt \"\$__b1\" ] && return 1")
+            sb.appendLine("    [ \"\$__a2\" -gt \"\$__b2\" ] && return 0")
+            sb.appendLine("    [ \"\$__a2\" -lt \"\$__b2\" ] && return 1")
+            sb.appendLine("    [ \"\$__a3\" -gt \"\$__b3\" ] && return 0")
+            sb.appendLine("    return 1")
+            sb.appendLine("  }")
+            sb.appendLine("  __shelly_claude_apk_native_version() {")
+            sb.appendLine("    local __cache=\"\$HOME/.shelly-runtime/claude/apk-version-v$BASHRC_VERSION\"")
+            sb.appendLine("    local __ver=\"\"")
+            sb.appendLine("    __ver=\$(cat \"\$__cache\" 2>/dev/null | tr -d '\\n')")
+            sb.appendLine("    case \"\$__ver\" in [0-9]*.[0-9]*.[0-9]*) printf '%s' \"\$__ver\"; return 0 ;; esac")
+            sb.appendLine("    [ -x \"\$__musl_claude\" ] || return 1")
+            sb.appendLine("    __ver=\$(SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" timeout 10 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" --version 2>/dev/null | sed -n 's/^\\([0-9][0-9.]*\\).*/\\1/p' | head -1)")
+            sb.appendLine("    case \"\$__ver\" in [0-9]*.[0-9]*.[0-9]*) mkdir -p \"\$(dirname \"\$__cache\")\" 2>/dev/null; printf '%s' \"\$__ver\" > \"\$__cache\" 2>/dev/null || true; printf '%s' \"\$__ver\"; return 0 ;; esac")
+            sb.appendLine("    return 1")
+            sb.appendLine("  }")
             sb.appendLine("  local __runtime_extracted_cli_js=\"\$(__shelly_resolve_claude_extracted_bin \"\$__runtime_extracted_pkg\" \"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted\")\"")
             sb.appendLine("  local __apk_extracted_cli_js=\"\$(__shelly_resolve_claude_extracted_bin \"\$__apk_extracted_pkg\" \"$libDir/node_modules/@anthropic-ai/claude-code-extracted\")\"")
             sb.appendLine("  [ -z \"\$__runtime_extracted_cli_js\" ] && [ -f \"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\" ] && __runtime_extracted_cli_js=\"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
@@ -1998,9 +2033,19 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    fi")
             sb.appendLine("    local __foreground_claude_bin=\"\"")
             sb.appendLine("    local __foreground_claude_tier=\"\"")
+            sb.appendLine("    local __runtime_claude_ver=\"\"")
+            sb.appendLine("    local __apk_claude_ver=\"\"")
+            sb.appendLine("    __runtime_claude_ver=\$(cat \"\$HOME/.shelly-runtime/claude/version\" 2>/dev/null | tr -d '\\n')")
+            sb.appendLine("    __apk_claude_ver=\$(__shelly_claude_apk_native_version 2>/dev/null || true)")
             sb.appendLine("    if [ -x \"\$__runtime_claude\" ] && { [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ] || ! __shelly_claude_native_in_cooldown; }; then")
-            sb.appendLine("      __foreground_claude_bin=\"\$__runtime_claude\"")
-            sb.appendLine("      __foreground_claude_tier=\"runtime\"")
+            sb.appendLine("      if [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" != \"1\" ] && [ -x \"\$__musl_claude\" ] && __shelly_semver_gt \"\$__apk_claude_ver\" \"\$__runtime_claude_ver\"; then")
+            sb.appendLine("        __foreground_claude_bin=\"\$__musl_claude\"")
+            sb.appendLine("        __foreground_claude_tier=\"apk\"")
+            sb.appendLine("        [ -z \"\$SHELLY_VERBOSE_CLI_TIER\" ] || echo \"[shelly] claude: APK native \$__apk_claude_ver is newer than runtime \$__runtime_claude_ver; using APK tier\" >&2")
+            sb.appendLine("      else")
+            sb.appendLine("        __foreground_claude_bin=\"\$__runtime_claude\"")
+            sb.appendLine("        __foreground_claude_tier=\"runtime\"")
+            sb.appendLine("      fi")
             sb.appendLine("    elif [ -x \"\$__runtime_claude\" ] && [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("      echo '[shelly] claude: runtime native cooldown active, using APK musl foreground tier' >&2")
             sb.appendLine("    fi")
@@ -2560,12 +2605,12 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  fi")
             sb.appendLine("  echo \"\$__shelly_runtime_now\" > \"\$__shelly_runtime_quick_marker\"")
             sb.appendLine("}")
-            sb.appendLine("if [ \"\${SHELLY_AUTO_UPDATE_CLIS:-0}\" = \"1\" ] && [ \$(( __shelly_runtime_now - __shelly_runtime_last_quick )) -ge \$__shelly_runtime_quick_interval ]; then")
+            sb.appendLine("if [ \"\${SHELLY_AUTO_UPDATE_RUNTIMES:-1}\" = \"1\" ] && [ \$(( __shelly_runtime_now - __shelly_runtime_last_quick )) -ge \$__shelly_runtime_quick_interval ]; then")
             sb.appendLine("  ( __shelly_runtime_quick_check & )")
             sb.appendLine("fi")
             // Original 24h gate kept as belt-and-suspenders fallback for offline
             // pathology (every quick-check fetch failed all day).
-            sb.appendLine("if [ \"\${SHELLY_AUTO_UPDATE_CLIS:-0}\" = \"1\" ] && [ \$(( __shelly_runtime_now - __shelly_runtime_last_update )) -ge \$__shelly_runtime_update_interval ]; then")
+            sb.appendLine("if [ \"\${SHELLY_AUTO_UPDATE_RUNTIMES:-1}\" = \"1\" ] && [ \$(( __shelly_runtime_now - __shelly_runtime_last_update )) -ge \$__shelly_runtime_update_interval ]; then")
             sb.appendLine("  ( __shelly_bg_runtime_update & )")
             sb.appendLine("fi")
             sb.appendLine()
