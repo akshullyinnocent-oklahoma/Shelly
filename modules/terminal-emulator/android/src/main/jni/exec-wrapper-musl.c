@@ -274,6 +274,7 @@ int posix_spawn(pid_t *pid, const char *path,
                 const posix_spawn_file_actions_t *file_actions,
                 const posix_spawnattr_t *attrp,
                 char *const argv[], char *const envp[]) {
+    if (env_value(envp, "SHELLY_MUSL_DISABLE_POSIX_SPAWN=")) return ENOSYS;
     if (file_actions || attrp) return ENOSYS;
 
     long child = raw_syscall5(__NR_clone, SIGCHLD, 0, 0, 0, 0);

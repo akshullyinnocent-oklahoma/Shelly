@@ -6,7 +6,6 @@
  */
 #define _GNU_SOURCE
 #include <errno.h>
-#include <signal.h>
 #include <spawn.h>
 #include <stddef.h>
 #include <unistd.h>
@@ -30,12 +29,6 @@
 #endif
 #ifndef __NR_read
 #define __NR_read 63
-#endif
-#ifndef __NR_exit_group
-#define __NR_exit_group 94
-#endif
-#ifndef __NR_clone
-#define __NR_clone 220
 #endif
 #ifndef __NR_execve
 #define __NR_execve 221
@@ -69,17 +62,6 @@ static long raw_syscall4(long nr, long a0, long a1, long a2, long a3) {
     return x0;
 }
 
-static long raw_syscall5(long nr, long a0, long a1, long a2, long a3, long a4) {
-    register long x8 asm("x8") = nr;
-    register long x0 asm("x0") = a0;
-    register long x1 asm("x1") = a1;
-    register long x2 asm("x2") = a2;
-    register long x3 asm("x3") = a3;
-    register long x4 asm("x4") = a4;
-    asm volatile("svc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x8) : "memory");
-    return x0;
-}
-
 static int finish_syscall(long ret) {
     if (ret < 0) return -1;
     return (int)ret;
@@ -99,11 +81,6 @@ static long raw_read_call(int fd, void *buf, size_t count) {
 
 static void raw_close_call(int fd) {
     raw_syscall1(__NR_close, fd);
-}
-
-static void raw_exit_group(int status) {
-    raw_syscall1(__NR_exit_group, status);
-    for (;;) {}
 }
 
 static int streq(const char *a, const char *b) {
@@ -239,24 +216,33 @@ int posix_spawn(pid_t *pid, const char *path,
                 const posix_spawn_file_actions_t *file_actions,
                 const posix_spawnattr_t *attrp,
                 char *const argv[], char *const envp[]) {
-    if (file_actions || attrp) return ENOSYS;
-
-    long child = raw_syscall5(__NR_clone, SIGCHLD, 0, 0, 0, 0);
-    if (child < 0) return (int)-child;
-    if (child == 0) {
-        execve(path, argv, envp);
-        raw_exit_group(127);
-    }
-
-    if (pid) *pid = (pid_t)child;
-    return 0;
+    (void)pid;
+    (void)path;
+    (void)file_actions;
+    (void)attrp;
+    (void)argv;
+    (void)envp;
+    /*
+     * Do not emulate posix_spawn here. The previous fast path used
+     * clone(SIGCHLD, NULL stack, ...), which is not a valid fork substitute on
+     * Android/aarch64 and can crash callers that pass NULL actions/attrs.
+     * Returning ENOSYS lets bionic/libuv use its normal fork+exec fallback,
+     * where the execve hook above still performs the linker64 redirection.
+     */
+    return ENOSYS;
 }
 
 int posix_spawnp(pid_t *pid, const char *file,
                  const posix_spawn_file_actions_t *file_actions,
                  const posix_spawnattr_t *attrp,
                  char *const argv[], char *const envp[]) {
-    return posix_spawn(pid, file, file_actions, attrp, argv, envp);
+    (void)pid;
+    (void)file;
+    (void)file_actions;
+    (void)attrp;
+    (void)argv;
+    (void)envp;
+    return ENOSYS;
 }
 
 int execvp(const char *file, char *const argv[]) {
