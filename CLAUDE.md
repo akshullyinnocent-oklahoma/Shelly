@@ -6,6 +6,8 @@
 
 **[docs/superpowers/DEFERRED.md](./docs/superpowers/DEFERRED.md)** — 後回しリストの唯一の真実の情報源。
 
+**[docs/superpowers/specs/2026-05-13-v119-claude-native-auth-crash-handoff.md](./docs/superpowers/specs/2026-05-13-v119-claude-native-auth-crash-handoff.md)** — 2026-05-13 時点の最新引き継ぎ。v119 で Claude Code の native TUI 描画は通ったが、`/login` 後の workspace trust/onboarding で Bun SEA が `Segmentation fault at address 0x10` になる。次セッションはこのファイルを読んでから v120 修正に入る。
+
 このファイルには「将来実装する」「次リリースで対応」「意図的に descope した」と判断されたすべての項目が、理由と優先度 (P0/P1/P2/P3) 付きで登録されている。過去に README との不整合や機能取りこぼしが発生した反省から 2026-04-14 に導入。
 
 **ルール**:
