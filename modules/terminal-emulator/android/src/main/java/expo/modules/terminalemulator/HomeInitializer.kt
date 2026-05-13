@@ -76,9 +76,10 @@ function patchGemini() {
   // files (for example interactiveCli-*.js and gemini.js). Scan every
   // bundle-root JS file so upstream filename churn cannot silently bypass
   // the Android patches.
-  const files = fs.readdirSync(d).filter(f => f.endsWith(".js") && fs.statSync(d + "/" + f).isFile());
+  const files = fs.readdirSync(d, { withFileTypes: true }).filter(e => e.isFile() && e.name.endsWith(".js")).map(e => e.name);
   let termuxPatched = 0, shellPatched = 0, commandExistsPatched = 0, oauthConsentPatched = 0, capabilityPatched = 0;
   let postShellPresent = 0, postCommandExistsPresent = 0, postOauthConsentPresent = 0, postCapabilityPresent = 0, termuxGuardPresent = 0;
+  let shellTrueRemaining = 0, commandExistsRemaining = 0, oauthConsentRemaining = 0, capabilityRemaining = 0;
   for (const f of files) {
     const p = d + "/" + f;
     let s = fs.readFileSync(p, "utf8");
@@ -144,9 +145,13 @@ function patchGemini() {
     if (s.includes('const userConsent = true;')) postOauthConsentPresent++;
     if (s.includes('SHELLY_SKIP_GEMINI_CAPABILITY_DETECT === "1"')) postCapabilityPresent++;
     if (s.includes("You need to install Termux")) termuxGuardPresent++;
+    if (s.match(/shell:\s*true[,}]/)) shellTrueRemaining++;
+    if (s.match(/execSync\(getCommandExistsCmd\(cmd\),\s*\{\s*stdio:\s*"ignore"\s*\}\)/)) commandExistsRemaining++;
+    if (s.match(/const userConsent = await getConsentForOauth\(""\);\n\s*if \(!userConsent\) \{/)) oauthConsentRemaining++;
+    if (s.match(capabilityRe) && !s.includes("SHELLY_SKIP_GEMINI_CAPABILITY_DETECT")) capabilityRemaining++;
   }
-  if (termuxGuardPresent !== 0 || postShellPresent === 0 || postCommandExistsPresent === 0 || postOauthConsentPresent === 0 || postCapabilityPresent === 0) {
-    throw new Error("[patch] gemini drift: expected bundle markers missing at " + d + " termuxGuard=" + termuxGuardPresent + " shell=" + postShellPresent + " commandExists=" + postCommandExistsPresent + " oauthConsent=" + postOauthConsentPresent + " capability=" + postCapabilityPresent + " files=" + files.length);
+  if (termuxGuardPresent !== 0 || shellTrueRemaining !== 0 || commandExistsRemaining !== 0 || oauthConsentRemaining !== 0 || capabilityRemaining !== 0 || postShellPresent === 0 || postCommandExistsPresent === 0 || postOauthConsentPresent === 0 || postCapabilityPresent === 0) {
+    throw new Error("[patch] gemini drift: expected bundle markers missing or known unpatched patterns remain at " + d + " termuxGuard=" + termuxGuardPresent + " shell=" + postShellPresent + "/" + shellTrueRemaining + " commandExists=" + postCommandExistsPresent + "/" + commandExistsRemaining + " oauthConsent=" + postOauthConsentPresent + "/" + oauthConsentRemaining + " capability=" + postCapabilityPresent + "/" + capabilityRemaining + " files=" + files.length);
   }
   console.log("[patch] gemini termux=" + termuxPatched + " shellTrue=" + shellPatched + " commandExists=" + commandExistsPatched + " oauthConsent=" + oauthConsentPatched + " capability=" + capabilityPatched + " /" + files.length + " files (at " + d + ")");
 }
@@ -953,7 +958,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 135: Gemini 0.42 moved entry/TUI code outside chunk-* and gemini-*
     //      bundle files. Scan every bundle-root JS file and fail/stamp only
     //      when the expected Android patch markers are actually present.
-    private const val BASHRC_VERSION = 135
+    // 136: Treat Gemini patch drift as fatal for runtime updates and launch.
+    //      A clean `--version` is not enough if shell/OAuth/TUI patch markers
+    //      are missing; do not promote or run a half-patched runtime tree.
+    private const val BASHRC_VERSION = 136
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2450,7 +2458,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  if [ -f \"\$HOME/.shelly-patcher.js\" ] && [ -d \"\$__gemini_base/bundle\" ]; then")
             sb.appendLine("    local __gemini_nm_root=\"\$(dirname \"\$(dirname \"\$__gemini_base\")\")\"")
             sb.appendLine("    local __gemini_patch_log=\"\$HOME/.shelly-cli/patch-gemini.log\"")
-            sb.appendLine("    _run $libDir/node \"\$HOME/.shelly-patcher.js\" gemini \"\$__gemini_nm_root\" >\"\$__gemini_patch_log\" 2>&1 || { [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ] && { echo \"[shelly] gemini patch failed; see \$__gemini_patch_log\" >&2; tail -20 \"\$__gemini_patch_log\" >&2 2>/dev/null; }; }")
+            sb.appendLine("    _run $libDir/node \"\$HOME/.shelly-patcher.js\" gemini \"\$__gemini_nm_root\" >\"\$__gemini_patch_log\" 2>&1 || { echo \"[shelly] gemini patch failed; see \$__gemini_patch_log\" >&2; tail -20 \"\$__gemini_patch_log\" >&2 2>/dev/null; return 1; }")
             sb.appendLine("  fi")
             sb.appendLine("  if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("    if [ \"\$__gemini_base\" = \"\$__gemini_runtime_base\" ]; then")
@@ -2891,7 +2899,12 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             //    (bug #76, #77, #96 — see earlier BASHRC_VERSION entries).
             //    Both are idempotent: safe to re-run on already-patched files.
             sb.appendLine("  _run $libDir/node \"\$HOME/.shelly-patcher.js\" codex \"$libDir\" \"\$__staging/node_modules\" || true")
-            sb.appendLine("  _run $libDir/node \"\$HOME/.shelly-patcher.js\" gemini \"\$__staging/node_modules\" || true")
+            sb.appendLine("  if ! _run $libDir/node \"\$HOME/.shelly-patcher.js\" gemini \"\$__staging/node_modules\"; then")
+            sb.appendLine("    echo '[install] gemini patch FAILED; refusing to promote staging' >&2")
+            sb.appendLine("    chmod -R u+w \"\$__staging\" 2>/dev/null || true")
+            sb.appendLine("    rm -rf \"\$__staging\"")
+            sb.appendLine("    return 1")
+            sb.appendLine("  fi")
             // Legacy cli.js compatibility patch. Latest Claude packages often
             // do not contain cli.js; the patcher logs and no-ops in that case.
             sb.appendLine("  _run $libDir/node \"\$HOME/.shelly-patcher.js\" claude \"\$__staging/node_modules\" || true")
