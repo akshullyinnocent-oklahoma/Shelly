@@ -42,6 +42,7 @@ import { useSettingsStore } from '@/store/settings-store';
 import { VoiceChat } from '@/components/VoiceChat';
 import { colors as C, fonts as F, sizes as S } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
+import { isAiPaneAgent, pickDefaultAiPaneAgent } from '@/lib/ai-pane-agents';
 
 // ─── Streaming Indicator ─────────────────────────────────────────────────────
 
@@ -305,15 +306,12 @@ export default function AIPane() {
   const initialised = useRef(false);
   if (!initialised.current) {
     useAIPaneStore.getState().getOrCreate(paneId);
-    if (!usePaneStore.getState().paneAgents[paneId]) {
-      // Pick the first configured API provider. Claude Code remains a
-      // Terminal CLI, not an AI Pane/background backend.
+    const currentAgent = usePaneStore.getState().paneAgents[paneId];
+    if (!isAiPaneAgent(currentAgent)) {
+      // AI Pane/background uses API providers only. Claude Code and Codex
+      // remain foreground Terminal CLIs with their own official auth flows.
       const s = useSettingsStore.getState().settings;
-      const pick =
-        s.cerebrasApiKey ? 'cerebras' :
-        s.groqApiKey     ? 'groq' :
-        'gemini';
-      usePaneStore.getState().bindAgent(paneId, pick);
+      usePaneStore.getState().bindAgent(paneId, pickDefaultAiPaneAgent(s));
     }
     initialised.current = true;
   }

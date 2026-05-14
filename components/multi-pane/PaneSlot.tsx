@@ -18,6 +18,7 @@ import { neonTextGlow } from '@/lib/neon-glow';
 import { colors as C, fonts as F, sizes as S, padding as P, radii as R } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
+import { getEnabledAiPaneAgents, isAiPaneAgent } from '@/lib/ai-pane-agents';
 
 const ZERO_INSETS = { top: 0, right: 0, bottom: 0, left: 0 };
 
@@ -62,6 +63,8 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
   const entry = PANE_REGISTRY[tab];
   const agentColor = usePaneStore((s) => getAgentColor(s.paneAgents, leafId));
   const boundAgent = usePaneStore((s) => s.paneAgents[leafId] ?? null);
+  const aiPaneAgent = isAiPaneAgent(boundAgent) ? boundAgent : null;
+  const aiPaneAgentColor = aiPaneAgent ? (AGENT_COLORS[aiPaneAgent] ?? AGENT_COLORS.unbound) : AGENT_COLORS.unbound;
   const { bindAgent } = usePaneStore();
   const focusedPaneId = usePaneStore((s) => s.focusedPaneId);
   const { setFocusedPane } = usePaneStore();
@@ -220,14 +223,14 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
           </View>
         ) : tab === 'ai' ? (
           <Pressable
-            style={[styles.agentBadge, { borderColor: agentColor + '66', backgroundColor: agentColor + '14' }]}
+            style={[styles.agentBadge, { borderColor: aiPaneAgentColor + '66', backgroundColor: aiPaneAgentColor + '14' }]}
             onPress={() => setAgentMenuVisible(true)}
             hitSlop={6}
             accessibilityLabel="Switch agent"
           >
-            <View style={[styles.agentBadgeDot, { backgroundColor: agentColor }]} />
+            <View style={[styles.agentBadgeDot, { backgroundColor: aiPaneAgentColor }]} />
             <Text style={styles.agentBadgeLabel} numberOfLines={1}>
-              {boundAgent ? boundAgent.toUpperCase() : 'AGENT'}
+              {aiPaneAgent ? aiPaneAgent.toUpperCase() : 'AGENT'}
             </Text>
             <MaterialIcons name="arrow-drop-down" size={12} color={C.text2} />
           </Pressable>
@@ -318,7 +321,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
           visible={agentMenuVisible}
           onClose={() => setAgentMenuVisible(false)}
           teamMembers={teamMembers}
-          boundAgent={boundAgent}
+          boundAgent={aiPaneAgent}
           onSelect={(key) => {
             bindAgent(leafId, key);
             setAgentMenuVisible(false);
@@ -425,9 +428,7 @@ function AgentMenu({
 }) {
   if (!visible) return null;
 
-  const agents = Object.entries(teamMembers)
-    .filter(([, enabled]) => enabled)
-    .map(([key]) => key);
+  const agents = getEnabledAiPaneAgents(teamMembers);
 
   return (
     <Pressable style={menuStyles.backdrop} onPress={onClose}>
