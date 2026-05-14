@@ -1,5 +1,5 @@
 {
-  "version": "5.3.0",
+  "version": "5.3.1",
   "generatedAt": "2026-05-14",
   "totalFeatures": 91,
   "categories": [
@@ -15,7 +15,7 @@
     {
       "name": "Chat & AI",
       "features": [
-        {"id": "multi-ai-router", "name": "マルチAIルーター", "description": "@mentionで13種類のAI/ツールを使い分け", "usage": "@claude, @gemini, @local, @perplexity, @team, @git, @agent, @plan, @arena, @codex, @cerebras, @open, @actions"},
+        {"id": "multi-ai-router", "name": "マルチAIルーター", "description": "@mentionでAPIプロバイダーと支援ツールを使い分け", "usage": "@gemini, @local, @perplexity, @team, @git, @agent, @plan, @arena, @cerebras, @groq, @open, @actions"},
         {"id": "chat-bubbles", "name": "チャットバブル", "description": "Markdown・コードブロック・実行ボタン付きリッチメッセージ", "usage": "チャット画面でメッセージ送信"},
         {"id": "message-editing", "name": "メッセージ編集", "description": "送信済みメッセージを編集して再生成", "usage": "メッセージを長押し → 編集"},
         {"id": "chat-onboarding", "name": "チャットオンボーディング", "description": "初回利用時に@mentionの使い方チュートリアル", "usage": "初回チャット画面表示時に自動"},

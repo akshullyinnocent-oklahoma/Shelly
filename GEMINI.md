@@ -22,7 +22,7 @@ Layout: AgentBar (top) + Sidebar (left) + PaneContainer (center, up to 4 panes) 
 
 ## Gemini Release Status (2026-05-14)
 
-Gemini API is supported in AI Pane/background flows when the user configures a Gemini API key. The interactive Gemini CLI is Experimental for v5.3.0.
+Gemini API is supported in AI Pane/background flows when the user configures a Gemini API key. The interactive Gemini CLI is Experimental for v5.3.1.
 
 Known device findings:
 

@@ -6,7 +6,7 @@
 
 **[docs/superpowers/DEFERRED.md](./docs/superpowers/DEFERRED.md)** — 後回しリストの唯一の真実の情報源。
 
-**[docs/superpowers/specs/2026-05-14-release-cli-surface-handoff.md](./docs/superpowers/specs/2026-05-14-release-cli-surface-handoff.md)** — 2026-05-14 時点の最新引き継ぎ。v5.3.0 の release surface は Claude Code CLI / Codex CLI を正式対応、Gemini CLI を Experimental、AI Pane / background を明示的 API provider 経路に整理済み。
+**[docs/superpowers/specs/2026-05-14-release-cli-surface-handoff.md](./docs/superpowers/specs/2026-05-14-release-cli-surface-handoff.md)** — 2026-05-14 時点の最新引き継ぎ。v5.3.1 の release surface は Claude Code CLI / Codex CLI を正式対応、Gemini CLI を Experimental、AI Pane / background を明示的 API provider 経路に整理済み。
 
 このファイルには「将来実装する」「次リリースで対応」「意図的に descope した」と判断されたすべての項目が、理由と優先度 (P0/P1/P2/P3) 付きで登録されている。過去に README との不整合や機能取りこぼしが発生した反省から 2026-04-14 に導入。
 
@@ -36,7 +36,8 @@
 - **設定**: ConfigTUI（歯車ボタン or `shelly config`）— 設定タブは廃止済み
 - **Storage**: `MANAGE_EXTERNAL_STORAGE` を取得して `/sdcard` 直接読み書き（bug #92）。初回起動時に `lib/first-launch-setup.ts` が Intent 経由で権限を要求
 - **Paste 経路**: すべてのペースト（IME commitText / middle-click / CommandKeyBar Paste）は `TerminalView.pasteViaEmulator()` に集約、`TerminalEmulator.paste()` が DECSET 2004 状態で分岐: (a) bracketed-paste mode 有効 (readline guest) → `\C-x\C-b` (0x18 0x02) + payload + `\e[201~`。`\C-x\C-b` は .bashrc で emacs / vi-insert / vi-command 全 keymap に `bracketed-paste-begin` を bind、END 側の ESC は関数内の直接 read で preserve される。(b) bracketed-paste mode 無効 (vim/less/nano 等 TUI) → `\r?\n → \r` fallback で各行を個別 Enter として送信（bug #91 / #94 / #97）
-- **AI CLIs**: v5.3.0 の正式 CLI surface は Claude Code と Codex。Shelly 管理 updater が staging に取得し、`--version` probe を通したものだけを live/current に昇格する。Claude/Codex runtime は `~/.shelly-runtime/*/current` と `$HOME/bin` wrapper で管理する。Gemini CLI は bundle/patched investigation 用の Experimental 扱いで、Worktrees / Quick Launch には出さない。Gemini は AI Pane/background の API provider として使う。
+- **AI CLIs**: v5.3.1 の正式 CLI surface は Claude Code と Codex。Shelly 管理 updater が staging に取得し、`--version` probe を通したものだけを live/current に昇格する。Claude/Codex runtime は `~/.shelly-runtime/*/current` と `$HOME/bin` wrapper で管理する。Gemini CLI は bundle/patched investigation 用の Experimental 扱いで、Worktrees / Quick Launch には出さない。Gemini は AI Pane/background の API provider として使う。
+- **Local LLM**: 高品質推奨は Qwen 3 8B Q4_K_M。低メモリ端末では Qwen 2.5 1.5B Q4_K_M を fallback とする。
 - **bash wrapper**: `$HOME/bin/bash` に linker64 経由の shim を配置して `bash script.sh` や `#!/usr/bin/env bash` shebang を動作させる（bug #93）
 
 ---

@@ -14,7 +14,7 @@
 
 ---
 
-## 🟢 現状サマリ (2026-05-14、v5.3.0 release surface)
+## 🟢 現状サマリ (2026-05-14、v5.3.1 release surface)
 
 **リリース判断**: Claude Code CLI / Codex CLI を正式対応、Gemini CLI は Experimental に降格。AI Pane / background agents は Gemini API / Cerebras / Groq / Perplexity / OpenAI-compatible local などの明示的 API provider 経路で提供する。Claude Code subscription/CLI を hidden background worker として使わない。
 
@@ -31,7 +31,7 @@
 ### bug #150 — Gemini CLI interactive TUI promotion blocked
 
 **優先度**: P2  
-**状態**: v5.3.0 release blocker から除外。API route は維持。
+**状態**: v5.3.1 release blocker から除外。API route は維持。
 
 **症状**:
 - Gemini CLI 0.42.x が Android/musl PTY で blank startup / slow response / Shell tool signal 11 を出すことがある。
@@ -43,7 +43,7 @@
 2. fresh install で `gemini` TUI 起動、1往復応答、Shell tool `find` / `ls` / `bash` 実行、失敗後の raw mode 復旧をすべて実機確認。
 3. Worktrees / Quick Launch への復帰は README / AGENTS / CLAUDE / GEMINI / release notes 同期後。
 
-**Why not now**: v5.3.0 の価値は Claude Code + Codex の real Android CLI 体験と API-backed AI Pane にある。Gemini CLI を launch blocker にすると、既に動く主要体験のリリースを遅らせる割に品質保証ができない。
+**Why not now**: v5.3.1 の価値は Claude Code + Codex の real Android CLI 体験、API-backed AI Pane、更新済み Local LLM catalog にある。Gemini CLI を launch blocker にすると、既に動く主要体験のリリースを遅らせる割に品質保証ができない。
 
 ## 🟢 現状サマリ (2026-05-08、BASHRC_VERSION 81、PR #34 + #37 着地)
 

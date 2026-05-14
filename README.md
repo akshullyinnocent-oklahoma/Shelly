@@ -253,7 +253,7 @@ Termux gives you a terminal but no AI-native workspace. ChatGPT gives you AI but
 - **InlineDiff with per-hunk write-back** — see above
 - **Voice input** — long-press the mic in the terminal action bar to open VoiceChat; speech → transcription → AI → TTS response
 - **Arena Mode** — same prompt, two AIs, blind comparison; vote, then reveal
-- **Local LLM support** — point Shelly at a running llama.cpp / llama-server and route via `@local` for fully on-device inference *(server must be started manually; guided setup wizard is planned)*
+- **Local LLM support** — use the built-in GGUF catalog and llama.cpp / llama-server controls, then route via `@local` for fully on-device inference. The high-end recommendation is Qwen3-8B Q4_K_M; Qwen 2.5 1.5B remains the low-memory fallback.
 
 </details>
 
@@ -657,9 +657,9 @@ GitHub Sponsors is also enabled via the "Sponsor" button at the top of this repo
 
 ## Known Limitations
 
-Shelly v5.3.0 is pre-release Android software. Here's what we know isn't perfect yet.
+Shelly v5.3.1 is pre-release Android software. Here's what we know isn't perfect yet.
 
-- **No offline mode by default** — Cloud AI features require an internet connection. Local LLM via `@local` works offline, but you must start the llama.cpp server yourself today.
+- **No offline mode by default** — Cloud AI features require an internet connection. Local LLM via `@local` works offline with the bundled catalog and llama.cpp / llama-server controls; Qwen3-8B Q4_K_M is recommended for high-end foldables, while Qwen 2.5 1.5B is the low-memory option.
 - **Additional tools beyond the bundle** — Shelly ships with bash, Node.js, Python 3, git, curl, sqlite3, tmux, vim, less, jq, make, and the GNU coreutils set. Notable tools **not** bundled include `busybox`, `watch` (procps-ng), `htop`, and most network daemons. If you need them, install Termux alongside Shelly or open a PR adding the binary to `modules/terminal-emulator/android/src/main/jniLibs/`.
 - **`watch` is broken in the current release** — the bundled `watch` binary fails to invoke subcommands under Shelly's bionic environment and the watched command never actually runs, even though the header refreshes. Workaround: `while true; do clear; <cmd>; sleep 1; done`. Tracked as bug #34.
 - **`busybox` is not bundled** — `busybox httpd`, `busybox nc`, and other applets return `command not found`. Use the standalone equivalents where available (`curl`, `nc` from the bundle, `python3 -m http.server`), or bundle `busybox-static` yourself. Tracked as bug #35.
@@ -783,7 +783,7 @@ See [SECURITY.md](./SECURITY.md) for the threat model and private vulnerability 
 
 - **User profile learning** — Shelly observes your command patterns and AI usage to personalize suggestions (`lib/user-profile.ts`). This data stays on-device in AsyncStorage. However, when you send a message to a cloud AI, the profile context is included in the API request to improve response quality. You can disable profile learning in Settings.
 - **No telemetry** — Shelly does not phone home. No analytics, no crash reporting, no usage tracking. The only network traffic is your explicit AI API calls.
-- **Local LLM mode** — For fully private usage, configure a local model (Gemma / Qwen via llama.cpp). All processing stays on-device.
+- **Local LLM mode** — For fully private usage, configure a local GGUF model through llama.cpp. Qwen3-8B Q4_K_M is the recommended high-end model; Qwen 2.5 1.5B is available for low-memory devices. All processing stays on-device.
 
 ---
 

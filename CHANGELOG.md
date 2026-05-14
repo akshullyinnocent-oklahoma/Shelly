@@ -6,6 +6,19 @@ All notable changes to Shelly are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [5.3.1] - 2026-05-14
+
+### Changed
+
+- **Release version bumped to 5.3.1** across Expo config, package metadata,
+  Android versionName/versionCode, and runtimeVersion.
+- **Local LLM catalog refreshed** — Qwen 3 8B Q4_K_M is now the recommended
+  high-quality model for high-end Android/foldable devices, while Qwen 2.5
+  1.5B remains the low-memory fallback.
+- **README and release-surface docs synced** with the supported CLI posture:
+  Claude Code and Codex are the supported foreground CLIs, Gemini CLI remains
+  Experimental, and AI Pane/background automation uses explicit API providers.
+
 ## [5.3.0] - 2026-05-14
 
 ### Added

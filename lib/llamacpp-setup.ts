@@ -75,19 +75,20 @@ export const MODEL_CATALOG: LlamaCppModel[] = [
       'https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf',
   },
   {
-    id: 'qwen3-8b-q3',
+    id: 'qwen3-8b-q4',
     name: 'Qwen 3 8B',
-    description: '高品質。日本語・コード・推論すべて優秀。RAM余裕があるなら。',
-    sizeGb: 4.0,
-    ramRequiredGb: 7.0,
+    description: '推奨・高品質。日本語、コード、クロスペイン補助のバランスが最も良いZ Fold6向けモデル。',
+    sizeGb: 4.7,
+    ramRequiredGb: 6.0,
     language: 'ja',
     useCase: 'balanced',
-    quantization: 'Q3_K_M',
-    huggingFaceRepo: 'unsloth/Qwen3-8B-GGUF',
-    filename: 'Qwen3-8B-Q3_K_M.gguf',
+    quantization: 'Q4_K_M',
+    huggingFaceRepo: 'Qwen/Qwen3-8B-GGUF',
+    filename: 'Qwen3-8B-Q4_K_M.gguf',
     downloadUrl:
-      'https://huggingface.co/unsloth/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q3_K_M.gguf',
-    badge: '高品質',
+      'https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf',
+    recommended: true,
+    badge: '推奨・高品質',
   },
   {
     id: 'qwen2.5-1.5b-q4',
@@ -102,7 +103,7 @@ export const MODEL_CATALOG: LlamaCppModel[] = [
     filename: 'qwen2.5-1.5b-instruct-q4_k_m.gguf',
     downloadUrl:
       'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
-    recommended: true,
+    badge: '軽量',
   },
   {
     id: 'qwen2.5-3b-q4',
