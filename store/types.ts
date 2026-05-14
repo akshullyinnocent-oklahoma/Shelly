@@ -446,6 +446,7 @@ export type AppSettings = {
 
 export type ToolChoice =
   | { type: 'cli'; cli: 'claude' | 'gemini' | 'codex' }
+  | { type: 'gemini-api' }
   | { type: 'local' }
   | { type: 'perplexity' }
   | { type: 'auto' };

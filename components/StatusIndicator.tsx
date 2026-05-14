@@ -22,7 +22,7 @@ function getActiveChat(settings: {
   if (settings.cerebrasApiKey) return { label: 'Cerebras', color: '#A78BFA' };
   if (settings.groqApiKey) return { label: 'Groq', color: '#F97316' };
   if (settings.localLlmEnabled) return { label: 'Local LLM', color: '#60A5FA' };
-  const cli = settings.defaultAgent || 'gemini-cli';
+  const cli = settings.defaultAgent || 'codex';
   const map: Record<string, { label: string; color: string }> = {
     'claude-code': { label: 'Claude', color: '#D4A574' },
     'codex': { label: 'Codex', color: '#4ADE80' },

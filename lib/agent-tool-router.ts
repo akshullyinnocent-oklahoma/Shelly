@@ -40,9 +40,9 @@ export function suggestTool(prompt: string): ToolSuggestion {
   // Priority 2: Code/GitHub
   if (CODE_KEYWORDS.some((kw) => lower.includes(kw))) {
     return {
-      tool: { type: 'cli', cli: 'claude' },
-      label: 'Claude Code CLI',
-      reason: 'Code/GitHub tasks — Claude Code has native GitHub integration',
+      tool: { type: 'cli', cli: 'codex' },
+      label: 'Codex CLI',
+      reason: 'Code/GitHub tasks — Codex is the supported background CLI path',
     };
   }
 
@@ -55,11 +55,11 @@ export function suggestTool(prompt: string): ToolSuggestion {
     };
   }
 
-  // Default: Gemini (free, general-purpose)
+  // Default: Gemini API (free Google AI Studio quota, no fragile TUI/PTY path)
   return {
-    tool: { type: 'cli', cli: 'gemini' },
-    label: 'Gemini CLI',
-    reason: 'General-purpose — Gemini CLI is free and handles most tasks well',
+    tool: { type: 'gemini-api' },
+    label: 'Gemini API',
+    reason: 'General-purpose — Gemini API uses the free Google quota without relying on the experimental CLI',
   };
 }
 
@@ -98,6 +98,8 @@ export function toolChoiceToLabel(tool: ToolChoice): string {
   switch (tool.type) {
     case 'cli':
       return `${tool.cli.charAt(0).toUpperCase()}${tool.cli.slice(1)} CLI`;
+    case 'gemini-api':
+      return 'Gemini API';
     case 'local':
       return 'Local LLM';
     case 'perplexity':

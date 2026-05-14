@@ -145,6 +145,11 @@ export default function PaneCliTabs({ paneSessionId, leafId }: Props = {}) {
       try {
         const { usePaneStore } = require('@/store/pane-store');
         usePaneStore.getState().setFocusedPane(leafId);
+        const mps = useMultiPaneStore.getState();
+        const slotIdx = mps.slots.findIndex((s) => s?.id === leafId);
+        if (slotIdx >= 0 && slotIdx < 4) {
+          mps.focusSlot(slotIdx as 0 | 1 | 2 | 3);
+        }
       } catch {}
     }
     setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 80);

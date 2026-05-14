@@ -580,9 +580,9 @@ function LanguageSection() {
 const DEFAULT_AGENT_OPTIONS: Array<{ value: 'cerebras' | 'groq' | 'gemini-cli' | 'claude-code' | 'codex'; label: string }> = [
   { value: 'cerebras',    label: 'Cerebras' },
   { value: 'groq',        label: 'Groq' },
-  { value: 'gemini-cli',  label: 'Gemini' },
-  { value: 'claude-code', label: 'Claude' },
   { value: 'codex',       label: 'Codex' },
+  { value: 'claude-code', label: 'Claude' },
+  { value: 'gemini-cli',  label: 'Gemini CLI Experimental' },
 ];
 
 function AgentsSection() {
@@ -592,7 +592,7 @@ function AgentsSection() {
   const [pickerOpen, setPickerOpen] = React.useState(false);
 
   const currentLabel =
-    DEFAULT_AGENT_OPTIONS.find((o) => o.value === defaultAgent)?.label ?? 'Gemini';
+    DEFAULT_AGENT_OPTIONS.find((o) => o.value === defaultAgent)?.label ?? 'Codex';
 
   const toggleAutoApprove = () => {
     const next = autoApproveLevel === 'none' ? 'safe' : 'none';

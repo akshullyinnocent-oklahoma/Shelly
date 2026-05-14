@@ -124,10 +124,18 @@ function generateToolCommand(tool: ToolChoice, escapedPrompt: string): string {
   const resultVar = '"$RESULT_FILE"';
   switch (tool.type) {
     case 'cli':
-      return `timeout "$TIMEOUT" ${tool.cli} --print '${escapedPrompt}' > ${resultVar} 2>&1 || true`;
+      if (tool.cli === 'claude') {
+        return `echo 'Claude Code is available in Terminal only. Background Claude execution is disabled.' > ${resultVar}`;
+      }
+      if (tool.cli === 'codex') {
+        return `timeout "$TIMEOUT" codex exec '${escapedPrompt}' > ${resultVar} 2>&1 || true`;
+      }
+      return `echo 'Gemini CLI is experimental in Shelly. Use Gemini API for background agents.' > ${resultVar}`;
+    case 'gemini-api':
+      return geminiApiCommand(escapedPrompt, resultVar);
     case 'local':
       return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
-echo '${escapedPrompt}' > "$PROMPT_FILE"
+printf '%s' '${escapedPrompt}' > "$PROMPT_FILE"
 PROMPT_JSON=$(jq -Rs '.' < "$PROMPT_FILE")
 timeout "$TIMEOUT" curl -s http://127.0.0.1:8080/v1/chat/completions \\
   -H "Content-Type: application/json" \\
@@ -136,7 +144,7 @@ timeout "$TIMEOUT" curl -s http://127.0.0.1:8080/v1/chat/completions \\
 rm -f "$PROMPT_FILE"`;
     case 'perplexity':
       return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
-echo '${escapedPrompt}' > "$PROMPT_FILE"
+printf '%s' '${escapedPrompt}' > "$PROMPT_FILE"
 PROMPT_JSON=$(jq -Rs '.' < "$PROMPT_FILE")
 timeout "$TIMEOUT" curl -s https://api.perplexity.ai/chat/completions \\
   -H "Authorization: Bearer $PERPLEXITY_API_KEY" \\
@@ -145,8 +153,31 @@ timeout "$TIMEOUT" curl -s https://api.perplexity.ai/chat/completions \\
   | jq -r '.choices[0].message.content // "Error: no response"' > ${resultVar} 2>&1 || true
 rm -f "$PROMPT_FILE"`;
     case 'auto':
-      return `timeout "$TIMEOUT" gemini --print '${escapedPrompt}' > ${resultVar} 2>&1 || true`;
+      return `if [ -n "\${GEMINI_API_KEY:-}" ]; then
+  ${geminiApiCommand(escapedPrompt, resultVar)}
+elif command -v codex >/dev/null 2>&1; then
+  timeout "$TIMEOUT" codex exec '${escapedPrompt}' > ${resultVar} 2>&1 || true
+else
+  echo 'No background agent backend is configured. Add a Gemini API key or use Codex in Terminal.' > ${resultVar}
+fi`;
   }
+}
+
+function geminiApiCommand(escapedPrompt: string, resultVar: string): string {
+  return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
+printf '%s' '${escapedPrompt}' > "$PROMPT_FILE"
+PROMPT_JSON=$(jq -Rs '.' < "$PROMPT_FILE")
+MODEL="\${GEMINI_MODEL:-gemini-2.0-flash}"
+if [ -z "\${GEMINI_API_KEY:-}" ]; then
+  echo 'Gemini API key is not set. Add it in Settings before running background agents.' > ${resultVar}
+else
+  timeout "$TIMEOUT" curl -s "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent" \\
+    -H "Content-Type: application/json" \\
+    -H "x-goog-api-key: $GEMINI_API_KEY" \\
+    -d "{\\"contents\\":[{\\"role\\":\\"user\\",\\"parts\\":[{\\"text\\":$PROMPT_JSON}]}],\\"generationConfig\\":{\\"maxOutputTokens\\":4096,\\"temperature\\":0.7}}" \\
+    | jq -r '.candidates[0].content.parts[]?.text // empty' > ${resultVar} 2>&1 || true
+fi
+rm -f "$PROMPT_FILE"`;
 }
 
 export function getScriptPath(agentId: string): string {

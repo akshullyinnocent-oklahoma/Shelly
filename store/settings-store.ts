@@ -12,6 +12,10 @@ import { logInfo, logError } from '@/lib/debug-logger';
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   fontSize: 14,
   lineHeight: 1.4,
@@ -30,20 +34,20 @@ export const DEFAULT_SETTINGS: AppSettings = {
   groqModel: 'llama-3.3-70b-versatile',
   perplexityApiKey: '',
   teamMembers: {
-    claude: true,
+    claude: false,
     gemini: true,
-    codex: false,
+    codex: true,
     cerebras: true,
     groq: true,
     perplexity: true,
     local: true,
   },
-  teamFacilitatorPriority: ['local', 'claude', 'gemini', 'codex', 'perplexity'],
+  teamFacilitatorPriority: ['gemini', 'codex', 'perplexity', 'local', 'claude'],
   enableCommandSafety: true,
   safetyConfirmLevel: 'HIGH' as const,
   experienceMode: 'learning' as const,
   autoApproveLevel: 'safe' as const,
-  defaultAgent: 'gemini-cli' as const,
+  defaultAgent: 'codex' as const,
   realtimeTranslateEnabled: false,
   llmInterpreterEnabled: false,
   externalKeyboardShortcuts: false,
@@ -107,11 +111,24 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           saveApiKey(key, value);
         }
       }
-      // Sync Perplexity API key to .env for headless agent execution
+      // Sync API settings to .env for headless/background agent execution.
+      const envUpdates: Array<[string, string]> = [];
       if ('perplexityApiKey' in newSettings && typeof newSettings.perplexityApiKey === 'string') {
-        const envKey = 'PERPLEXITY_API_KEY';
-        const value = newSettings.perplexityApiKey;
-        const cmd = `mkdir -p ~/.shelly/agents && (grep -v "^${envKey}=" ~/.shelly/agents/.env 2>/dev/null || true; echo "${envKey}=${value}") > ~/.shelly/agents/.env.tmp && mv ~/.shelly/agents/.env.tmp ~/.shelly/agents/.env && chmod 600 ~/.shelly/agents/.env`;
+        envUpdates.push(['PERPLEXITY_API_KEY', newSettings.perplexityApiKey]);
+      }
+      if ('geminiApiKey' in newSettings && typeof newSettings.geminiApiKey === 'string') {
+        envUpdates.push(['GEMINI_API_KEY', newSettings.geminiApiKey]);
+      }
+      if ('geminiModel' in newSettings && typeof newSettings.geminiModel === 'string') {
+        envUpdates.push(['GEMINI_MODEL', newSettings.geminiModel]);
+      }
+      if (envUpdates.length > 0) {
+        const keys = envUpdates.map(([key]) => key);
+        const grepPattern = keys.map((key) => `^${key}=`).join('|');
+        const lines = envUpdates
+          .map(([key, value]) => `printf '%s\\n' ${shQuote(`${key}=${value}`)}`)
+          .join('; ');
+        const cmd = `mkdir -p ~/.shelly/agents && (grep -Ev '${grepPattern}' ~/.shelly/agents/.env 2>/dev/null || true; ${lines}) > ~/.shelly/agents/.env.tmp && mv ~/.shelly/agents/.env.tmp ~/.shelly/agents/.env && chmod 600 ~/.shelly/agents/.env`;
         useAgentStore.getState().setPendingEnvSync(cmd);
       }
       // Sync sound store with settings

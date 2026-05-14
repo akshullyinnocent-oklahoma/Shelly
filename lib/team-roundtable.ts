@@ -3,14 +3,14 @@
  *
  * @team Table — 複数AIエージェント合議機能
  *
- * 複数AIエージェント（Claude/Gemini/Codex CLI + Perplexity API + Local LLM）に
+ * 複数AIエージェント（Gemini API + Codex CLI + Perplexity API + Local LLM）に
  * 同じプロンプトを並列投げし、ファシリテーターAIが統合サマリーを生成する。
  *
  * 設計方針:
- * - CLI経由（Claude/Gemini/Codex）: サブスクリプション活用、追加課金なし
- * - API経由（Perplexity/Gemini API）: 最新情報・ソース担保
+ * - CLI経由（Codex、明示時のみClaude）: Terminal向けCLIを活用
+ * - API経由（Gemini/Perplexity）: free quota と安定したbackground実行
  * - Local LLM: ファシリ優先候補、オフライン動作
- * - ファシリ自動選択: Local LLM → Claude → Gemini → Codex → Perplexity
+ * - ファシリ自動選択: Gemini API → Cerebras/Groq → Codex → Perplexity → Local
  * - 各回答が返ってきた順にコールバックで通知（ストリーミング的UI）
  */
 
@@ -75,17 +75,14 @@ export interface TeamSettings {
 }
 
 export const DEFAULT_TEAM_SETTINGS: TeamSettings = {
-  claudeEnabled: true,
+  claudeEnabled: false,
   geminiEnabled: true,
-  codexEnabled: false,
+  codexEnabled: true,
   perplexityEnabled: true,
   localEnabled: true,
   cerebrasEnabled: true,
   groqEnabled: true,
-  // Facilitator picks: Cerebras is both fast and smart (Qwen3-235B) so
-  // it sits near the top; groq is a fine secondary reasoner. Local LLM
-  // only wins when nothing cloud-side is configured.
-  facilitatorPriority: ['cerebras', 'groq', 'claude', 'gemini', 'codex', 'perplexity', 'local'],
+  facilitatorPriority: ['gemini', 'cerebras', 'groq', 'codex', 'perplexity', 'local', 'claude'],
   codexCmd: 'codex',
   claudeCmd: 'claude',
   geminiCmd: 'gemini',
@@ -112,7 +109,7 @@ export function buildTeamMembers(settings: TeamSettings): TeamMemberConfig[] {
       label: 'Gemini',
       color: '#3B82F6',
       emoji: '🔵',
-      mode: 'cli',
+      mode: 'api',
       enabled: settings.geminiEnabled,
     },
     {
@@ -207,17 +204,32 @@ export async function runTeamMember(
     let response = '';
 
     if (member.mode === 'cli') {
-      // CLI経由: claude/gemini/codex コマンドを実行
+      // CLI経由: codex コマンドを実行。Claude は明示設定時だけ使う。
       const cmdMap: Record<string, string> = {
         claude: opts.teamSettings.claudeCmd,
-        gemini: opts.teamSettings.geminiCmd,
         codex: opts.teamSettings.codexCmd,
       };
       const cmd = cmdMap[member.id] ?? member.id;
       // プロンプトをシングルクォートでエスケープ
       const escapedPrompt = prompt.replace(/'/g, "'\\''");
-      const fullCmd = `${cmd} -p '${escapedPrompt}' 2>&1 | head -200`;
+      const fullCmd = member.id === 'codex'
+        ? `${cmd} exec '${escapedPrompt}' 2>&1 | head -200`
+        : `${cmd} -p '${escapedPrompt}' 2>&1 | head -200`;
       response = await opts.runCommand(fullCmd);
+    } else if (member.id === 'gemini') {
+      if (!opts.geminiApiKey) {
+        throw new Error('Gemini APIキーが設定されていません');
+      }
+      const { geminiChatStream, GEMINI_DEFAULT_MODEL } = await import('@/lib/gemini');
+      let accumulated = '';
+      const result = await geminiChatStream(
+        opts.geminiApiKey,
+        prompt,
+        (chunk: string) => { accumulated += chunk; },
+        opts.geminiModel ?? GEMINI_DEFAULT_MODEL,
+      );
+      if (!result.success && result.error) throw new Error(result.error);
+      response = accumulated || result.content || '';
     } else if (member.id === 'perplexity') {
       // Perplexity API経由
       if (!opts.perplexityApiKey) {
@@ -384,15 +396,28 @@ Reply in English.`;
     } else if (facilitator.mode === 'cli') {
       const cmdMap: Record<string, string> = {
         claude: opts.teamSettings.claudeCmd,
-        gemini: opts.teamSettings.geminiCmd,
         codex: opts.teamSettings.codexCmd,
       };
       const cmd = cmdMap[facilitator.id] ?? facilitator.id;
       const escapedPrompt = facilitatorPrompt.replace(/'/g, "'\\''");
-      const fullCmd = `${cmd} -p '${escapedPrompt}' 2>&1 | head -300`;
+      const fullCmd = facilitator.id === 'codex'
+        ? `${cmd} exec '${escapedPrompt}' 2>&1 | head -300`
+        : `${cmd} -p '${escapedPrompt}' 2>&1 | head -300`;
       const result = await opts.runCommand(fullCmd);
       opts.onChunk?.(result);
       return result;
+    } else if (facilitator.id === 'gemini') {
+      if (!opts.geminiApiKey) throw new Error('Gemini APIキーなし');
+      const { geminiChatStream, GEMINI_DEFAULT_MODEL } = await import('@/lib/gemini');
+      let geminiFacili = '';
+      const result = await geminiChatStream(
+        opts.geminiApiKey,
+        facilitatorPrompt,
+        (text) => { geminiFacili += text; opts.onChunk?.(text); },
+        opts.geminiModel ?? GEMINI_DEFAULT_MODEL,
+      );
+      if (!result.success && result.error) throw new Error(result.error);
+      return geminiFacili || result.content || '';
     } else if (facilitator.id === 'perplexity') {
       if (!opts.perplexityApiKey) throw new Error('Perplexity APIキーなし');
       const { perplexitySearchStream } = await import('@/lib/perplexity');

@@ -18,26 +18,23 @@ import { SidebarSection } from './SidebarSection';
 import { colors as C, fonts as F, padding as P, radii as R } from '@/theme.config';
 import { neonGlowSky } from '@/lib/neon-glow';
 
-type Cli = 'claude' | 'codex' | 'gemini';
+type Cli = 'claude' | 'codex';
 
-// Anthropic Claude brand: warm copper/orange (#CC785C). Codex green and
-// Gemini blue match each project's primary brand identity.
+// Anthropic Claude brand: warm copper/orange (#CC785C). Codex green matches
+// OpenAI's primary brand identity.
 const CLI_COLORS: Record<Cli, string> = {
   claude: '#CC785C',
   codex: '#22C55E',
-  gemini: '#60A5FA',
 };
 
 const CLI_EMOJI: Record<Cli, string> = {
   claude: '🟠',
   codex: '🟢',
-  gemini: '🔵',
 };
 
 const CLI_LABEL: Record<Cli, string> = {
   claude: 'Claude',
   codex: 'Codex',
-  gemini: 'Gemini',
 };
 
 type Props = {
@@ -55,8 +52,8 @@ export function QuickLaunchSection({ isOpen, onToggle, iconsOnly }: Props) {
       if (result !== null) return; // useAddPane already alerted
       const sessionId = useTerminalStore.getState().activeSessionId;
       // The shell function name on the user's $PATH matches the cli token
-      // (claude/codex/gemini are all bashrc-defined functions in
-      // HomeInitializer.kt). Trailing newline so bash auto-runs it the
+      // (claude/codex are bashrc-defined functions in HomeInitializer.kt).
+      // Trailing newline so bash auto-runs it the
       // moment the new pane's TerminalPane effect picks the command up.
       useTerminalStore.getState().insertCommand(`${cli}\n`, sessionId);
     },
@@ -74,7 +71,7 @@ export function QuickLaunchSection({ isOpen, onToggle, iconsOnly }: Props) {
       glow={neonGlowSky}
     >
       <View style={styles.row}>
-        {(['claude', 'codex', 'gemini'] as const).map((cli) => (
+        {(['claude', 'codex'] as const).map((cli) => (
           <Pressable
             key={cli}
             style={[styles.chip, { borderColor: CLI_COLORS[cli] }]}

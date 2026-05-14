@@ -20,7 +20,6 @@ import { groqChatStream, GROQ_DEFAULT_MODEL } from '@/lib/groq';
 import { geminiChatStream, GEMINI_DEFAULT_MODEL } from '@/lib/gemini';
 import { perplexitySearchStream, PERPLEXITY_DEFAULT_MODEL } from '@/lib/perplexity';
 import { cerebrasChatStream, CEREBRAS_DEFAULT_MODEL } from '@/lib/cerebras';
-import { claudeCliStream } from '@/lib/claude-cli';
 import { parseInput } from '@/lib/input-router';
 import { parseAgentCommand, createAgent } from '@/lib/agent-manager';
 import { suggestTool } from '@/lib/agent-tool-router';
@@ -285,8 +284,8 @@ export function useAIPaneDispatch(paneId: string) {
         return;
       }
 
-      // @team — fan the prompt out to every enabled provider (Claude
-      // CLI, Gemini CLI, Codex CLI, Perplexity API, Local LLM), stream
+      // @team — fan the prompt out to every enabled provider (Gemini API,
+      // Cerebras/Groq APIs, Codex CLI, Perplexity API, Local LLM), stream
       // each response into its own bubble, and finish with a
       // facilitator-generated consolidated summary. Same intercept
       // pattern as @agent above.
@@ -328,14 +327,9 @@ export function useAIPaneDispatch(paneId: string) {
           const runner = (cmd: string) =>
             execCommand(cmd, 180_000).then((r) => r.stdout || r.stderr || '');
 
-          // Only invite members the user has actually configured. API
-          // members require the relevant key; Local LLM needs a URL;
-          // CLI members (Claude / Gemini / Codex) ship bundled so we
-          // default them on — the roundtable runner will still surface
-          // a ⚠ bubble if a CLI is missing at runtime. Deriving the
-          // settings dynamically means an absent key no longer throws
-          // a confusing "API key not set" error for a member the user
-          // never enabled.
+          // Only invite members the user has actually configured. Gemini
+          // runs through API here; Gemini CLI stays Terminal-only/experimental.
+          // Claude Code is also Terminal-only for AI Pane/background flows.
           const dyn = {
             ...DEFAULT_TEAM_SETTINGS,
             perplexityEnabled: !!settings.perplexityApiKey && DEFAULT_TEAM_SETTINGS.perplexityEnabled,
@@ -343,7 +337,7 @@ export function useAIPaneDispatch(paneId: string) {
             groqEnabled:       !!settings.groqApiKey       && DEFAULT_TEAM_SETTINGS.groqEnabled,
             geminiEnabled:     !!settings.geminiApiKey && DEFAULT_TEAM_SETTINGS.geminiEnabled,
             localEnabled:      !!settings.localLlmUrl      && DEFAULT_TEAM_SETTINGS.localEnabled,
-            // Claude / Codex CLIs are bundled — keep the library's default.
+            claudeEnabled: false,
           };
 
           const result = await runTeamRoundtable(teamPrompt, dyn, {
@@ -769,54 +763,11 @@ export function useAIPaneDispatch(paneId: string) {
             }
           }
         } else if (agent === 'claude') {
-          // ── Claude (bundled CLI via JNI fork+exec) ──
-          logInfo('AIPaneDispatch', `Claude dispatch start: prompt=${userText.slice(0, 80)}`);
-          let accumulated = '';
-          throttledUpdate(paneId, assistantId, { isStreaming: true, streamingText: '' });
-
-          const result = await claudeCliStream(
-            userText,
-            (chunk, done) => {
-              if (signal.aborted) return;
-              if (!done && chunk) {
-                accumulated += chunk;
-                logInfo('AIPaneDispatch', `Claude chunk: +${chunk.length} chars (total=${accumulated.length})`);
-                throttledUpdate(paneId, assistantId, {
-                  streamingText: accumulated,
-                  tokenCount: estimateTokens(accumulated),
-                  isStreaming: true,
-                });
-              }
-            },
-            {
-              autoApprove: (settings.autoApproveLevel ?? 'safe') as any,
-              systemPrompt,
-            },
-            signal,
-          );
-
-          if (!signal.aborted) {
-            const finalContent = result.content || accumulated;
-            logInfo('AIPaneDispatch', `Claude dispatch end: success=${result.success} exitCode=${result.exitCode} contentLen=${finalContent.length}`);
-            if (!result.success) {
-              logError('AIPaneDispatch', `Claude failed: ${result.error ?? '(no error msg)'}`);
-              store.updateMessage(paneId, assistantId, {
-                content: result.error
-                  ? `Claude CLI error: ${result.error}`
-                  : finalContent || 'Claude returned no output.',
-                isStreaming: false,
-                streamingText: undefined,
-              });
-            } else {
-              store.updateMessage(paneId, assistantId, {
-                content: finalContent,
-                streamingText: undefined,
-                isStreaming: false,
-                tokenCount: estimateTokens(finalContent),
-              });
-            }
-            logInfo('AIPaneDispatch', 'Claude response complete');
-          }
+          store.updateMessage(paneId, assistantId, {
+            content: 'Claude Code is available in the Terminal. AI Pane/background Claude execution is disabled.',
+            isStreaming: false,
+            streamingText: undefined,
+          });
         } else {
           // ── Unknown agent ──
           store.updateMessage(paneId, assistantId, {

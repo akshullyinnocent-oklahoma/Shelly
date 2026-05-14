@@ -5,6 +5,7 @@
 
 import { useMultiPaneStore } from '@/hooks/use-multi-pane';
 import { usePaneStore } from '@/store/pane-store';
+import { useFocusStore } from '@/store/focus-store';
 import { useTerminalStore } from '@/store/terminal-store';
 
 /**
@@ -17,15 +18,23 @@ export function createTerminalSessionForFocusedPane(): string | undefined {
   const newSessionId = useTerminalStore.getState().addSession();
   if (!newSessionId) return undefined;
 
-  const focusedPaneId = usePaneStore.getState().focusedPaneId;
-  if (!focusedPaneId) return newSessionId;
-
   const multiPane = useMultiPaneStore.getState();
-  const focusedSlot = multiPane.slots.find((slot) => slot?.id === focusedPaneId);
-  if (focusedSlot?.tab === 'terminal') {
-    multiPane.setSlotSessionId(focusedPaneId, newSessionId);
-    useTerminalStore.getState().setActiveSession(newSessionId);
+  const focusedPaneId = usePaneStore.getState().focusedPaneId;
+  let slotIdx = focusedPaneId
+    ? multiPane.slots.findIndex((slot) => slot?.id === focusedPaneId && slot.tab === 'terminal')
+    : -1;
+  if (slotIdx < 0) {
+    slotIdx = multiPane.slots.findIndex((slot) => slot?.tab === 'terminal');
   }
+  const targetSlot = slotIdx >= 0 ? multiPane.slots[slotIdx] : null;
+  if (!targetSlot) return newSessionId;
+
+  multiPane.setSlotSessionId(targetSlot.id, newSessionId);
+  if (slotIdx < 4) multiPane.focusSlot(slotIdx as 0 | 1 | 2 | 3);
+  usePaneStore.getState().setFocusedPane(targetSlot.id);
+  useTerminalStore.getState().setActiveSession(newSessionId);
+  setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 80);
+  setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 240);
 
   return newSessionId;
 }

@@ -38,18 +38,21 @@ const AGENT_EMOJI: Record<WorktreeAgent, string> = {
   none:   '⚪',
 };
 
+function supportedAgent(agent: WorktreeAgent): Exclude<WorktreeAgent, 'gemini'> {
+  return agent === 'gemini' ? 'none' : agent;
+}
+
 /** Phase 2: pick the right CLI invocation for a worktree. Once the agent
  *  has been started at least once in this worktree we want the CLI to
  *  resume its previous conversation instead of a cold start. */
 function resumeCommandFor(wt: Worktree): string | null {
-  if (wt.agent === 'none') return null;
-  if (!wt.agentStarted) return wt.agent;
+  const agent = supportedAgent(wt.agent);
+  if (agent === 'none') return null;
+  if (!wt.agentStarted) return agent;
   // Claude Code: `claude --continue` resumes the most recent session in
   //   the current directory. Well-documented + stable.
   // Codex: `codex --continue` behaves analogously as of codex-termux.
-  // Gemini CLI: `gemini --continue` was added in 0.3.x; older bundles fall
-  //   back to a cold start, which is harmless.
-  return `${wt.agent} --continue`;
+  return `${agent} --continue`;
 }
 
 /** Render "3h ago" / "just now" / "2d ago" for the LastTouched badge. */
@@ -133,18 +136,19 @@ export function WorktreesSection({ isOpen, onToggle, iconsOnly }: Props) {
       // Bind an AI pane (if one exists in the tree) to this worktree so
       // stageAiEdit resolves file paths inside it. Phase 2 plumbing uses
       // the pane-store's agent binding hook.
-      if (wt.agent !== 'none') {
+      const bindAgent = supportedAgent(wt.agent);
+      if (bindAgent !== 'none') {
         try {
           const paneAgents = usePaneStore.getState().paneAgents;
           const focused = usePaneStore.getState().focusedPaneId;
           if (focused && paneAgents[focused] == null) {
-            usePaneStore.getState().bindAgent(focused, wt.agent);
+            usePaneStore.getState().bindAgent(focused, bindAgent);
           }
         } catch { /* pane binding is best-effort */ }
       }
 
       touch(worktreeId);
-      if (wt.agent !== 'none') markAgentStarted(worktreeId);
+      if (bindAgent !== 'none') markAgentStarted(worktreeId);
     },
     [touch, setSession, markAgentStarted, addPane],
   );
@@ -198,22 +202,24 @@ export function WorktreesSection({ isOpen, onToggle, iconsOnly }: Props) {
           </Text>
         ) : (
           repoWorktrees.map((wt) => {
-            const resumable = wt.agentStarted === true && wt.agent !== 'none';
+            const agent = supportedAgent(wt.agent);
+            const resumable = wt.agentStarted === true && agent !== 'none';
             return (
               <View key={wt.id} style={styles.row}>
                 <Pressable style={styles.rowMain} onPress={() => handleOpen(wt.id)}>
-                  <Text style={styles.emoji}>{AGENT_EMOJI[wt.agent]}</Text>
+                  <Text style={styles.emoji}>{AGENT_EMOJI[agent]}</Text>
                   <View style={styles.rowText}>
-                    <Text style={[styles.branch, { color: AGENT_COLORS[wt.agent] }]} numberOfLines={1}>
+                    <Text style={[styles.branch, { color: AGENT_COLORS[agent] }]} numberOfLines={1}>
                       {wt.branch}
                     </Text>
                     <Text style={styles.meta} numberOfLines={1}>
                       {relativeTime(wt.lastTouchedAt)}
                       {resumable ? ' · resume' : ''}
+                      {wt.agent === 'gemini' ? ' · unsupported' : ''}
                     </Text>
                   </View>
                   {resumable ? (
-                    <MaterialIcons name="play-arrow" size={12} color={AGENT_COLORS[wt.agent]} />
+                    <MaterialIcons name="play-arrow" size={12} color={AGENT_COLORS[agent]} />
                   ) : null}
                 </Pressable>
                 <Pressable
@@ -234,7 +240,7 @@ export function WorktreesSection({ isOpen, onToggle, iconsOnly }: Props) {
             binding can still pick "None" inside the modal. */}
         {activeRepoPath ? (
           <View style={styles.addRow}>
-            {(['claude', 'gemini', 'codex'] as WorktreeAgent[]).map((a) => (
+            {(['claude', 'codex'] as WorktreeAgent[]).map((a) => (
               <Pressable
                 key={a}
                 style={[styles.addChip, { borderColor: AGENT_COLORS[a] }]}

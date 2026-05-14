@@ -30,14 +30,17 @@ type Props = {
 
 const AGENTS: Array<{ id: WorktreeAgent; label: string; emoji: string; color: string }> = [
   { id: 'claude', label: 'Claude', emoji: '🟣', color: '#A78BFA' },
-  { id: 'gemini', label: 'Gemini', emoji: '🔵', color: '#60A5FA' },
   { id: 'codex',  label: 'Codex',  emoji: '🟢', color: '#22C55E' },
   { id: 'none',   label: 'None',   emoji: '⚪', color: '#9CA3AF' },
 ];
 
+function supportedInitialAgent(agent: WorktreeAgent): WorktreeAgent {
+  return agent === 'gemini' ? 'none' : agent;
+}
+
 export function WorktreeAddModal({ visible, repoPath, initialAgent = 'claude', onClose }: Props) {
   const addWorktree = useWorktreeStore((s) => s.addWorktree);
-  const [agent, setAgent] = useState<WorktreeAgent>(initialAgent);
+  const [agent, setAgent] = useState<WorktreeAgent>(supportedInitialAgent(initialAgent));
   const [branch, setBranch] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -45,7 +48,7 @@ export function WorktreeAddModal({ visible, repoPath, initialAgent = 'claude', o
   // inherits stale input from a previous aborted attempt.
   React.useEffect(() => {
     if (visible) {
-      setAgent(initialAgent);
+      setAgent(supportedInitialAgent(initialAgent));
       setBranch('');
       setBusy(false);
     }

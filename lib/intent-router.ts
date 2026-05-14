@@ -14,7 +14,7 @@
  *
  * Priority order (when LLM unavailable):
  *   chat: groq (if key set) > CLI fallback
- *   code: claude-code > codex > gemini-cli
+ *   code: claude-code > codex
  */
 
 import type { ToolStatus } from './shelly-system-prompt';
@@ -192,11 +192,11 @@ function buildDecision(
  * Fallback routing when LLM is unavailable.
  *
  * Priority order (based on installed tools):
- *   claude-code (if installed) > codex (if installed) > gemini-cli
+ *   claude-code (if installed) > codex (if installed)
  *
  * - chat → groq (if API key set) > local-llm > best CLI
- * - code → claude-code > codex > gemini-cli
- * - research → gemini-cli (best for search)
+ * - code → claude-code > codex
+ * - research → default supported backend
  * - file_ops → best available CLI
  * - unknown → best installed CLI
  */
@@ -224,12 +224,16 @@ function fallbackRoute(
   const hasCodex = toolStatuses.some((s) => s.id === 'codex' && s.installed);
   const hasGroqKey = !!(options?.groqApiKey && options.groqApiKey.trim().length > 0);
 
-  // Default agent priority: explicit > claude-code > codex > gemini-cli
+  // Default agent priority: explicit > claude-code > codex.
+  // Gemini CLI is still available when explicitly mentioned, but it is not
+  // selected automatically while the Android TUI path is experimental.
   const defaultAgent: RoutingTool = explicitDefault
-    ?? (hasClaude ? 'claude-code' : hasCodex ? 'codex' : 'gemini-cli');
+    ?? (hasClaude ? 'claude-code' : hasCodex ? 'codex' : 'local-llm');
 
   const defaultLabel = defaultAgent === 'claude-code' ? 'Claude Code'
-    : defaultAgent === 'codex' ? 'Codex CLI' : 'Gemini CLI';
+    : defaultAgent === 'codex' ? 'Codex CLI'
+    : defaultAgent === 'local-llm' ? 'Local LLM'
+    : 'Gemini CLI';
 
   // Chat tasks: route to user's default CLI (not Groq — Groq is for intent classification & interpretation)
   // Code tasks: prefer claude-code if available
@@ -238,7 +242,7 @@ function fallbackRoute(
   const categoryToTool: Record<TaskCategory, RoutingTool> = {
     chat: defaultAgent,
     code: codeTool,
-    research: 'gemini-cli',
+    research: defaultAgent,
     file_ops: defaultAgent,
     unknown: defaultAgent,
   };
@@ -246,7 +250,7 @@ function fallbackRoute(
   const categoryReasons: Record<TaskCategory, string> = {
     chat: `Responding via ${defaultLabel}`,
     code: hasClaude ? 'Code task — delegating to Claude Code' : `Code task — using ${defaultLabel}`,
-    research: 'Research task — delegating to Gemini CLI',
+    research: `Research task — using ${defaultLabel}`,
     file_ops: `File operation — using ${defaultLabel}`,
     unknown: `Using ${defaultLabel}`,
   };

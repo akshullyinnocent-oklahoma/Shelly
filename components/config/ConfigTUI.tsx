@@ -118,7 +118,7 @@ const SECTIONS: { title: string; icon: string; items: SettingDef[] }[] = [
       { key: 'teamMembers.codex',      label: 'Codex',       type: 'boolean', source: 'custom', description: 'Enable Codex agent' },
       { key: 'teamMembers.perplexity', label: 'Perplexity',  type: 'boolean', source: 'custom', description: 'Enable Perplexity agent' },
       { key: 'teamMembers.local',      label: 'Local LLM',   type: 'boolean', source: 'custom', description: 'Enable local LLM agent' },
-      { key: 'defaultAgent',           label: 'Default Agent', type: 'enum', options: ['gemini-cli', 'claude-code', 'codex', 'local'], source: 'settings' },
+      { key: 'defaultAgent',           label: 'Default Agent', type: 'enum', options: ['codex', 'claude-code', 'gemini-cli', 'local'], source: 'settings' },
       { key: 'experienceMode',         label: 'Experience Mode', type: 'enum', options: ['learning', 'standard', 'power'], source: 'settings' },
       { key: 'autoApproveLevel',       label: 'CLI Approval Level', type: 'enum', options: ['safe', 'moderate', 'yolo'], source: 'settings', description: 'How much to auto-approve' },
     ],
