@@ -154,6 +154,8 @@ export default function PaneCliTabs({ paneSessionId, leafId }: Props = {}) {
     }
     setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 80);
     setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 240);
+    setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 600);
+    setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 1000);
   };
 
   return (

@@ -35,6 +35,8 @@ export function createTerminalSessionForFocusedPane(): string | undefined {
   useTerminalStore.getState().setActiveSession(newSessionId);
   setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 80);
   setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 240);
+  setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 600);
+  setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 1000);
 
   return newSessionId;
 }

@@ -31,6 +31,7 @@ import { execCommand } from '@/hooks/use-native-exec';
 import type { GroqMessage } from '@/lib/groq';
 import type { GeminiMessage } from '@/lib/gemini';
 import type { CerebrasMessage } from '@/lib/cerebras';
+import { isAiPaneAgent, pickDefaultAiPaneAgent } from '@/lib/ai-pane-agents';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -229,8 +230,14 @@ export function useAIPaneDispatch(paneId: string) {
       if (!userText.trim()) return;
 
       const store = useAIPaneStore.getState();
-      const agent = usePaneStore.getState().paneAgents[paneId] ?? 'local';
       const { settings } = useSettingsStore.getState();
+      const rawAgent = usePaneStore.getState().paneAgents[paneId];
+      const agent = isAiPaneAgent(rawAgent)
+        ? rawAgent
+        : pickDefaultAiPaneAgent(settings);
+      if (agent !== rawAgent) {
+        usePaneStore.getState().bindAgent(paneId, agent);
+      }
       logInfo('AIPaneDispatch', 'Dispatching to agent: ' + agent);
 
       // ── Add user message ──
@@ -762,12 +769,6 @@ export function useAIPaneDispatch(paneId: string) {
               logInfo('AIPaneDispatch', 'Perplexity response complete');
             }
           }
-        } else if (agent === 'claude') {
-          store.updateMessage(paneId, assistantId, {
-            content: 'Claude Code is available in the Terminal. AI Pane/background Claude execution is disabled.',
-            isStreaming: false,
-            streamingText: undefined,
-          });
         } else {
           // ── Unknown agent ──
           store.updateMessage(paneId, assistantId, {

@@ -7,18 +7,17 @@ import { PaneSelector } from './PaneSelector';
 import PaneCliTabs from './PaneCliTabs';
 import type { PaneTab } from '@/hooks/use-multi-pane';
 import { useMultiPaneStore, type SlotIndex } from '@/hooks/use-multi-pane';
-import { usePaneStore, getAgentColor, AGENT_COLORS } from '@/store/pane-store';
+import { usePaneStore, getAgentColor } from '@/store/pane-store';
 import { useSettingsStore } from '@/store/settings-store';
 import { useTerminalStore } from '@/store/terminal-store';
 import { useFocusStore } from '@/store/focus-store';
 import { onCommandComplete } from '@/lib/cli-notification';
 import { useSidebarStore } from '@/store/sidebar-store';
 import { useBrowserStore } from '@/store/browser-store';
-import { neonTextGlow } from '@/lib/neon-glow';
 import { colors as C, fonts as F, sizes as S, padding as P, radii as R } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
-import { getEnabledAiPaneAgents, isAiPaneAgent } from '@/lib/ai-pane-agents';
+import { getAiPaneAgentMeta, getEnabledAiPaneAgents, isAiPaneAgent } from '@/lib/ai-pane-agents';
 
 const ZERO_INSETS = { top: 0, right: 0, bottom: 0, left: 0 };
 
@@ -64,7 +63,9 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
   const agentColor = usePaneStore((s) => getAgentColor(s.paneAgents, leafId));
   const boundAgent = usePaneStore((s) => s.paneAgents[leafId] ?? null);
   const aiPaneAgent = isAiPaneAgent(boundAgent) ? boundAgent : null;
-  const aiPaneAgentColor = aiPaneAgent ? (AGENT_COLORS[aiPaneAgent] ?? AGENT_COLORS.unbound) : AGENT_COLORS.unbound;
+  const aiPaneAgentMeta = aiPaneAgent ? getAiPaneAgentMeta(aiPaneAgent) : null;
+  const aiPaneAgentColor = aiPaneAgentMeta?.color ?? C.text2;
+  const aiPaneAgentLabel = aiPaneAgentMeta?.label ?? 'Agent';
   const { bindAgent } = usePaneStore();
   const focusedPaneId = usePaneStore((s) => s.focusedPaneId);
   const { setFocusedPane } = usePaneStore();
@@ -230,7 +231,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
           >
             <View style={[styles.agentBadgeDot, { backgroundColor: aiPaneAgentColor }]} />
             <Text style={styles.agentBadgeLabel} numberOfLines={1}>
-              {aiPaneAgent ? aiPaneAgent.toUpperCase() : 'AGENT'}
+              {aiPaneAgent ? aiPaneAgentLabel.toUpperCase() : 'AGENT'}
             </Text>
             <MaterialIcons name="arrow-drop-down" size={12} color={C.text2} />
           </Pressable>
@@ -435,7 +436,8 @@ function AgentMenu({
       <Pressable style={agentStyles.menu} onPress={(e) => e.stopPropagation()}>
         <Text style={menuStyles.title}>Switch Agent</Text>
         {agents.map((key) => {
-          const color = AGENT_COLORS[key] ?? AGENT_COLORS.unbound;
+          const meta = getAiPaneAgentMeta(key);
+          const color = meta.color;
           const isActive = key === boundAgent;
           return (
             <Pressable
@@ -445,7 +447,7 @@ function AgentMenu({
             >
               <View style={[agentStyles.dot, { backgroundColor: color }]} />
               <Text style={[agentStyles.label, isActive && { color: C.accent }]}>
-                {key.charAt(0).toUpperCase() + key.slice(1)}
+                {meta.label}
               </Text>
               {isActive && (
                 <MaterialIcons name="check" size={12} color={C.accent} style={{ marginLeft: 'auto' }} />

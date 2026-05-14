@@ -2,7 +2,7 @@
  * components/panes/AIPane.tsx
  *
  * AI Pane — per-pane chat interface for the Superset UI.
- * Redesigned to match mock: YOU/CLAUDE labels, inline diff, READING TERMINAL badge.
+ * Redesigned to match mock: provider labels, inline diff, READING TERMINAL badge.
  */
 
 import React, { useContext, useCallback, useRef, useEffect, useState } from 'react';
@@ -18,9 +18,7 @@ import {
   type TextStyle,
 } from 'react-native';
 import {
-  neonGlowPurple,
   neonGlowBlue,
-  neonGlowGreen,
   neonGlowAmber,
   neonGlowSky,
   neonGlowTeal,
@@ -30,7 +28,6 @@ import { PaneIdContext, MultiPaneContext } from '@/components/multi-pane/PaneSlo
 import { useAIPaneStore } from '@/store/ai-pane-store';
 import { usePaneStore } from '@/store/pane-store';
 import { formatContextBadge } from '@/lib/ai-pane-context';
-import { useTheme } from '@/lib/theme-engine';
 import type { ChatMessage } from '@/store/chat-store';
 import PaneInputBar from '@/components/panes/PaneInputBar';
 import InlineDiff, { hasDiffContent } from '@/components/panes/InlineDiff';
@@ -40,9 +37,15 @@ import VoiceWaveform from '@/components/panes/VoiceWaveform';
 import { usePaneVoice } from '@/hooks/use-pane-voice';
 import { useSettingsStore } from '@/store/settings-store';
 import { VoiceChat } from '@/components/VoiceChat';
-import { colors as C, fonts as F, sizes as S } from '@/theme.config';
+import { colors as C, fonts as F } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
-import { isAiPaneAgent, pickDefaultAiPaneAgent } from '@/lib/ai-pane-agents';
+import {
+  getAiPaneAgentMeta,
+  isAiPaneAgent,
+  pickDefaultAiPaneAgent,
+  resolveAiPaneAgent,
+  type AiPaneAgentId,
+} from '@/lib/ai-pane-agents';
 
 // ─── Streaming Indicator ─────────────────────────────────────────────────────
 
@@ -86,28 +89,15 @@ const dotStyles = StyleSheet.create({
   },
 });
 
-// ─── Per-agent label colors (mock-faithful neon) ────────────────────────────
+// ─── Per-provider label glow (AI Pane providers only) ───────────────────────
 
-const AGENT_LABEL_COLORS: Record<string, string> = {
-  claude:     '#A78BFA', // purple
-  gemini:     '#60A5FA', // blue
-  codex:      '#22C55E', // green
-  cerebras:   '#FF6B35', // brand orange
-  groq:       '#F97316', // brand orange-deep
-  perplexity: '#38BDF8', // sky
-  local:      '#E5E7EB', // neutral
-  default:    '#A78BFA',
-};
-
-const AGENT_LABEL_GLOWS: Record<string, TextStyle> = {
-  claude:     neonGlowPurple,
+const AGENT_LABEL_GLOWS: Record<AiPaneAgentId | 'default', TextStyle> = {
   gemini:     neonGlowBlue,
-  codex:      neonGlowGreen,
   cerebras:   neonGlowAmber,
   groq:       neonGlowAmber,
   perplexity: neonGlowSky,
   local:      neonGlowTeal,
-  default:    neonGlowPurple,
+  default:    neonGlowTeal,
 };
 
 // ─── Message Bubble (Redesigned) ────────────────────────────────────────────
@@ -147,16 +137,17 @@ const MessageBubble = React.memo(function MessageBubble({
 
   // Assistant message
   const containsDiff = !isLastStreaming && hasDiffContent(displayText);
-  const agentKey = message.agent ?? 'claude';
-  const agentLabel = agentKey.toUpperCase();
+  const agentKey = resolveAiPaneAgent(message.agent, 'local');
+  const agentMeta = getAiPaneAgentMeta(agentKey);
+  const agentLabel = agentMeta.label.toUpperCase();
   // Per-provider neon label color so each assistant bubble reads as the
-  // agent that produced it (mock: CLAUDE purple, Cerebras orange, etc).
-  const labelColor = AGENT_LABEL_COLORS[agentKey] ?? AGENT_LABEL_COLORS.default;
+  // AI Pane provider that produced it.
+  const labelColor = agentMeta.color;
   const labelGlow = AGENT_LABEL_GLOWS[agentKey] ?? AGENT_LABEL_GLOWS.default;
 
   return (
     <View style={[bubbleStyles.messageContainer, containerMaxWidth]}>
-      <Text style={[bubbleStyles.roleLabelClaude, { color: labelColor }, labelGlow]}>
+      <Text style={[bubbleStyles.roleLabelAgent, { color: labelColor }, labelGlow]}>
         {agentLabel}
       </Text>
       <View style={bubbleStyles.assistantContent}>
@@ -205,7 +196,7 @@ const bubbleStyles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 6,
   },
-  roleLabelClaude: {
+  roleLabelAgent: {
     fontSize: 7,
     fontFamily: F.family,
     fontWeight: '800',
@@ -249,8 +240,6 @@ const bubbleStyles = StyleSheet.create({
 
 export default function AIPane() {
   const paneId = useContext(PaneIdContext);
-  const theme = useTheme();
-  const colors = theme.colors;
   // Bug #56 — narrow grid layouts (2×2 or 1+2) drop pane width below
   // ~360dp. Shrink horizontal padding so bubble content does not get
   // clipped by the pane chrome.

@@ -491,6 +491,8 @@ export const useMultiPaneStore = create<MultiPaneStore>()(
           const { useFocusStore } = require('@/store/focus-store');
           setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 80);
           setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 240);
+          setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 600);
+          setTimeout(() => useFocusStore.getState().requestTerminalRefocus(), 1000);
         } catch { /* pane-store unavailable (tests) */ }
         return null;
       };
