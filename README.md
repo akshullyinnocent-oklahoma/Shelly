@@ -45,7 +45,7 @@
 
 **Claude Code running natively on Android with slash-command autocomplete**
 
-[Watch the demo video](https://github.com/RYOITABASHI/Shelly/raw/main/docs/videos/demo-claude-codex-2pane.mp4)
+https://github.com/user-attachments/assets/de04f935-7f81-4b84-b8b0-b5bbac22d26c
 
 **AI reading a runtime error and suggesting the fix in real time**
 
