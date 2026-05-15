@@ -13,7 +13,7 @@ import { useFonts } from "expo-font";
 import { JetBrainsMono_400Regular, JetBrainsMono_700Bold } from "@expo-google-fonts/jetbrains-mono";
 import { useTerminalStore } from "@/store/terminal-store";
 import { useSoundStore, unloadSounds } from "@/lib/sounds";
-import { loadAgentsFromDisk } from "@/lib/agent-manager";
+import { loadAgentsFromDisk, syncAgentRunLogsFromDisk } from "@/lib/agent-manager";
 import { useI18n } from '@/lib/i18n';
 import { useThemeStore } from '@/lib/theme-engine';
 import { useA11yStore } from '@/lib/accessibility';
@@ -108,6 +108,31 @@ export default function RootLayout() {
       }).catch((e: any) => {
         logError('RootLayout', 'loadAgentsFromDisk failed', e);
       });
+    });
+
+    // Background agents can complete while the JS bridge is asleep. Refresh
+    // their on-disk logs when Shelly returns to foreground, and periodically
+    // while it is open, so the sidebar/history reflects scheduled runs.
+    let agentLogSyncInFlight = false;
+    const syncAgentLogs = async () => {
+      if (agentLogSyncInFlight) return;
+      agentLogSyncInFlight = true;
+      try {
+        await import('@/lib/home-path').then(({ initHomePath }) => initHomePath());
+        await syncAgentRunLogsFromDisk(async (cmd) => {
+          const result = await execCommand(cmd, 30_000);
+          if (result.exitCode !== 0) throw new Error(result.stderr || `exit ${result.exitCode}`);
+          return result.stdout;
+        });
+      } catch (e: any) {
+        logError('RootLayout', 'syncAgentRunLogsFromDisk failed', e);
+      } finally {
+        agentLogSyncInFlight = false;
+      }
+    };
+    const agentLogInterval = setInterval(syncAgentLogs, 60_000);
+    const agentLogSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void syncAgentLogs();
     });
 
 
@@ -476,8 +501,10 @@ export default function RootLayout() {
     });
     return () => {
       sub.remove();
+      agentLogSub.remove();
       linkSub.remove();
       clearInterval(queueInterval);
+      clearInterval(agentLogInterval);
     };
   }, []);
 
