@@ -562,7 +562,11 @@ export default function TerminalScreen() {
 
   // Terminal color scheme from settings — converted to Kotlin prop format
   const terminalColorScheme = useMemo(() => {
-    const theme = getTerminalTheme(settings.terminalTheme ?? 'shelly');
+    const themeName =
+      settings.uiFont === 'blue' || settings.uiFont === 'orange' || settings.uiFont === 'purple'
+        ? settings.uiFont
+        : settings.terminalTheme ?? 'blue';
+    const theme = getTerminalTheme(themeName);
     return {
       color0: theme.black,    color1: theme.red,      color2: theme.green,     color3: theme.yellow,
       color4: theme.blue,     color5: theme.magenta,  color6: theme.cyan,      color7: theme.white,
@@ -572,7 +576,7 @@ export default function TerminalScreen() {
       background: theme.background,
       cursor: theme.cursor,
     };
-  }, [settings.terminalTheme]);
+  }, [settings.terminalTheme, settings.uiFont]);
 
   // Terminal font size honors the user's Settings → Display → Font Size
   // choice. Since the terminal now uses JetBrains Mono (not Silkscreen),

@@ -18,6 +18,33 @@ export type TerminalTheme = {
 };
 
 export const TERMINAL_THEMES: Record<string, TerminalTheme> = {
+  blue: {
+    name: 'blue', label: 'Blue',
+    background: '#000000', foreground: '#E8EEF8', cursor: '#4DA3FF',
+    black: '#101317', red: '#4DA3FF', green: '#4DA3FF', yellow: '#4DA3FF',
+    blue: '#4DA3FF', magenta: '#4DA3FF', cyan: '#4DA3FF', white: '#E8EEF8',
+    brightBlack: '#526070', brightRed: '#4DA3FF', brightGreen: '#4DA3FF',
+    brightYellow: '#4DA3FF', brightBlue: '#4DA3FF', brightMagenta: '#4DA3FF',
+    brightCyan: '#4DA3FF', brightWhite: '#FFFFFF',
+  },
+  orange: {
+    name: 'orange', label: 'Orange',
+    background: '#000000', foreground: '#F4EEE8', cursor: '#FF4B35',
+    black: '#17100D', red: '#FF4B35', green: '#FF4B35', yellow: '#FF4B35',
+    blue: '#FF4B35', magenta: '#FF4B35', cyan: '#FF4B35', white: '#F4EEE8',
+    brightBlack: '#6F5E54', brightRed: '#FF4B35', brightGreen: '#FF4B35',
+    brightYellow: '#FF4B35', brightBlue: '#FF4B35', brightMagenta: '#FF4B35',
+    brightCyan: '#FF4B35', brightWhite: '#FFFFFF',
+  },
+  purple: {
+    name: 'purple', label: 'Purple',
+    background: '#000000', foreground: '#F2EAFE', cursor: '#9B5CFF',
+    black: '#15101C', red: '#9B5CFF', green: '#9B5CFF', yellow: '#9B5CFF',
+    blue: '#9B5CFF', magenta: '#9B5CFF', cyan: '#9B5CFF', white: '#F2EAFE',
+    brightBlack: '#66557E', brightRed: '#9B5CFF', brightGreen: '#9B5CFF',
+    brightYellow: '#9B5CFF', brightBlue: '#9B5CFF', brightMagenta: '#9B5CFF',
+    brightCyan: '#9B5CFF', brightWhite: '#FFFFFF',
+  },
   shelly: {
     name: 'shelly', label: 'Shelly',
     background: '#0A0A0A', foreground: '#E8E8E8', cursor: '#00D4AA',

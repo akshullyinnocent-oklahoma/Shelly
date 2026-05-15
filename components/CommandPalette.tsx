@@ -62,7 +62,7 @@ export function CommandPalette() {
   const addPane = useAddPane();
   const applyPalette = useCallback((id: ThemePresetId) => {
     applyThemePreset(id);
-    useSettingsStore.getState().updateSettings({ uiFont: id });
+    useSettingsStore.getState().updateSettings({ uiFont: id, terminalTheme: id });
   }, []);
 
   const actions = useMemo((): PaletteAction[] => {

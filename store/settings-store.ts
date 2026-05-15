@@ -51,7 +51,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   realtimeTranslateEnabled: false,
   llmInterpreterEnabled: false,
   externalKeyboardShortcuts: false,
-  terminalTheme: 'shelly',
+  terminalTheme: 'blue',
   gpuRendering: false,
   uiFont: 'blue',
   showVimKeyBar: false,

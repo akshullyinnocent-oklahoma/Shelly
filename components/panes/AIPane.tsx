@@ -15,14 +15,7 @@ import {
   Easing,
   TouchableOpacity,
   type ListRenderItemInfo,
-  type TextStyle,
 } from 'react-native';
-import {
-  neonGlowBlue,
-  neonGlowAmber,
-  neonGlowSky,
-  neonGlowTeal,
-} from '@/lib/neon-glow';
 import { MaterialIcons } from '@expo/vector-icons';
 import { PaneIdContext, MultiPaneContext } from '@/components/multi-pane/PaneSlot';
 import { useAIPaneStore } from '@/store/ai-pane-store';
@@ -44,7 +37,6 @@ import {
   isAiPaneAgent,
   pickDefaultAiPaneAgent,
   resolveAiPaneAgent,
-  type AiPaneAgentId,
 } from '@/lib/ai-pane-agents';
 
 // ─── Streaming Indicator ─────────────────────────────────────────────────────
@@ -89,17 +81,6 @@ const dotStyles = StyleSheet.create({
   },
 });
 
-// ─── Per-provider label glow (AI Pane providers only) ───────────────────────
-
-const AGENT_LABEL_GLOWS: Record<AiPaneAgentId | 'default', TextStyle> = {
-  gemini:     neonGlowBlue,
-  cerebras:   neonGlowAmber,
-  groq:       neonGlowAmber,
-  perplexity: neonGlowSky,
-  local:      neonGlowTeal,
-  default:    neonGlowTeal,
-};
-
 // ─── Message Bubble (Redesigned) ────────────────────────────────────────────
 
 type BubbleProps = {
@@ -129,7 +110,14 @@ const MessageBubble = React.memo(function MessageBubble({
   if (isUser) {
     return (
       <View style={[bubbleStyles.messageContainer, containerMaxWidth]}>
-        <Text style={bubbleStyles.roleLabel}>YOU</Text>
+        <Text
+          style={[
+            bubbleStyles.roleLabel,
+            { color: C.accent, textShadowColor: withAlpha(C.accent, 0.6) },
+          ]}
+        >
+          YOU
+        </Text>
         <Text style={bubbleStyles.userText} selectable>{displayText}</Text>
       </View>
     );
@@ -140,14 +128,10 @@ const MessageBubble = React.memo(function MessageBubble({
   const agentKey = resolveAiPaneAgent(message.agent, 'local');
   const agentMeta = getAiPaneAgentMeta(agentKey);
   const agentLabel = agentMeta.label.toUpperCase();
-  // Per-provider neon label color so each assistant bubble reads as the
-  // AI Pane provider that produced it.
-  const labelColor = agentMeta.color;
-  const labelGlow = AGENT_LABEL_GLOWS[agentKey] ?? AGENT_LABEL_GLOWS.default;
 
   return (
     <View style={[bubbleStyles.messageContainer, containerMaxWidth]}>
-      <Text style={[bubbleStyles.roleLabelAgent, { color: labelColor }, labelGlow]}>
+      <Text style={[bubbleStyles.roleLabelAgent, { color: C.text2 }]}>
         {agentLabel}
       </Text>
       <View style={bubbleStyles.assistantContent}>
@@ -189,10 +173,10 @@ const bubbleStyles = StyleSheet.create({
     fontFamily: F.family,
     fontWeight: '800',
     letterSpacing: 0.8,
-    color: C.accentBlue,
+    color: C.text2,
     marginBottom: 2,
     textTransform: 'uppercase',
-    textShadowColor: 'rgba(96, 165, 250, 0.6)',
+    textShadowColor: 'transparent',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 6,
   },
@@ -201,7 +185,7 @@ const bubbleStyles = StyleSheet.create({
     fontFamily: F.family,
     fontWeight: '800',
     letterSpacing: 0.8,
-    color: '#D4A574',
+    color: C.text2,
     marginBottom: 2,
     textTransform: 'uppercase',
   },

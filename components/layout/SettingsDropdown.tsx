@@ -541,7 +541,7 @@ function ThemeRow() {
                 // Apply synchronously to avoid the AsyncStorage race that
                 // caused bug #28/#54.
                 applyThemePreset(opt.value);
-                updateSettings({ uiFont: opt.value });
+                updateSettings({ uiFont: opt.value, terminalTheme: opt.value });
               }}
               hitSlop={4}
             >

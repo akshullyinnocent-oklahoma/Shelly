@@ -34,21 +34,11 @@ import { withAlpha } from '@/lib/theme-utils';
 const MAX_TABS = 4;
 
 /**
- * Per-session neon hue. Colour is picked by a stable hash of the session
- * id rather than its current index in `sessions[]`, so closing the middle
- * tab (or adding/removing sessions in any order) does not shuffle the
- * surviving tabs' colours. All four hues are shellyPalette tokens so
- * theme swaps pull the equivalent pastel from TokyoNight / Catppuccin /
- * Rose Pine automatically.
+ * Per-session accent. Theme colorways are intentionally monochrome, so all
+ * CLI tabs inherit the current palette accent instead of rotating hues.
  */
-function sessionHue(sessionId: string): string {
-  const colors = [C.accent, C.accentPink, C.accentPurple, C.accentAmber];
-  // Simple sum-of-charcodes — collision-prone in theory, but sessions
-  // share a `session-${Date.now()}` prefix so their low bits drift
-  // enough across rapid adds to land in different buckets in practice.
-  let h = 0;
-  for (let i = 0; i < sessionId.length; i++) h = (h + sessionId.charCodeAt(i)) | 0;
-  return colors[Math.abs(h) % colors.length] ?? C.accent;
+function sessionHue(_sessionId: string): string {
+  return C.accent;
 }
 
 type Props = {

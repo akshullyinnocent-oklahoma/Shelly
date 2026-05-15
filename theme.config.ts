@@ -23,24 +23,24 @@ export const colors = {
   border:     '#243040',
 
   accent:        '#4DA3FF',
-  accentGreen:   '#35D07F',
+  accentGreen:   '#4DA3FF',
   accentBlue:    '#4DA3FF',
-  accentSky:     '#65D7FF',
-  accentPurple:  '#9B8CFF',
-  accentPink:    '#FF5C9A',
-  accentAmber:   '#FFD166',
-  accentCode:    '#65D7FF',
-  warning:       '#FFD166',
+  accentSky:     '#4DA3FF',
+  accentPurple:  '#4DA3FF',
+  accentPink:    '#4DA3FF',
+  accentAmber:   '#4DA3FF',
+  accentCode:    '#4DA3FF',
+  warning:       '#4DA3FF',
 
   text1:      '#E8EEF8',
   text2:      '#97A6BA',
   text3:      '#526070',
 
   // Semantic
-  errorText:  '#FF5C7A',
-  errorBg:    'rgba(255,92,122,0.12)',
-  addText:    '#35D07F',
-  addBg:      'rgba(53,208,127,0.12)',
+  errorText:  '#4DA3FF',
+  errorBg:    'rgba(77,163,255,0.12)',
+  addText:    '#4DA3FF',
+  addBg:      'rgba(77,163,255,0.12)',
 
   // Buttons
   btnPrimaryBg:     '#4DA3FF',
@@ -49,10 +49,10 @@ export const colors = {
   btnSecondaryText: '#E8EEF8',
 
   // Badges
-  badgeRunningBg:   'rgba(255,209,102,0.14)',
-  badgeRunningText: '#FFD166',
-  badgeLinkedBg:    'rgba(53,208,127,0.14)',
-  badgeLinkedText:  '#35D07F',
+  badgeRunningBg:   'rgba(77,163,255,0.14)',
+  badgeRunningText: '#4DA3FF',
+  badgeLinkedBg:    'rgba(77,163,255,0.14)',
+  badgeLinkedText:  '#4DA3FF',
   badgeConnectBg:   '#000000',
   badgeConnectText: '#526070',
 
@@ -70,8 +70,8 @@ export const colors = {
   autoSaveBg: '#000000',
 
   // Diff
-  diffAddBorder:    '#35D07F',
-  diffRemoveBorder: '#FF5C7A',
+  diffAddBorder:    '#4DA3FF',
+  diffRemoveBorder: '#4DA3FF',
 };
 
 // ─── Fonts ──────────────────────────────────────────────────────────────────
