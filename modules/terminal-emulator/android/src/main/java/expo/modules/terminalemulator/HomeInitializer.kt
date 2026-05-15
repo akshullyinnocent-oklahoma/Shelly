@@ -3376,7 +3376,8 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
         try {
             val project = File(home, "projects/shelly-content-studio")
             val dirs = listOf(
-                "sources",
+                "sources/substack",
+                "sources/x",
                 "drafts/substack",
                 "drafts/x",
                 "drafts/articles",
@@ -3521,10 +3522,10 @@ OBSIDIAN_VAULT_PATH=/sdcard/Documents/ObsidianVault
             seedAgent(
                 agentsDir,
                 id = "content-source-collector",
-                name = "Content Source Collector",
-                description = "Collects fresh STEAM x AI sources with Perplexity sonar.",
+                name = "Substack Academic Source Collector",
+                description = "Collects fresh STEAM x AI primary sources with sonar-deep-research.",
                 prompt = """
-Use Perplexity sonar to collect fresh sources for STEAM x AI and AI-era foundational academic ability.
+Use Perplexity sonar-deep-research to collect fresh sources for STEAM x AI and AI-era foundational academic ability.
 
 Prioritize:
 - academic papers
@@ -3533,10 +3534,32 @@ Prioritize:
 - public documents
 - primary sources
 
-Avoid duplicates when possible. Return concise source notes with URLs, dates, and why each source matters.
+Avoid duplicates from the known source registry. Return concise source notes with URLs, dates, and why each source matters.
+""".trimIndent(),
+                toolJson = """{"type":"perplexity","model":"sonar-deep-research"}""",
+                outputPath = File(project, "sources/substack").absolutePath,
+                schedule = "0 6 * * 1",
+            )
+
+            seedAgent(
+                agentsDir,
+                id = "x-trend-source-collector",
+                name = "X Trend Source Collector",
+                description = "Collects casual AI, education, and build-log hooks with Perplexity sonar.",
+                prompt = """
+Use Perplexity sonar to collect casual but useful source material for X posts.
+
+Prioritize:
+- recent AI and education news
+- STEAM / maker culture trends
+- Android automation and smartphone-only development topics
+- Shelly/Chelly build-log angles
+
+Avoid duplicates from the known source registry. Return short Japanese notes with URLs and why each item could become a post.
 """.trimIndent(),
                 toolJson = """{"type":"perplexity","model":"sonar"}""",
-                outputPath = File(project, "sources").absolutePath,
+                outputPath = File(project, "sources/x").absolutePath,
+                schedule = "0 7 * * *",
             )
 
             seedAgent(
@@ -3554,6 +3577,7 @@ Use fresh primary sources where possible. Distinguish facts from interpretation.
 """.trimIndent(),
                 toolJson = """{"type":"perplexity","model":"sonar-deep-research"}""",
                 outputPath = File(project, "drafts/substack").absolutePath,
+                schedule = "0 8 * * 1",
             )
 
             seedAgent(
@@ -3573,6 +3597,7 @@ Keep it casual, useful, and not overclaiming.
 """.trimIndent(),
                 toolJson = """{"type":"perplexity","model":"sonar"}""",
                 outputPath = File(project, "drafts/x").absolutePath,
+                schedule = "0 8 * * *",
             )
 
             seedAgent(
@@ -3589,6 +3614,7 @@ Use a strong structure and make the author's position clear.
 """.trimIndent(),
                 toolJson = """{"type":"cli","cli":"codex"}""",
                 outputPath = File(project, "drafts/articles").absolutePath,
+                schedule = "0 10 * * 1",
             )
 
             seedAgent(
@@ -3639,6 +3665,7 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
         prompt: String,
         toolJson: String,
         outputPath: String,
+        schedule: String? = null,
     ) {
         writeIfMissing(
             File(agentsDir, "$id.json"),
@@ -3648,7 +3675,7 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
   "name": ${jsonString(name)},
   "description": ${jsonString(description)},
   "prompt": ${jsonString(prompt)},
-  "schedule": null,
+  "schedule": ${schedule?.let { jsonString(it) } ?: "null"},
   "tool": $toolJson,
   "outputPath": ${jsonString(outputPath)},
   "outputTemplate": null,

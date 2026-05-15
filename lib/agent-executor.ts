@@ -78,6 +78,15 @@ export HOME="${home}"
 # Create directories
 mkdir -p '${tmpDir}' '${locksDir}' "$LOG_DIR"
 
+PROJECT_DIR="\${SHELLY_CONTENT_PROJECT:-$HOME/projects/shelly-content-studio}"
+SOURCE_REGISTRY_FILE="\${SOURCE_REGISTRY_FILE:-$PROJECT_DIR/sources/source-registry.tsv}"
+mkdir -p "$(dirname "$SOURCE_REGISTRY_FILE")"
+touch "$SOURCE_REGISTRY_FILE"
+SOURCE_CONTEXT=""
+if [ -s "$SOURCE_REGISTRY_FILE" ]; then
+  SOURCE_CONTEXT=$(printf '\\n\\nKnown source URLs already used. Avoid duplicates unless essential:\\n'; tail -n 120 "$SOURCE_REGISTRY_FILE" | awk -F '\\t' '{ if ($4 != "") print "- " $4 " (" $1 ", " $2 ")" }')
+fi
+
 # Global concurrency check
 ACTIVE_COUNT=$(find "$LOCKS_DIR" -name '*.pid' -exec sh -c 'kill -0 $(cat "{}") 2>/dev/null && echo 1' \\; | wc -l)
 if [ "$ACTIVE_COUNT" -ge "$MAX_CONCURRENT" ]; then
@@ -116,7 +125,29 @@ if [ -f "$RESULT_FILE" ] && [ -s "$RESULT_FILE" ]; then
   # Copy to output directory
   mkdir -p "$OUTPUT_DIR"
   DATE=$(date +%Y-%m-%d)
-  cp "$RESULT_FILE" "$OUTPUT_DIR/$DATE-$SLUG.md"
+  SAVED_FILE="$OUTPUT_DIR/$DATE-$SLUG.md"
+  cp "$RESULT_FILE" "$SAVED_FILE"
+
+  if [ -n "\${OBSIDIAN_VAULT_PATH:-}" ] && [ -d "$OBSIDIAN_VAULT_PATH" ]; then
+    OBSIDIAN_TARGET="90_Log/Agent_Output"
+    case "$OUTPUT_DIR" in
+      *drafts/substack*) OBSIDIAN_TARGET="50_Drafts/Substack" ;;
+      *drafts/x*) OBSIDIAN_TARGET="50_Drafts/X" ;;
+      *drafts/articles*) OBSIDIAN_TARGET="50_Drafts/Substack" ;;
+      *sources*) OBSIDIAN_TARGET="20_Literature/Papers" ;;
+      *images/prompts*) OBSIDIAN_TARGET="60_Experiments/Image_Prompts" ;;
+      *evals*) OBSIDIAN_TARGET="90_Log/Agent_Evals" ;;
+    esac
+    mkdir -p "$OBSIDIAN_VAULT_PATH/$OBSIDIAN_TARGET"
+    cp "$SAVED_FILE" "$OBSIDIAN_VAULT_PATH/$OBSIDIAN_TARGET/$DATE-$SLUG.md"
+  fi
+
+  grep -Eo 'https?://[^][ )<>"'"'"']+' "$RESULT_FILE" 2>/dev/null | sed 's/[.,;)]$//' | sort -u | while read -r url; do
+    [ -n "$url" ] || continue
+    if ! grep -Fq "$url" "$SOURCE_REGISTRY_FILE"; then
+      printf '%s\\t%s\\t%s\\t%s\\n' "$(date -Iseconds)" "$AGENT_ID" "$TOOL_LABEL" "$url" >> "$SOURCE_REGISTRY_FILE"
+    fi
+  done
 else
   PREVIEW=""
   STATUS="error"
@@ -144,18 +175,21 @@ function generateToolCommand(tool: ToolChoice, escapedPrompt: string, rawPrompt:
         return `echo 'Claude Code is available in Terminal only. Background Claude execution is disabled.' > ${resultVar}`;
       }
       if (tool.cli === 'codex') {
-        return `if command -v codex >/dev/null 2>&1; then
-  timeout "$TIMEOUT" codex exec '${escapedPrompt}' > ${resultVar} 2>&1 || true
+        return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
+printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
+if command -v codex >/dev/null 2>&1; then
+  timeout "$TIMEOUT" codex exec "$(cat "$PROMPT_FILE")" > ${resultVar} 2>&1 || true
 else
   echo 'Codex CLI is not installed or not on PATH. Run shelly-runtime-update codex, then codex-login.' > ${resultVar}
-fi`;
+fi
+rm -f "$PROMPT_FILE"`;
       }
       return `echo 'Gemini CLI is experimental in Shelly. Use Gemini API for background agents.' > ${resultVar}`;
     case 'gemini-api':
       return geminiApiCommand(escapedPrompt, resultVar, tool.model);
     case 'local':
       return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
-printf '%s' '${escapedPrompt}' > "$PROMPT_FILE"
+printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
 PROMPT_JSON=$(jq -Rs '.' < "$PROMPT_FILE")
 timeout "$TIMEOUT" curl -s http://127.0.0.1:8080/v1/chat/completions \\
   -H "Content-Type: application/json" \\
@@ -165,7 +199,7 @@ rm -f "$PROMPT_FILE"`;
     case 'perplexity':
       const perplexityModel = tool.model || 'sonar';
       return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
-printf '%s' '${escapedPrompt}' > "$PROMPT_FILE"
+printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
 PROMPT_JSON=$(jq -Rs '.' < "$PROMPT_FILE")
 MODEL='${perplexityModel.replace(/'/g, "'\\''")}'
 if [ -z "\${PERPLEXITY_API_KEY:-}" ]; then
@@ -184,7 +218,10 @@ rm -f "$PROMPT_FILE"`;
       return `if [ -n "\${GEMINI_API_KEY:-}" ]; then
   ${geminiApiCommand(escapedPrompt, resultVar)}
 elif command -v codex >/dev/null 2>&1; then
-  timeout "$TIMEOUT" codex exec '${escapedPrompt}' > ${resultVar} 2>&1 || true
+  PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
+  printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
+  timeout "$TIMEOUT" codex exec "$(cat "$PROMPT_FILE")" > ${resultVar} 2>&1 || true
+  rm -f "$PROMPT_FILE"
 else
   echo 'No background agent backend is configured. Add a Gemini API key or use Codex in Terminal.' > ${resultVar}
 fi`;
@@ -339,7 +376,7 @@ RESULTEOF`;
 function geminiApiCommand(escapedPrompt: string, resultVar: string, model?: string): string {
   const defaultModel = model || 'gemini-2.0-flash';
   return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
-printf '%s' '${escapedPrompt}' > "$PROMPT_FILE"
+printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
 PROMPT_JSON=$(jq -Rs '.' < "$PROMPT_FILE")
 MODEL="\${GEMINI_MODEL:-${defaultModel.replace(/"/g, '\\"')}}"
 if [ -z "\${GEMINI_API_KEY:-}" ]; then

@@ -21,6 +21,10 @@ function cronToIntervalMs(cron: string): number | null {
     return 24 * 60 * 60 * 1000;
   }
 
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === '*' && mon === '*' && /^\d+$/.test(dow)) {
+    return 7 * 24 * 60 * 60 * 1000;
+  }
+
   return null;
 }
 
@@ -28,7 +32,7 @@ function nextTriggerMs(cron: string): number {
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return Date.now() + 60000;
 
-  const [min, hour] = parts;
+  const [min, hour, dom, mon, dow] = parts;
   const now = new Date();
   const target = new Date();
 
@@ -53,6 +57,17 @@ function nextTriggerMs(cron: string): number {
   if (/^\d+$/.test(hour)) target.setHours(parseInt(hour));
   target.setSeconds(0);
   target.setMilliseconds(0);
+
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === '*' && mon === '*' && /^\d+$/.test(dow)) {
+    const targetDow = parseInt(dow, 10) % 7;
+    const currentDow = target.getDay();
+    let daysUntil = (targetDow - currentDow + 7) % 7;
+    if (daysUntil === 0 && target.getTime() <= now.getTime()) {
+      daysUntil = 7;
+    }
+    target.setDate(target.getDate() + daysUntil);
+    return target.getTime();
+  }
 
   if (target.getTime() <= now.getTime()) {
     target.setDate(target.getDate() + 1);
