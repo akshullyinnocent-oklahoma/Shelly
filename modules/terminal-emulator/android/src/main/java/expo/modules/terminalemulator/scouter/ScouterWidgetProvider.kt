@@ -123,12 +123,12 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         }
 
         private fun colorForStatus(status: ScouterStatus): Int = when (status) {
-            ScouterStatus.IDLE -> Color.rgb(120, 120, 120)
-            ScouterStatus.THINKING -> Color.rgb(59, 130, 246)
-            ScouterStatus.TOOL_RUNNING -> Color.rgb(34, 197, 94)
-            ScouterStatus.WAITING_PERMISSION -> Color.rgb(249, 115, 22)
-            ScouterStatus.COMPLETED -> Color.rgb(45, 212, 191)
-            ScouterStatus.ERROR -> Color.rgb(239, 68, 68)
+            ScouterStatus.IDLE -> Color.rgb(143, 175, 143)
+            ScouterStatus.THINKING -> Color.rgb(184, 255, 184)
+            ScouterStatus.TOOL_RUNNING -> Color.rgb(102, 255, 102)
+            ScouterStatus.WAITING_PERMISSION -> Color.rgb(204, 255, 204)
+            ScouterStatus.COMPLETED -> Color.rgb(204, 255, 204)
+            ScouterStatus.ERROR -> Color.rgb(255, 92, 92)
         }
 
         private fun formatTokens(tokens: Long): String {
