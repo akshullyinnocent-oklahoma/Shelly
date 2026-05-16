@@ -202,14 +202,16 @@ export function Sidebar() {
 
   // Derive latest completed task per agent from run history
   const recentTasks = React.useMemo(() => {
+    const activeAgentIds = new Set([...runningAgentIds, ...pendingAgentIds]);
     const latestByAgent = new Map<
       string,
-      { id: string; name: string; timestamp: number; status: 'success' | 'error' | 'skipped' }
+      { id: string; name: string; timestamp: number; status: 'success' | 'error' }
     >();
     for (const [agentId, logs] of Object.entries(runHistory)) {
+      if (activeAgentIds.has(agentId)) continue;
       const agent = agents.find((a) => a.id === agentId);
       for (const log of logs) {
-        if (log.status === 'success' || log.status === 'error' || log.status === 'skipped') {
+        if (log.status === 'success' || log.status === 'error') {
           const current = latestByAgent.get(agentId);
           if (!current || log.timestamp > current.timestamp) {
             latestByAgent.set(agentId, {
@@ -229,7 +231,7 @@ export function Sidebar() {
         ...log,
         age: formatTimeAgo(log.timestamp),
       }));
-  }, [runHistory, agents]);
+  }, [runHistory, agents, runningAgentIds, pendingAgentIds]);
 
   const refreshRunningAgents = React.useCallback(async () => {
     const result = await TerminalEmulator.execCommand(
@@ -348,13 +350,7 @@ export function Sidebar() {
           {recentTasks.map((task) => (
             <View key={`recent-${task.id}`} style={styles.taskRow}>
               <MaterialIcons
-                name={
-                  task.status === 'success'
-                    ? 'check-circle'
-                    : task.status === 'error'
-                      ? 'error'
-                      : 'remove-circle-outline'
-                }
+                name={task.status === 'success' ? 'check-circle' : 'error'}
                 size={10}
                 color={task.status === 'error' ? '#F87171' : C.text2}
               />
