@@ -148,12 +148,26 @@ if [ -f "$RESULT_FILE" ] && [ -s "$RESULT_FILE" ]; then
     cp "$SAVED_FILE" "$OBSIDIAN_VAULT_PATH/$OBSIDIAN_TARGET/$DATE-$SLUG.md"
   fi
 
+  REGISTRY_LOCK="$SOURCE_REGISTRY_FILE.lock"
+  lock_attempt=0
+  while ! mkdir "$REGISTRY_LOCK" 2>/dev/null; do
+    lock_attempt=$((lock_attempt + 1))
+    [ "$lock_attempt" -lt 30 ] || break
+    sleep 1
+  done
+  if [ -d "$REGISTRY_LOCK" ]; then
+    trap 'rm -f "$LOCK_FILE"; rmdir "$REGISTRY_LOCK" 2>/dev/null || true' EXIT
+  fi
   { grep -Eo 'https?://[^][ )<>"'"'"']+' "$RESULT_FILE" 2>/dev/null || true; } | sed 's/[.,;)]$//' | sort -u | while read -r url; do
     [ -n "$url" ] || continue
-    if ! grep -Fq "$url" "$SOURCE_REGISTRY_FILE"; then
+    if ! awk -F '\\t' -v url="$url" '$4 == url { found=1 } END { exit found ? 0 : 1 }' "$SOURCE_REGISTRY_FILE"; then
       printf '%s\\t%s\\t%s\\t%s\\n' "$(date -Iseconds)" "$AGENT_ID" "$TOOL_LABEL" "$url" >> "$SOURCE_REGISTRY_FILE"
     fi
   done
+  if [ -d "$REGISTRY_LOCK" ]; then
+    rmdir "$REGISTRY_LOCK" 2>/dev/null || true
+    trap cleanup EXIT
+  fi
 else
   PREVIEW=""
   STATUS="error"
