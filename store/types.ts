@@ -450,7 +450,7 @@ export type AppSettings = {
 export type ToolChoice =
   | { type: 'cli'; cli: 'claude' | 'gemini' | 'codex' }
   | { type: 'gemini-api'; model?: string }
-  | { type: 'local' }
+  | { type: 'local'; model?: string }
   | { type: 'perplexity'; model?: string }
   | { type: 'ab-article-eval'; localModel?: string; codexCmd?: string }
   | { type: 'auto' };

@@ -1,6 +1,6 @@
 # Shelly Content Agent Status
 
-Updated: 2026-05-15
+Updated: 2026-05-16
 
 ## Goal
 
@@ -11,13 +11,14 @@ Shelly単体で、Shelly/Chelly開発ログとSTEAM x AI発信をスマホだけ
 - Scheduler: Shelly native Android AlarmManager.
 - Source collection:
   - Substack: Perplexity `sonar-deep-research`.
-  - X: Perplexity `sonar`.
+  - X: local Shelly/Chelly development context only. Perplexity is not used for X.
 - Drafting:
   - Substack: `sonar-deep-research` first, Codex CLI for article reasoning when installed.
-  - X: `sonar`.
+  - X: local Qwen3-8B from Git history, build logs, Obsidian notes, and agent outputs.
   - Local comparison: Qwen3-8B vs Codex via the A/B eval agent.
 - Publishing:
   - X API is not used.
+  - X agents do not use Perplexity, paid APIs, or web scraping.
   - Outputs are drafts in Obsidian / Shelly files.
 
 ## Default Agent Cadence
@@ -25,7 +26,7 @@ Shelly単体で、Shelly/Chelly開発ログとSTEAM x AI発信をスマホだけ
 - Monday 06:00: academic source collection.
 - Monday 08:00: Substack deep-research draft.
 - Monday 10:00: Codex article draft.
-- Daily 07:00: X trend source collection.
+- Daily 07:00: X dev-log source collection.
 - Daily 08:00: X casual draft.
 
 ## Output Paths
@@ -53,8 +54,7 @@ Duplicate source registry:
 
 ## Remaining Risks
 
-- `PERPLEXITY_API_KEY` must be present in `~/.shelly/agents/.env`.
+- `PERPLEXITY_API_KEY` is required only for Substack academic/deep-research agents.
+- X agents require a local OpenAI-compatible LLM endpoint at `LOCAL_LLM_URL` when using Qwen3-8B.
 - Codex CLI must be installed and logged in inside Shelly before the Codex drafting agent can run.
-- Full APK packaging currently fails in Gradle Prefab native library resolution; Kotlin/source compile passes.
-- The failing packaging path is currently `expo-modules-core:buildCMakeDebug`, where Gradle transform output points to missing React Native / fbjni Prefab `.so` files such as `libjsi.so` or `libfbjni.so`.
-- A temporary Gradle cache repair can replace broken Prefab links with the matching `jni/<abi>/` `.so`, but this environment can regenerate the broken transform during assemble. Treat this as a build-environment issue to fix before final APK smoke testing.
+- Android debug APK packaging passes after regenerating the Gradle transform cache and stabilizing the Shelly AAPT2 wrapper.

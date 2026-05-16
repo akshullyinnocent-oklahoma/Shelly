@@ -66,6 +66,7 @@ SLUG=${shellQuote(slug)}
 TOOL_LABEL=${shellQuote(toolLabel)}
 ENV_FILE=${shellQuote(envFile)}
 LOCKS_DIR=${shellQuote(locksDir)}
+TMP_DIR=${shellQuote(tmpDir)}
 MAX_CONCURRENT=${MAX_CONCURRENT}
 REGISTRY_LOCK=""
 REGISTRY_LOCK_ACQUIRED=0
@@ -187,6 +188,40 @@ touch "$SOURCE_REGISTRY_FILE"
 SOURCE_CONTEXT=""
 if [ -s "$SOURCE_REGISTRY_FILE" ]; then
   SOURCE_CONTEXT=$(printf '\\n\\nKnown source URLs already used. Avoid duplicates unless essential:\\n'; tail -n 120 "$SOURCE_REGISTRY_FILE" | awk -F '\\t' '{ if ($4 != "") print "- " $4 " (" $1 ", " $2 ")" }')
+fi
+LOCAL_CONTEXT_FILE="$TMP_DIR/local-context-$AGENT_ID.txt"
+{
+  echo
+  echo "## Local project context"
+  if [ -f "$PROJECT_DIR/AI_CONTEXT.md" ]; then
+    echo
+    echo "### AI_CONTEXT.md"
+    head -c 8000 "$PROJECT_DIR/AI_CONTEXT.md" || true
+    echo
+  fi
+  for dir in "$PROJECT_DIR/drafts/x" "$PROJECT_DIR/sources/x" "$PROJECT_DIR/drafts/articles" "\${OBSIDIAN_VAULT_PATH:-/sdcard/Documents/ObsidianVault}/30_Build_Log" "\${OBSIDIAN_VAULT_PATH:-/sdcard/Documents/ObsidianVault}/90_Log/Agent_Output"; do
+    [ -d "$dir" ] || continue
+    echo
+    echo "### Recent files: $dir"
+    find "$dir" -type f -name '*.md' 2>/dev/null | sort | tail -n 6 | while read -r file; do
+      echo
+      echo "#### $file"
+      head -c 3000 "$file" || true
+      echo
+    done
+  done
+  for repo in "$HOME/hw" "$HOME/projects/shelly-content-studio"; do
+    [ -d "$repo/.git" ] || continue
+    echo
+    echo "### Recent git log: $repo"
+    git -C "$repo" log --oneline -8 2>/dev/null || true
+    echo
+    echo "### Current git status: $repo"
+    git -C "$repo" status --short 2>/dev/null || true
+  done
+} > "$LOCAL_CONTEXT_FILE"
+if [ -s "$LOCAL_CONTEXT_FILE" ]; then
+  SOURCE_CONTEXT="$SOURCE_CONTEXT\\n\\n$(head -c 20000 "$LOCAL_CONTEXT_FILE")"
 fi
 
 # Global concurrency check
@@ -321,13 +356,16 @@ rm -f "$PROMPT_FILE"`;
       return `echo 'Gemini CLI is experimental in Shelly. Use Gemini API for background agents.' > ${resultVar}`;
     case 'gemini-api':
       return geminiApiCommand(escapedPrompt, resultVar, tool.model);
-	    case 'local':
-	      return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
+    case 'local':
+      const localModel = (tool.model || 'Qwen3-8B').replace(/"/g, '\\"');
+      return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
 	printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
 	PROMPT_JSON=$(json_string_file "$PROMPT_FILE")
-	timeout "$TIMEOUT" curl -s http://127.0.0.1:8080/v1/chat/completions \\
+	LOCAL_URL="\${LOCAL_LLM_URL:-http://127.0.0.1:8080}"
+	LOCAL_MODEL="\${LOCAL_LLM_MODEL:-${localModel}}"
+	timeout "$TIMEOUT" curl -s "\${LOCAL_URL%/}/v1/chat/completions" \\
 	  -H "Content-Type: application/json" \\
-	  -d "{\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":$PROMPT_JSON}],\\"max_tokens\\":4096}" \\
+	  -d "{\\"model\\":\\"$LOCAL_MODEL\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":$PROMPT_JSON}],\\"max_tokens\\":4096}" \\
 	  > "$RESULT_FILE.response.json" 2> "$RESULT_FILE.stderr" || true
 	extract_ai_content "$RESULT_FILE.response.json" > ${resultVar} 2>> "$RESULT_FILE.stderr" || { touch "$BACKEND_ERROR_FILE"; [ -s ${resultVar} ] || cat "$RESULT_FILE.stderr" > ${resultVar}; }
 	rm -f "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"

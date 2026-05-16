@@ -3508,9 +3508,9 @@ AI-era STEAM education is not primarily about introducing AI tools into classroo
 
 ## Publishing Policy
 - Substack: academic papers, journals, conference material, public documents, and recent primary sources. Avoid duplicate sources.
-- X: casual news, trends, and user-interest driven observations are acceptable.
-- Source collection: Perplexity.
-- Drafting and reasoning: Codex CLI first, local Qwen3-8B as an A/B candidate.
+- X: local development logs, Git history, Obsidian notes, and agent run logs. Do not use Perplexity for X.
+- Source collection: Perplexity only for academic Substack work.
+- X drafting and short-form reasoning: local Qwen3-8B first, Codex CLI only when explicitly selected.
 - Image prompts: Gemini API only when needed.
 """.trimIndent() + "\n"
             )
@@ -3559,7 +3559,15 @@ Requirements:
                 """
 # X Draft
 
-Write concise Japanese posts from the latest sources or build log.
+Write concise Japanese posts from local development material.
+
+Use:
+- Shelly/Chelly build log
+- Git commits and diffs
+- Obsidian notes
+- agent run logs
+
+Do not use Perplexity or X API.
 
 Tone:
 - direct
@@ -3613,6 +3621,8 @@ OBSIDIAN_VAULT_PATH=/sdcard/Documents/ObsidianVault
             envFile.setWritable(false, false)
             envFile.setReadable(true, true)
             envFile.setWritable(true, true)
+            val oldXTrendState = readAgentState(agentsDir, "x-trend-source-collector")
+            deleteStaleAgent(agentsDir, "x-trend-source-collector")
 
             seedAgent(
                 agentsDir,
@@ -3638,23 +3648,25 @@ Avoid duplicates from the known source registry. Return concise source notes wit
 
             seedAgent(
                 agentsDir,
-                id = "x-trend-source-collector",
-                name = "X Trend Source Collector",
-                description = "Collects casual AI, education, and build-log hooks with Perplexity sonar.",
+                id = "x-dev-log-source-collector",
+                name = "X Dev Log Source Collector",
+                description = "Collects X post hooks from local Shelly/Chelly development logs without Perplexity.",
                 prompt = """
-Use Perplexity sonar to collect casual but useful source material for X posts.
+Collect useful X post hooks from local context only.
 
 Prioritize:
-- recent AI and education news
-- STEAM / maker culture trends
-- Android automation and smartphone-only development topics
 - Shelly/Chelly build-log angles
+- smartphone-only development lessons
+- Android automation constraints and breakthroughs
+- useful implementation details from Git history and Obsidian notes
+- STEAM x AI ideas already present in local notes
 
-Avoid duplicates from the known source registry. Return short Japanese notes with URLs and why each item could become a post.
+Do not use Perplexity, X API, paid APIs, or web scraping. Return short Japanese notes explaining why each item could become a post.
 """.trimIndent(),
-                toolJson = """{"type":"perplexity","model":"sonar"}""",
+                toolJson = """{"type":"local","model":"Qwen3-8B"}""",
                 outputPath = File(project, "sources/x").absolutePath,
                 schedule = "0 7 * * *",
+                inheritedState = oldXTrendState,
             )
 
             seedAgent(
@@ -3679,9 +3691,11 @@ Use fresh primary sources where possible. Distinguish facts from interpretation.
                 agentsDir,
                 id = "x-casual-draft",
                 name = "X Casual Draft",
-                description = "Drafts casual X posts from news, trends, and project context.",
+                description = "Drafts casual X posts from local Shelly/Chelly context without Perplexity.",
                 prompt = """
-Create concise Japanese X post drafts from recent AI, education, STEAM, Shelly, and Chelly context.
+Create concise Japanese X post drafts from local Shelly/Chelly development context.
+
+Use Git history, build logs, Obsidian notes, and agent outputs included in context. Do not use Perplexity, X API, paid APIs, or scraping.
 
 Return:
 1. short post
@@ -3690,7 +3704,7 @@ Return:
 
 Keep it casual, useful, and not overclaiming.
 """.trimIndent(),
-                toolJson = """{"type":"perplexity","model":"sonar"}""",
+                toolJson = """{"type":"local","model":"Qwen3-8B"}""",
                 outputPath = File(project, "drafts/x").absolutePath,
                 schedule = "0 8 * * *",
             )
@@ -3756,8 +3770,29 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
         val marker = File(home, ".shelly/enable-content-studio")
         val existingProject = File(home, "projects/shelly-content-studio")
         val existingAgent = File(home, ".shelly/agents/x-trend-source-collector.json")
-        return marker.exists() || existingProject.exists() || existingAgent.exists()
+        val existingDevLogAgent = File(home, ".shelly/agents/x-dev-log-source-collector.json")
+        return marker.exists() || existingProject.exists() || existingAgent.exists() || existingDevLogAgent.exists()
     }
+
+    private fun deleteStaleAgent(agentsDir: File, id: String) {
+        val file = File(agentsDir, "$id.json")
+        if (file.exists()) {
+            file.delete()
+        }
+    }
+
+    private fun readAgentState(agentsDir: File, id: String): JSONObject? {
+        val file = File(agentsDir, "$id.json")
+        if (!file.exists()) return null
+        return try {
+            JSONObject(file.readText())
+        } catch (e: Exception) {
+            android.util.Log.w("HomeInitializer", "agent state read skipped for $id: ${e.message}")
+            null
+        }
+    }
+
+    private val CONTENT_AGENT_VERSION = 3
 
     private fun seedAgent(
         agentsDir: File,
@@ -3768,33 +3803,41 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
         toolJson: String,
         outputPath: String,
         schedule: String? = null,
+        inheritedState: JSONObject? = null,
     ) {
         val file = File(agentsDir, "$id.json")
         val nextContent = agentJson(id, name, description, prompt, toolJson, outputPath, schedule)
         if (!file.exists()) {
             file.parentFile?.mkdirs()
-            file.writeText(nextContent)
+            val seeded = JSONObject(nextContent)
+            applyAgentState(seeded, inheritedState)
+            file.writeText(seeded.toString(2) + "\n")
             return
         }
 
         try {
             val current = JSONObject(file.readText())
-            if (current.optInt("version", 1) >= 2) return
+            if (current.optInt("version", 1) >= CONTENT_AGENT_VERSION) return
 
             val migrated = JSONObject(nextContent)
-            migrated.put("enabled", current.optBoolean("enabled", true))
-            if (current.has("lastRun") && !current.isNull("lastRun")) {
-                migrated.put("lastRun", current.get("lastRun"))
-            }
-            if (current.has("lastResult") && !current.isNull("lastResult")) {
-                migrated.put("lastResult", current.get("lastResult"))
-            }
-            migrated.put("createdAt", current.optLong("createdAt", 0L))
-            migrated.put("version", 2)
+            applyAgentState(migrated, current)
+            migrated.put("version", CONTENT_AGENT_VERSION)
             file.writeText(migrated.toString(2) + "\n")
         } catch (e: Exception) {
             android.util.Log.w("HomeInitializer", "agent seed migration skipped for $id: ${e.message}")
         }
+    }
+
+    private fun applyAgentState(target: JSONObject, state: JSONObject?) {
+        if (state == null) return
+        target.put("enabled", state.optBoolean("enabled", target.optBoolean("enabled", true)))
+        if (state.has("lastRun") && !state.isNull("lastRun")) {
+            target.put("lastRun", state.get("lastRun"))
+        }
+        if (state.has("lastResult") && !state.isNull("lastResult")) {
+            target.put("lastResult", state.get("lastResult"))
+        }
+        target.put("createdAt", state.optLong("createdAt", target.optLong("createdAt", 0L)))
     }
 
     private fun agentJson(
@@ -3820,7 +3863,7 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
   "lastRun": null,
   "lastResult": null,
   "createdAt": 0,
-  "version": 2
+  "version": $CONTENT_AGENT_VERSION
 }
 """.trimIndent() + "\n"
 
