@@ -200,22 +200,29 @@ export function Sidebar() {
   // REPOSITORIES) and use git's own per-file metadata rather than a
   // porcelain line count.
 
-  // Derive recent completed tasks from run history
+  // Derive latest completed task per agent from run history
   const recentTasks = React.useMemo(() => {
-    const allLogs: Array<{ id: string; name: string; timestamp: number }> = [];
+    const latestByAgent = new Map<
+      string,
+      { id: string; name: string; timestamp: number; status: 'success' | 'error' | 'skipped' }
+    >();
     for (const [agentId, logs] of Object.entries(runHistory)) {
       const agent = agents.find((a) => a.id === agentId);
       for (const log of logs) {
-        if (log.status === 'success' || log.status === 'error') {
-          allLogs.push({
-            id: `${agentId}-${log.timestamp}`,
-            name: agent?.name ?? agentId,
-            timestamp: log.timestamp,
-          });
+        if (log.status === 'success' || log.status === 'error' || log.status === 'skipped') {
+          const current = latestByAgent.get(agentId);
+          if (!current || log.timestamp > current.timestamp) {
+            latestByAgent.set(agentId, {
+              id: `${agentId}-${log.timestamp}`,
+              name: agent?.name ?? agentId,
+              timestamp: log.timestamp,
+              status: log.status,
+            });
+          }
         }
       }
     }
-    return allLogs
+    return Array.from(latestByAgent.values())
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 5)
       .map((log) => ({
@@ -340,7 +347,17 @@ export function Sidebar() {
           ))}
           {recentTasks.map((task) => (
             <View key={`recent-${task.id}`} style={styles.taskRow}>
-              <MaterialIcons name="check-circle" size={10} color={C.text2} />
+              <MaterialIcons
+                name={
+                  task.status === 'success'
+                    ? 'check-circle'
+                    : task.status === 'error'
+                      ? 'error'
+                      : 'remove-circle-outline'
+                }
+                size={10}
+                color={task.status === 'error' ? '#F87171' : C.text2}
+              />
               <View style={styles.taskInfo}>
                 <Text style={styles.taskName} numberOfLines={1}>
                   {task.name.toUpperCase()}
