@@ -60,7 +60,8 @@
     android:text="No agent session yet"
     android:textColor="#7DDB7D"
     android:textSize="15sp"
-    android:typeface="monospace" />
+    android:typeface="monospace"
+    android:textStyle="bold" />
 
   <TextView
     android:layout_width="match_parent"
@@ -79,5 +80,6 @@
     android:text="Open Shelly to start"
     android:textColor="#9BC49B"
     android:textSize="13sp"
-    android:typeface="monospace" />
+    android:typeface="monospace"
+    android:textStyle="bold" />
 </LinearLayout>
