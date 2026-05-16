@@ -61,6 +61,7 @@ export function Sidebar() {
     useSidebarStore();
   const agents = useAgentStore((s) => s.agents);
   const runHistory = useAgentStore((s) => s.runHistory);
+  const [runningAgentIds, setRunningAgentIds] = useState<Set<string>>(new Set());
   const [addRepoVisible, setAddRepoVisible] = useState(false);
   const [repoInput, setRepoInput] = useState('');
 
@@ -222,7 +223,31 @@ export function Sidebar() {
       }));
   }, [runHistory, agents]);
 
-  const runningAgents = agents.filter((a) => a.enabled);
+  useEffect(() => {
+    let cancelled = false;
+    const refreshRunningAgents = async () => {
+      const output = await TerminalEmulator.execCommand(
+        `for f in "$HOME"/.shelly/agents/locks/*.pid; do ` +
+          `[ -f "$f" ] || continue; ` +
+          `pid="$(cat "$f" 2>/dev/null || true)"; ` +
+          `[ -n "$pid" ] || continue; ` +
+          `if kill -0 "$pid" 2>/dev/null; then basename "$f" .pid; fi; ` +
+        `done`,
+        10_000,
+      ).catch(() => '');
+      if (cancelled) return;
+      setRunningAgentIds(new Set(output.split(/\s+/).filter(Boolean)));
+    };
+
+    refreshRunningAgents();
+    const interval = setInterval(refreshRunningAgents, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [agents.length]);
+
+  const runningAgents = agents.filter((a) => runningAgentIds.has(a.id));
 
   const targetWidth =
     mode === 'expanded' ? S.sidebarWidth : mode === 'icons' ? WIDTH_ICONS : WIDTH_HIDDEN;
