@@ -22,7 +22,7 @@ import { readDirEntries } from '@/lib/fs-native';
 import { logInfo } from '@/lib/debug-logger';
 import { useAgentStore } from '@/store/agent-store';
 import { useTerminalStore } from '@/store/terminal-store';
-import { deleteAgent } from '@/lib/agent-manager';
+import { deleteAgent, syncAgentRunLogsFromDisk } from '@/lib/agent-manager';
 import { useSettingsStore } from '@/store/settings-store';
 import { usePaneStore } from '@/store/pane-store';
 import { useMultiPaneStore } from '@/hooks/use-multi-pane';
@@ -223,29 +223,57 @@ export function Sidebar() {
       }));
   }, [runHistory, agents]);
 
+  const refreshRunningAgents = React.useCallback(async () => {
+    const output = await TerminalEmulator.execCommand(
+      `for f in "$HOME"/.shelly/agents/locks/*.pid; do ` +
+        `[ -f "$f" ] || continue; ` +
+        `pid="$(cat "$f" 2>/dev/null || true)"; ` +
+        `[ -n "$pid" ] || continue; ` +
+        `if kill -0 "$pid" 2>/dev/null; then basename "$f" .pid; fi; ` +
+      `done`,
+      10_000,
+    ).catch(() => '');
+    setRunningAgentIds(new Set(output.split(/\s+/).filter(Boolean)));
+  }, []);
+
+  const runCommandForAgentSync = React.useCallback(async (cmd: string) => {
+    const result = await TerminalEmulator.execCommand(cmd, 30_000);
+    if (result.exitCode !== 0) throw new Error(result.stderr || `exit ${result.exitCode}`);
+    return result.stdout;
+  }, []);
+
+  const handleRunScheduledAgent = React.useCallback(async (agentId: string, agentName: string) => {
+    setRunningAgentIds((prev) => new Set(prev).add(agentId));
+    try {
+      await TerminalEmulator.runAgent(agentId);
+      setTimeout(() => void refreshRunningAgents(), 1_000);
+      setTimeout(() => void refreshRunningAgents(), 5_000);
+      setTimeout(() => {
+        void syncAgentRunLogsFromDisk(runCommandForAgentSync, agentId).catch(() => {});
+      }, 8_000);
+    } catch (error) {
+      setRunningAgentIds((prev) => {
+        const next = new Set(prev);
+        next.delete(agentId);
+        return next;
+      });
+      Alert.alert('Agent failed', `Could not start "${agentName}".`);
+    }
+  }, [refreshRunningAgents, runCommandForAgentSync]);
+
   useEffect(() => {
     let cancelled = false;
-    const refreshRunningAgents = async () => {
-      const output = await TerminalEmulator.execCommand(
-        `for f in "$HOME"/.shelly/agents/locks/*.pid; do ` +
-          `[ -f "$f" ] || continue; ` +
-          `pid="$(cat "$f" 2>/dev/null || true)"; ` +
-          `[ -n "$pid" ] || continue; ` +
-          `if kill -0 "$pid" 2>/dev/null; then basename "$f" .pid; fi; ` +
-        `done`,
-        10_000,
-      ).catch(() => '');
-      if (cancelled) return;
-      setRunningAgentIds(new Set(output.split(/\s+/).filter(Boolean)));
+    const refreshIfMounted = async () => {
+      if (!cancelled) await refreshRunningAgents();
     };
 
-    refreshRunningAgents();
-    const interval = setInterval(refreshRunningAgents, 15_000);
+    refreshIfMounted();
+    const interval = setInterval(refreshIfMounted, 15_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [agents.length]);
+  }, [agents.length, refreshRunningAgents]);
 
   const runningAgents = agents.filter((a) => runningAgentIds.has(a.id));
 
@@ -327,11 +355,7 @@ export function Sidebar() {
                     </Text>
                   </View>
                   <Pressable
-                    onPress={() => {
-                      TerminalEmulator.runAgent(agent.id).catch(() => {
-                        Alert.alert('Agent failed', `Could not start "${agent.name}".`);
-                      });
-                    }}
+                    onPress={() => void handleRunScheduledAgent(agent.id, agent.name)}
                     hitSlop={8}
                     style={styles.tasksAction}
                     accessibilityRole="button"
