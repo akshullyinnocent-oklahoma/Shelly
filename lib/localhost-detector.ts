@@ -25,6 +25,7 @@ export function detectLocalhostUrl(rawText: string): string | null {
     const match = text.match(pattern);
     if (match) {
       let url = match[0];
+      if (isInternalNonPreviewUrl(url)) return null;
       // Normalize to localhost
       url = url.replace('0.0.0.0', 'localhost');
       url = url.replace('[::]', 'localhost');
@@ -34,4 +35,13 @@ export function detectLocalhostUrl(rawText: string): string | null {
   }
 
   return null;
+}
+
+function isInternalNonPreviewUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.startsWith('/hook/');
+  } catch {
+    return url.includes('/hook/');
+  }
 }

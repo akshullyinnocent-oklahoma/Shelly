@@ -181,7 +181,7 @@ function SessionCard({ session, primary = false }: { session: ScouterSession; pr
       <Text style={styles.sessionMeta} numberOfLines={1}>
         {metrics(session)}
       </Text>
-      {session.lastError ? <Text style={styles.sessionError} numberOfLines={2}>{session.lastError}</Text> : null}
+      {session.lastError ? <Text style={styles.sessionError} numberOfLines={1}>{summarizeError(session.lastError)}</Text> : null}
     </View>
   );
 }
@@ -221,7 +221,81 @@ function metrics(session: ScouterSession): string {
   if ((session.totalCostUsd || 0) > 0) parts.push(`$${(session.totalCostUsd || 0).toFixed(2)}`);
   if (typeof session.contextPercentRemaining === 'number') parts.push(`${session.contextPercentRemaining.toFixed(0)}% context`);
   if (session.gitBranch) parts.push(session.gitBranch);
-  return parts.length ? parts.join(' · ') : session.sessionId || 'No metrics yet';
+  return parts.length ? parts.join(' · ') : shortSessionId(session.sessionId);
+}
+
+function summarizeError(error: string): string {
+  const value = error.trim();
+  if (!value) return '';
+  if (looksLikeJson(value)) {
+    const parsed = tryParseJson(value);
+    const text = findJsonText(parsed);
+    if (text) return `Last payload: ${shorten(text, 90)}`;
+    const message = findJsonString(parsed, ['message', 'error', 'stop_reason', 'type']);
+    if (message) return `Last payload: ${shorten(message, 90)}`;
+    return 'Last payload: JSON response';
+  }
+  return `Last error: ${shorten(value.replace(/\s+/g, ' '), 120)}`;
+}
+
+function looksLikeJson(value: string): boolean {
+  return value.startsWith('{') || value.startsWith('[');
+}
+
+function tryParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function findJsonText(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findJsonText(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.type === 'text' && typeof record.text === 'string') return record.text;
+  for (const item of Object.values(record)) {
+    const found = findJsonText(item);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findJsonString(value: unknown, keys: string[]): string | null {
+  if (!value || typeof value !== 'object') return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findJsonString(item, keys);
+      if (found) return found;
+    }
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    if (typeof record[key] === 'string') return record[key] as string;
+  }
+  for (const item of Object.values(record)) {
+    const found = findJsonString(item, keys);
+    if (found) return found;
+  }
+  return null;
+}
+
+function shorten(value: string, max: number): string {
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned;
+}
+
+function shortSessionId(sessionId?: string): string {
+  if (!sessionId) return 'No metrics yet';
+  return sessionId.length > 18 ? `session ${sessionId.slice(0, 8)}` : sessionId;
 }
 
 function dotColor(status?: string, stale?: boolean): string {
