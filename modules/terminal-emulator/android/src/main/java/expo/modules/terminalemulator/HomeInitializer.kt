@@ -1,6 +1,7 @@
 package expo.modules.terminalemulator
 
 import android.content.Context
+import org.json.JSONObject
 import java.io.File
 
 object HomeInitializer {
@@ -3747,9 +3748,44 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
         outputPath: String,
         schedule: String? = null,
     ) {
-        writeIfMissing(
-            File(agentsDir, "$id.json"),
-            """
+        val file = File(agentsDir, "$id.json")
+        val nextContent = agentJson(id, name, description, prompt, toolJson, outputPath, schedule)
+        if (!file.exists()) {
+            file.parentFile?.mkdirs()
+            file.writeText(nextContent)
+            return
+        }
+
+        try {
+            val current = JSONObject(file.readText())
+            if (current.optInt("version", 1) >= 2) return
+
+            val migrated = JSONObject(nextContent)
+            migrated.put("enabled", current.optBoolean("enabled", true))
+            if (current.has("lastRun") && !current.isNull("lastRun")) {
+                migrated.put("lastRun", current.get("lastRun"))
+            }
+            if (current.has("lastResult") && !current.isNull("lastResult")) {
+                migrated.put("lastResult", current.get("lastResult"))
+            }
+            migrated.put("createdAt", current.optLong("createdAt", 0L))
+            migrated.put("version", 2)
+            file.writeText(migrated.toString(2) + "\n")
+        } catch (e: Exception) {
+            android.util.Log.w("HomeInitializer", "agent seed migration skipped for $id: ${e.message}")
+        }
+    }
+
+    private fun agentJson(
+        id: String,
+        name: String,
+        description: String,
+        prompt: String,
+        toolJson: String,
+        outputPath: String,
+        schedule: String?,
+    ): String =
+        """
 {
   "id": ${jsonString(id)},
   "name": ${jsonString(name)},
@@ -3763,11 +3799,9 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
   "lastRun": null,
   "lastResult": null,
   "createdAt": 0,
-  "version": 1
+  "version": 2
 }
 """.trimIndent() + "\n"
-        )
-    }
 
     private fun jsonString(value: String): String =
         "\"" + value
