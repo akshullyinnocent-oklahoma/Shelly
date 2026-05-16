@@ -7,6 +7,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.os.Build
 import android.util.Log
+import java.util.Calendar
 
 /**
  * BroadcastReceiver for scheduled agent execution.
@@ -19,11 +20,13 @@ class AgentAlarmReceiver : BroadcastReceiver() {
         private const val TAG = "AgentAlarmReceiver"
         const val EXTRA_AGENT_ID = "agent_id"
         const val EXTRA_INTERVAL_MS = "interval_ms"
+        const val EXTRA_CRON = "cron"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         val agentId = intent.getStringExtra(EXTRA_AGENT_ID) ?: return
         val intervalMs = intent.getLongExtra(EXTRA_INTERVAL_MS, 0L)
+        val cron = intent.getStringExtra(EXTRA_CRON)
         Log.i(TAG, "Alarm triggered for agent: $agentId")
 
         try {
@@ -41,16 +44,17 @@ class AgentAlarmReceiver : BroadcastReceiver() {
         }
 
         if (intervalMs > 0) {
-            scheduleNext(context.applicationContext, agentId, intervalMs)
+            scheduleNext(context.applicationContext, agentId, intervalMs, cron)
         }
     }
 
-    private fun scheduleNext(context: Context, agentId: String, intervalMs: Long) {
+    private fun scheduleNext(context: Context, agentId: String, intervalMs: Long, cron: String?) {
         try {
-            val triggerAt = System.currentTimeMillis() + intervalMs
+            val triggerAt = nextTriggerAt(cron) ?: (System.currentTimeMillis() + intervalMs)
             val nextIntent = Intent(context, AgentAlarmReceiver::class.java).apply {
                 putExtra(EXTRA_AGENT_ID, agentId)
                 putExtra(EXTRA_INTERVAL_MS, intervalMs)
+                if (!cron.isNullOrBlank()) putExtra(EXTRA_CRON, cron)
             }
             val pendingIntent = PendingIntent.getBroadcast(
                 context,
@@ -60,10 +64,64 @@ class AgentAlarmReceiver : BroadcastReceiver() {
             )
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             scheduleAlarm(alarmManager, triggerAt, pendingIntent)
-            Log.i(TAG, "Next agent alarm scheduled: $agentId in ${intervalMs}ms")
+            Log.i(TAG, "Next agent alarm scheduled: $agentId at $triggerAt")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to schedule next agent alarm for $agentId", e)
         }
+    }
+
+    private fun nextTriggerAt(cron: String?): Long? {
+        if (cron.isNullOrBlank()) return null
+        val parts = cron.trim().split(Regex("\\s+"))
+        if (parts.size != 5) return null
+
+        val minute = parts[0]
+        val hour = parts[1]
+        val dayOfMonth = parts[2]
+        val month = parts[3]
+        val dayOfWeek = parts[4]
+        val now = Calendar.getInstance()
+        val target = Calendar.getInstance()
+
+        val everyMin = Regex("^\\*/(\\d+)$").matchEntire(minute)?.groupValues?.get(1)?.toIntOrNull()
+        if (everyMin != null && everyMin > 0 && hour == "*" && dayOfMonth == "*" && month == "*" && dayOfWeek == "*") {
+            target.set(Calendar.SECOND, 0)
+            target.set(Calendar.MILLISECOND, 0)
+            val currentMinute = now.get(Calendar.MINUTE)
+            val nextMinute = ((currentMinute + 1 + everyMin - 1) / everyMin) * everyMin
+            if (nextMinute >= 60) {
+                target.add(Calendar.HOUR_OF_DAY, 1)
+                target.set(Calendar.MINUTE, nextMinute % 60)
+            } else {
+                target.set(Calendar.MINUTE, nextMinute)
+            }
+            return target.timeInMillis
+        }
+
+        val parsedMinute = minute.toIntOrNull()
+        val parsedHour = hour.toIntOrNull()
+        if (parsedMinute == null || parsedHour == null || dayOfMonth != "*" || month != "*") return null
+
+        target.set(Calendar.HOUR_OF_DAY, parsedHour)
+        target.set(Calendar.MINUTE, parsedMinute)
+        target.set(Calendar.SECOND, 0)
+        target.set(Calendar.MILLISECOND, 0)
+
+        val parsedDow = dayOfWeek.toIntOrNull()
+        if (parsedDow != null) {
+            val targetDow = if (parsedDow % 7 == 0) Calendar.SUNDAY else (parsedDow % 7) + 1
+            target.set(Calendar.DAY_OF_WEEK, targetDow)
+            if (target.timeInMillis <= now.timeInMillis) {
+                target.add(Calendar.DAY_OF_YEAR, 7)
+            }
+            return target.timeInMillis
+        }
+
+        if (dayOfWeek != "*") return null
+        if (target.timeInMillis <= now.timeInMillis) {
+            target.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return target.timeInMillis
     }
 
     private fun scheduleAlarm(alarmManager: AlarmManager, triggerAt: Long, pendingIntent: PendingIntent) {

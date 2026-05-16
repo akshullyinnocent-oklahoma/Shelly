@@ -30,7 +30,7 @@ declare class TerminalEmulatorModuleType extends NativeModule {
   /** bug #92: Fires the per-package all-files-access settings intent. No-op when already granted or API < 30. */
   requestAllFilesAccess(): Promise<void>;
   testExecve(): Promise<{ success: boolean; result?: string; error?: string }>;
-  scheduleAgent(agentId: string, intervalMs: number, triggerAtMs: number): Promise<void>;
+  scheduleAgent(agentId: string, intervalMs: number, triggerAtMs: number, cron?: string): Promise<void>;
   cancelAgent(agentId: string): Promise<void>;
   execCommand(command: string, timeoutMs?: number): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   readProcNetFile(path: string): Promise<string>;

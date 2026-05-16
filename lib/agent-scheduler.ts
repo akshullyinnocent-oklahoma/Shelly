@@ -83,7 +83,7 @@ export async function installSchedule(agent: Agent): Promise<void> {
 
   if (intervalMs !== null) {
     const triggerAt = nextTriggerMs(agent.schedule);
-    await TerminalEmulator.scheduleAgent(agent.id, intervalMs, triggerAt);
+    await TerminalEmulator.scheduleAgent(agent.id, intervalMs, triggerAt, agent.schedule);
   }
 }
 

@@ -679,13 +679,14 @@ class TerminalEmulatorModule : Module() {
             }
         }
 
-        AsyncFunction("scheduleAgent") { agentId: String, intervalMs: Long, triggerAtMs: Long ->
+        AsyncFunction("scheduleAgent") { agentId: String, intervalMs: Long, triggerAtMs: Long, cron: String? ->
             val context = appContext.reactContext ?: return@AsyncFunction null
             val requestCode = getAgentRequestCode(context, agentId)
             val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val intent = Intent(context, AgentAlarmReceiver::class.java).apply {
                 putExtra(AgentAlarmReceiver.EXTRA_AGENT_ID, agentId)
                 putExtra(AgentAlarmReceiver.EXTRA_INTERVAL_MS, intervalMs)
+                if (!cron.isNullOrBlank()) putExtra(AgentAlarmReceiver.EXTRA_CRON, cron)
             }
             val pi = PendingIntent.getBroadcast(
                 context, requestCode, intent,
