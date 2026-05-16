@@ -383,7 +383,13 @@ export function Sidebar() {
                   {task.name.toUpperCase()}
                 </Text>
               </View>
-              <Text style={styles.taskAge}>{task.age}</Text>
+              {task.status === 'error' ? (
+                <View style={styles.taskLogBadge}>
+                  <Text style={styles.taskLogBadgeText}>LOG</Text>
+                </View>
+              ) : (
+                <Text style={styles.taskAge}>{task.age}</Text>
+              )}
             </Pressable>
           ))}
           {agents.some((a) => a.enabled && a.schedule) && (
@@ -729,6 +735,19 @@ const styles = StyleSheet.create({
     fontWeight: F.sidebarItem.weight,
     color: C.text2,
     letterSpacing: 0.3,
+  },
+  taskLogBadge: {
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: R.badge,
+    backgroundColor: withAlpha('#F87171', 0.18),
+  },
+  taskLogBadgeText: {
+    fontSize: F.badge.size,
+    fontFamily: F.family,
+    fontWeight: F.badge.weight,
+    color: '#F87171',
+    letterSpacing: 0.5,
   },
   taskName: {
     fontSize: F.sidebarItem.size,
