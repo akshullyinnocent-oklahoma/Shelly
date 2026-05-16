@@ -984,7 +984,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 140: Add a shebang to the generated `shelly` helper. Without it,
     //      native bash resolves the path but cannot execute the script,
     //      surfacing as `libbash.so: .../bin/shelly: Success`.
-    private const val BASHRC_VERSION = 140
+    // 141: Avoid executing `$HOME/bin/shelly` directly. Samsung/SELinux can
+    //      still reject app-private shebang scripts with
+    //      `bad interpreter: Success`, so expose `shelly()` as a bash
+    //      function that sources the helper through the active shell.
+    private const val BASHRC_VERSION = 141
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1314,6 +1318,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("SHELLY_HELPER_EOF")
             sb.appendLine("chmod 700 \"\$HOME/bin/shelly\" 2>/dev/null || true")
             sb.appendLine("fi")
+            sb.appendLine("shelly() {")
+            sb.appendLine("  \"\$SHELL\" \"\$HOME/bin/shelly\" \"\$@\"")
+            sb.appendLine("}")
             sb.appendLine("hash -r 2>/dev/null || true")
             // v138: PATH-level Codex wrapper. The bash `codex()` function
             // below is preferred in normal interactive shells, but restored
