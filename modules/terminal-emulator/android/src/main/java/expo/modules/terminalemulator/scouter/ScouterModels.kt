@@ -60,14 +60,17 @@ data class ScouterEvent(
     val contextPercentRemaining: Double? = null
 ) {
     fun toSnapshot(previous: SessionSnapshot? = null): SessionSnapshot {
+        val isTerminalState = derivedStatus == ScouterStatus.COMPLETED ||
+            derivedStatus == ScouterStatus.IDLE ||
+            derivedStatus == ScouterStatus.ERROR
         return SessionSnapshot(
             sessionId = sessionId,
             source = source,
             projectName = projectName,
             gitBranch = gitBranch ?: previous?.gitBranch,
             currentStatus = derivedStatus,
-            currentTool = toolName ?: previous?.currentTool,
-            currentFile = targetFile ?: previous?.currentFile,
+            currentTool = if (isTerminalState) null else toolName ?: previous?.currentTool,
+            currentFile = if (isTerminalState) null else targetFile ?: previous?.currentFile,
             lastEventAt = timestamp,
             sessionStartAt = previous?.sessionStartAt ?: timestamp,
             totalCostUsd = if (totalCostUsd > 0.0) totalCostUsd else previous?.totalCostUsd ?: 0.0,
@@ -159,4 +162,3 @@ fun inferSource(raw: String?): ScouterSource {
         else -> ScouterSource.SHELLY
     }
 }
-
