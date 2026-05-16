@@ -59,12 +59,13 @@
     android:textColor="#D1D5DB"
     android:textSize="13sp" />
 
-  <View
+  <TextView
     android:layout_width="match_parent"
     android:layout_height="1dp"
     android:layout_marginTop="8dp"
     android:layout_marginBottom="7dp"
-    android:background="#263241" />
+    android:background="#263241"
+    android:text="" />
 
   <TextView
     android:id="@+id/scouter_metrics"
@@ -76,4 +77,3 @@
     android:textColor="#9CA3AF"
     android:textSize="12sp" />
 </LinearLayout>
-
