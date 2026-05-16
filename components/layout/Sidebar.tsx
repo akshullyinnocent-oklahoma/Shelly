@@ -205,7 +205,15 @@ export function Sidebar() {
     const activeAgentIds = new Set([...runningAgentIds, ...pendingAgentIds]);
     const latestByAgent = new Map<
       string,
-      { id: string; name: string; timestamp: number; status: 'success' | 'error' }
+      {
+        id: string;
+        name: string;
+        timestamp: number;
+        status: 'success' | 'error';
+        outputPreview: string;
+        errorMessage?: string;
+        toolUsed: string;
+      }
     >();
     for (const [agentId, logs] of Object.entries(runHistory)) {
       if (activeAgentIds.has(agentId)) continue;
@@ -219,6 +227,9 @@ export function Sidebar() {
               name: agent?.name ?? agentId,
               timestamp: log.timestamp,
               status: log.status,
+              outputPreview: log.outputPreview,
+              errorMessage: log.errorMessage,
+              toolUsed: log.toolUsed,
             });
           }
         }
@@ -348,7 +359,20 @@ export function Sidebar() {
             </View>
           ))}
           {recentTasks.map((task) => (
-            <View key={`recent-${task.id}`} style={styles.taskRow}>
+            <Pressable
+              key={`recent-${task.id}`}
+              style={({ pressed }) => [styles.taskRow, pressed && styles.taskRowPressed]}
+              onPress={() => {
+                const preview = task.errorMessage || task.outputPreview || 'No log preview available.';
+                Alert.alert(
+                  task.status === 'success' ? 'Agent completed' : 'Agent failed',
+                  `${task.name}\n${task.age}${task.toolUsed ? `\nTool: ${task.toolUsed}` : ''}\n\n${preview}`,
+                );
+              }}
+              hitSlop={4}
+              accessibilityRole="button"
+              accessibilityLabel={`Show result for ${task.name}`}
+            >
               <MaterialIcons
                 name={task.status === 'success' ? 'check-circle' : 'error'}
                 size={10}
@@ -360,7 +384,7 @@ export function Sidebar() {
                 </Text>
               </View>
               <Text style={styles.taskAge}>{task.age}</Text>
-            </View>
+            </Pressable>
           ))}
           {agents.some((a) => a.enabled && a.schedule) && (
             <>
@@ -662,6 +686,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: P.sidebarItem.px,
     height: S.sidebarItemHeight,
     gap: 5,
+  },
+  taskRowPressed: {
+    backgroundColor: withAlpha(C.accent, 0.08),
   },
   tasksSeparator: {
     height: 1,
