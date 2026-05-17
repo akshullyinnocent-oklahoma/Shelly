@@ -218,6 +218,61 @@ if (typeof globalThis.Bun.gc !== 'function') {
 if (typeof globalThis.Bun.generateHeapSnapshot !== 'function') {
   globalThis.Bun.generateHeapSnapshot = function() { throw new Error('Bun.generateHeapSnapshot unavailable on Shelly Node tier'); };
 }
+if (typeof globalThis.Bun.version !== 'string') {
+  globalThis.Bun.version = '1.3.0-shelly-node';
+}
+if (typeof globalThis.Bun.stripANSI !== 'function') {
+  globalThis.Bun.stripANSI = function shellyStripANSI(value) {
+    return String(value ?? '').replace(/\\x1B(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])/g, '');
+  };
+}
+if (typeof globalThis.Bun.wrapAnsi !== 'function') {
+  globalThis.Bun.wrapAnsi = function shellyWrapAnsi(value, columns) {
+    const text = String(value ?? '');
+    const width = Math.max(1, Number(columns) || 80);
+    const lines = [];
+    for (const line of text.split('\\n')) {
+      let rest = line;
+      while (globalThis.Bun.stringWidth(rest) > width) {
+        let cut = 0, used = 0;
+        for (const ch of rest) {
+          const w = globalThis.Bun.stringWidth(ch);
+          if (used + w > width) break;
+          used += w;
+          cut += ch.length;
+        }
+        lines.push(rest.slice(0, Math.max(cut, 1)));
+        rest = rest.slice(Math.max(cut, 1));
+      }
+      lines.push(rest);
+    }
+    return lines.join('\\n');
+  };
+}
+if (!globalThis.Bun.stdin) {
+  globalThis.Bun.stdin = process.stdin;
+}
+if (!globalThis.Bun.embeddedFiles) {
+  globalThis.Bun.embeddedFiles = [];
+}
+if (!globalThis.Bun.JSONL) {
+  globalThis.Bun.JSONL = {
+    parse: function(value) { return String(value ?? '').split(/\\r?\\n/).filter(Boolean).map(function(line) { return JSON.parse(line); }); },
+    stringify: function(values) { return Array.from(values ?? []).map(function(value) { return JSON.stringify(value); }).join('\\n'); }
+  };
+}
+if (typeof globalThis.Bun.spawn !== 'function') {
+  globalThis.Bun.spawn = function shellyBunSpawn(command, options) {
+    const childProcess = require('child_process');
+    const cmd = Array.isArray(command) ? command[0] : command;
+    const args = Array.isArray(command) ? command.slice(1) : [];
+    const child = childProcess.spawn(String(cmd), args.map(String), options || {});
+    child.exited = new Promise(function(resolve) {
+      child.on('exit', function(code) { resolve(code ?? 0); });
+    });
+    return child;
+  };
+}
 `;
 
 function log(line) {

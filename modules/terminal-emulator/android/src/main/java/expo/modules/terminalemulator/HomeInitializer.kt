@@ -997,7 +997,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 143: Apply the same native opt-in policy to background updater health
     //      checks and npm quick checks so Bun SEA failures do not repeat in
     //      the background after foreground `claude` is fixed.
-    private const val BASHRC_VERSION = 143
+    // 144: Extend the Claude extracted-Node Bun compatibility preload for
+    //      Claude Code 2.1.143 surfaces observed in the bundled cli.js.
+    private const val BASHRC_VERSION = 144
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2079,6 +2081,61 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("}")
             sb.appendLine("if (typeof globalThis.Bun.generateHeapSnapshot !== 'function') {")
             sb.appendLine("  globalThis.Bun.generateHeapSnapshot = function() { throw new Error('Bun.generateHeapSnapshot unavailable on Shelly Node tier'); };")
+            sb.appendLine("}")
+            sb.appendLine("if (typeof globalThis.Bun.version !== 'string') {")
+            sb.appendLine("  globalThis.Bun.version = '1.3.0-shelly-node';")
+            sb.appendLine("}")
+            sb.appendLine("if (typeof globalThis.Bun.stripANSI !== 'function') {")
+            sb.appendLine("  globalThis.Bun.stripANSI = function shellyStripANSI(value) {")
+            sb.appendLine("    return String(value ?? '').replace(/\\x1B(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])/g, '');")
+            sb.appendLine("  };")
+            sb.appendLine("}")
+            sb.appendLine("if (typeof globalThis.Bun.wrapAnsi !== 'function') {")
+            sb.appendLine("  globalThis.Bun.wrapAnsi = function shellyWrapAnsi(value, columns) {")
+            sb.appendLine("    const text = String(value ?? '');")
+            sb.appendLine("    const width = Math.max(1, Number(columns) || 80);")
+            sb.appendLine("    const lines = [];")
+            sb.appendLine("    for (const line of text.split('\\n')) {")
+            sb.appendLine("      let rest = line;")
+            sb.appendLine("      while (globalThis.Bun.stringWidth(rest) > width) {")
+            sb.appendLine("        let cut = 0, used = 0;")
+            sb.appendLine("        for (const ch of rest) {")
+            sb.appendLine("          const w = globalThis.Bun.stringWidth(ch);")
+            sb.appendLine("          if (used + w > width) break;")
+            sb.appendLine("          used += w;")
+            sb.appendLine("          cut += ch.length;")
+            sb.appendLine("        }")
+            sb.appendLine("        lines.push(rest.slice(0, Math.max(cut, 1)));")
+            sb.appendLine("        rest = rest.slice(Math.max(cut, 1));")
+            sb.appendLine("      }")
+            sb.appendLine("      lines.push(rest);")
+            sb.appendLine("    }")
+            sb.appendLine("    return lines.join('\\n');")
+            sb.appendLine("  };")
+            sb.appendLine("}")
+            sb.appendLine("if (!globalThis.Bun.stdin) {")
+            sb.appendLine("  globalThis.Bun.stdin = process.stdin;")
+            sb.appendLine("}")
+            sb.appendLine("if (!globalThis.Bun.embeddedFiles) {")
+            sb.appendLine("  globalThis.Bun.embeddedFiles = [];")
+            sb.appendLine("}")
+            sb.appendLine("if (!globalThis.Bun.JSONL) {")
+            sb.appendLine("  globalThis.Bun.JSONL = {")
+            sb.appendLine("    parse: function(value) { return String(value ?? '').split(/\\r?\\n/).filter(Boolean).map(function(line) { return JSON.parse(line); }); },")
+            sb.appendLine("    stringify: function(values) { return Array.from(values ?? []).map(function(value) { return JSON.stringify(value); }).join('\\n'); }")
+            sb.appendLine("  };")
+            sb.appendLine("}")
+            sb.appendLine("if (typeof globalThis.Bun.spawn !== 'function') {")
+            sb.appendLine("  globalThis.Bun.spawn = function shellyBunSpawn(command, options) {")
+            sb.appendLine("    const childProcess = require('child_process');")
+            sb.appendLine("    const cmd = Array.isArray(command) ? command[0] : command;")
+            sb.appendLine("    const args = Array.isArray(command) ? command.slice(1) : [];")
+            sb.appendLine("    const child = childProcess.spawn(String(cmd), args.map(String), options || {});")
+            sb.appendLine("    child.exited = new Promise(function(resolve) {")
+            sb.appendLine("      child.on('exit', function(code) { resolve(code ?? 0); });")
+            sb.appendLine("    });")
+            sb.appendLine("    return child;")
+            sb.appendLine("  };")
             sb.appendLine("}")
 
             // ──────────────────────────────────────────────────────────────
