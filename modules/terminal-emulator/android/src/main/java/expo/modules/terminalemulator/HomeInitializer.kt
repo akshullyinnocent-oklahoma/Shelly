@@ -988,7 +988,16 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      still reject app-private shebang scripts with
     //      `bad interpreter: Success`, so expose `shelly()` as a bash
     //      function that sources the helper through the active shell.
-    private const val BASHRC_VERSION = 141
+    // 142: Harden bare `claude` against upstream native musl regressions.
+    //      Claude Code 2.1.143 can draw the initial TUI banner on-device and
+    //      then crash with SIGBUS/SIGSEGV from the musl trampoline. Record the
+    //      crashing native version immediately, skip cooled-down APK/runtime
+    //      native tiers, and fall through to cli.js tiers instead of leaving
+    //      the terminal in a broken crash loop.
+    // 143: Apply the same native opt-in policy to background updater health
+    //      checks and npm quick checks so Bun SEA failures do not repeat in
+    //      the background after foreground `claude` is fixed.
+    private const val BASHRC_VERSION = 143
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1597,7 +1606,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    PATH=\"\$PATH\" LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\" ANDROID_DATA=\"\${ANDROID_DATA:-/data}\" ANDROID_ROOT=\"\${ANDROID_ROOT:-/system}\" \\")
             sb.appendLine("    TMPDIR=\"\$__shelly_tmp\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\$__claude_tmp\" CLAUDE_TMPDIR=\"\$__claude_tmp\" \\")
             sb.appendLine("    XDG_CONFIG_HOME=\"\${XDG_CONFIG_HOME:-\$HOME/.config}\" XDG_CACHE_HOME=\"\${XDG_CACHE_HOME:-\$HOME/.cache}\" XDG_DATA_HOME=\"\${XDG_DATA_HOME:-\$HOME/.local/share}\" \\")
-            sb.appendLine("    NO_UPDATE_NOTIFIER=1 USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" \\")
+            sb.appendLine("    NO_UPDATE_NOTIFIER=1 USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" \\")
             sb.appendLine("    /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__claude_bin\" \"\$@\"")
             sb.appendLine("}")
             // bug #116 paste-routing override (Codex 2026-04-25): the
@@ -1793,7 +1802,8 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __fv=\"\$HOME/.shelly-runtime/.failed-versions\"")
             sb.appendLine("  [ -f \"\$__fv\" ] || return 1")
             sb.appendLine("  local __cur __now __ttl __latest __keyver __epoch")
-            sb.appendLine("  __cur=\$(cat \"\$__vf\" 2>/dev/null | tr -d '\\n')")
+            sb.appendLine("  __cur=\"\${1:-}\"")
+            sb.appendLine("  [ -n \"\$__cur\" ] || __cur=\$(cat \"\$__vf\" 2>/dev/null | tr -d '\\n')")
             sb.appendLine("  if [ -z \"\$__cur\" ]; then")
             sb.appendLine("    __cur=\$(basename \"\$(readlink \"\$HOME/.shelly-runtime/claude/current\" 2>/dev/null)\" 2>/dev/null)")
             sb.appendLine("  fi")
@@ -2280,7 +2290,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    __ver=\$(cat \"\$__cache\" 2>/dev/null | tr -d '\\n')")
             sb.appendLine("    case \"\$__ver\" in [0-9]*.[0-9]*.[0-9]*) printf '%s' \"\$__ver\"; return 0 ;; esac")
             sb.appendLine("    [ -x \"\$__musl_claude\" ] || return 1")
-            sb.appendLine("    __ver=\$(SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" timeout 10 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" --version 2>/dev/null | sed -n 's/^\\([0-9][0-9.]*\\).*/\\1/p' | head -1)")
+            sb.appendLine("    __ver=\$(SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" timeout 10 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" --version 2>/dev/null | sed -n 's/^\\([0-9][0-9.]*\\).*/\\1/p' | head -1)")
             sb.appendLine("    case \"\$__ver\" in [0-9]*.[0-9]*.[0-9]*) mkdir -p \"\$(dirname \"\$__cache\")\" 2>/dev/null; printf '%s' \"\$__ver\" > \"\$__cache\" 2>/dev/null || true; printf '%s' \"\$__ver\"; return 0 ;; esac")
             sb.appendLine("    return 1")
             sb.appendLine("  }")
@@ -2303,12 +2313,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    __shelly_seed_claude_home_trust")
             sb.appendLine("  fi")
             sb.appendLine("  __shelly_consume_runtime_failures")
-            // v119: real-device triage showed the Node-based tiers hang before
-            // rendering, while the musl Bun SEA tier reaches the Claude TUI.
-            // Prefer native for bare TUI launches, but keep an explicit opt-out
-            // for diagnostics or future upstream regressions.
+            // v142: upstream native musl Claude can regress after passing
+            // --version smoke. Keep foreground native opt-in only and let the
+            // extracted/legacy cli.js tiers handle ordinary bare TUI launches.
             sb.appendLine("  local __claude_foreground_native=0")
-            sb.appendLine("  if { [ \"\$__claude_bare_tui\" -eq 1 ] && [ \"\${SHELLY_DISABLE_NATIVE_CLAUDE:-0}\" != \"1\" ]; } || [ \"\${SHELLY_CLAUDE_NATIVE_TUI:-0}\" = \"1\" ] || [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ]; then")
+            sb.appendLine("  if { [ \"\${SHELLY_PREFER_NATIVE_CLAUDE:-0}\" = \"1\" ] || [ \"\${SHELLY_CLAUDE_NATIVE_TUI:-0}\" = \"1\" ] || [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ]; } && [ \"\${SHELLY_DISABLE_NATIVE_CLAUDE:-0}\" != \"1\" ]; then")
             sb.appendLine("    __claude_foreground_native=1")
             sb.appendLine("  fi")
             sb.appendLine("  if [ \"\$__claude_foreground_native\" -eq 1 ] && [ \"\${SHELLY_FORCE_LEGACY_CLAUDE:-0}\" != \"1\" ] && [ -x \"\$__trampoline\" ] && [ -x \"\$__musl_ld\" ] && [ -f \"\$__musl_exec_wrapper\" ]; then")
@@ -2323,7 +2332,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    __runtime_claude_ver=\$(cat \"\$HOME/.shelly-runtime/claude/version\" 2>/dev/null | tr -d '\\n')")
             sb.appendLine("    __apk_claude_ver=\$(__shelly_claude_apk_native_version 2>/dev/null || true)")
             sb.appendLine("    if [ -x \"\$__runtime_claude\" ] && { [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ] || ! __shelly_claude_native_in_cooldown; }; then")
-            sb.appendLine("      if [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" != \"1\" ] && [ -x \"\$__musl_claude\" ] && __shelly_semver_gt \"\$__apk_claude_ver\" \"\$__runtime_claude_ver\"; then")
+            sb.appendLine("      if [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" != \"1\" ] && [ -x \"\$__musl_claude\" ] && __shelly_semver_gt \"\$__apk_claude_ver\" \"\$__runtime_claude_ver\" && ! __shelly_claude_native_in_cooldown \"\$__apk_claude_ver\"; then")
             sb.appendLine("        __foreground_claude_bin=\"\$__musl_claude\"")
             sb.appendLine("        __foreground_claude_tier=\"apk\"")
             sb.appendLine("        [ -z \"\$SHELLY_VERBOSE_CLI_TIER\" ] || echo \"[shelly] claude: APK native \$__apk_claude_ver is newer than runtime \$__runtime_claude_ver; using APK tier\" >&2")
@@ -2334,7 +2343,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    elif [ -x \"\$__runtime_claude\" ] && [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("      echo '[shelly] claude: runtime native cooldown active, using APK musl foreground tier' >&2")
             sb.appendLine("    fi")
-            sb.appendLine("    if [ -z \"\$__foreground_claude_bin\" ] && [ -x \"\$__musl_claude\" ]; then")
+            sb.appendLine("    if [ -z \"\$__foreground_claude_bin\" ] && [ -x \"\$__musl_claude\" ] && { [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ] || ! __shelly_claude_native_in_cooldown \"\$__apk_claude_ver\"; }; then")
             sb.appendLine("      __foreground_claude_bin=\"\$__musl_claude\"")
             sb.appendLine("      __foreground_claude_tier=\"apk\"")
             sb.appendLine("    fi")
@@ -2379,14 +2388,27 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("            ;;")
             sb.appendLine("        esac")
             sb.appendLine("      fi")
+            sb.appendLine("      case \"\$__foreground_claude_rc\" in")
+            sb.appendLine("        133|134|135|139|159)")
+            sb.appendLine("          local __failed_native_ver=\"\"")
+            sb.appendLine("          if [ \"\$__foreground_claude_tier\" = \"runtime\" ]; then")
+            sb.appendLine("            __failed_native_ver=\$(cat \"\$HOME/.shelly-runtime/claude/version\" 2>/dev/null | tr -d '\\n')")
+            sb.appendLine("          else")
+            sb.appendLine("            __failed_native_ver=\"\$__apk_claude_ver\"")
+            sb.appendLine("          fi")
+            sb.appendLine("          case \"\$__failed_native_ver\" in [0-9]*.[0-9]*.[0-9]*) mkdir -p \"\$HOME/.shelly-runtime\" 2>/dev/null; printf 'claude=%s %s %s %s\\n' \"\$__failed_native_ver\" \"\$(date -u +%s)\" \"\$__foreground_claude_rc\" \"\$__foreground_claude_tier\" >> \"\$HOME/.shelly-runtime/.runtime-failures\" 2>/dev/null ;; esac")
+            sb.appendLine("          ;;")
+            sb.appendLine("      esac")
             sb.appendLine("      if [ \"\$__foreground_claude_rc\" -eq 139 ] && [ \"\$__claude_bare_tui\" -eq 1 ] && [ ! -f \"\$HOME/.claude/.credentials.json\" ]; then")
             sb.appendLine("        echo '[shelly] claude: native exit 139 during /login. Trust seed may not have applied. Run shelly-doctor to inspect ~/.claude.json state.' >&2")
             sb.appendLine("      fi")
             sb.appendLine("      __shelly_paste_tui_end")
-            sb.appendLine("      if [ \"\$__foreground_claude_rc\" -ne 0 ] && [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
-            sb.appendLine("        echo \"[shelly] claude: native foreground exited \$__foreground_claude_rc; not falling back to Node tiers\" >&2")
+            sb.appendLine("      if [ \"\$__foreground_claude_rc\" -eq 0 ] || [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ]; then")
+            sb.appendLine("        return \"\$__foreground_claude_rc\"")
             sb.appendLine("      fi")
-            sb.appendLine("      return \"\$__foreground_claude_rc\"")
+            sb.appendLine("      if [ -z \"\$SHELLY_SILENT_CLI_TIER\" ]; then")
+            sb.appendLine("        echo \"[shelly] claude: native foreground failed (exit \$__foreground_claude_rc), falling back to cli.js tiers\" >&2")
+            sb.appendLine("      fi")
             sb.appendLine("    fi")
             sb.appendLine("  fi")
             sb.appendLine("  if [ -f \"\$__runtime_extracted_cli_js\" ]; then")
@@ -2439,7 +2461,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("        echo '[shelly] claude: runtime latest (musl Bun SEA)' >&2")
             sb.appendLine("      fi")
             sb.appendLine("      __shelly_paste_tui_begin")
-            sb.appendLine("      BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__runtime_claude\" \"\$@\"")
+            sb.appendLine("      BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__runtime_claude\" \"\$@\"")
             sb.appendLine("      local __runtime_rc=$?")
             // Retry list updated 2026-05-08 per Codex review: 133 (SIGTRAP)
             // and 135 (SIGBUS) added — both observed on Z Fold6 with Bun
@@ -2450,7 +2472,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      case \"\$__runtime_rc\" in")
             sb.appendLine("        133|134|135|139|159)")
             sb.appendLine("          rm -f \"\$__bun_tmp\"/.*.node 2>/dev/null")
-            sb.appendLine("          BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__runtime_claude\" \"\$@\"")
+            sb.appendLine("          BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__runtime_claude\" \"\$@\"")
             sb.appendLine("          __runtime_rc=$?")
             sb.appendLine("          ;;")
             sb.appendLine("      esac")
@@ -2499,14 +2521,14 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    fi")
             sb.appendLine("    if { [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ] || { [ \"\${SHELLY_PREFER_NATIVE_CLAUDE:-0}\" = \"1\" ] && ! __shelly_claude_native_in_cooldown; }; } && [ -x \"\$__musl_claude\" ]; then")
             sb.appendLine("    __shelly_paste_tui_begin")
-            sb.appendLine("    BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" \"\$@\"")
+            sb.appendLine("    BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" \"\$@\"")
             sb.appendLine("    local __musl_rc=$?")
             // 137 dropped per Codex review (SIGKILL/OOM is not a cache-clear-
             // recoverable signal); list matches the runtime-tier block above.
             sb.appendLine("    case \"\$__musl_rc\" in")
             sb.appendLine("      133|134|135|139|159)")
             sb.appendLine("        rm -f \"\$__bun_tmp\"/.*.node 2>/dev/null")
-            sb.appendLine("        BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" \"\$@\"")
+            sb.appendLine("        BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" \"\$@\"")
             sb.appendLine("        __musl_rc=$?")
             sb.appendLine("        ;;")
             sb.appendLine("    esac")
@@ -3166,11 +3188,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("          ;;")
             sb.appendLine("      esac")
             sb.appendLine("    fi")
-            sb.appendLine("    if [ \$__claude_ok -ne 1 ] && [ -x \"\$HOME/.shelly-runtime/claude/current/claude\" ] && [ -x \"$libDir/shelly_musl_exec\" ] && [ -x \"$libDir/ld-musl-aarch64.so.1\" ]; then")
-            sb.appendLine("      if SHELLY_MUSL_LD_PRELOAD=\"$libDir/libexec_wrapper_musl.so\" timeout 30 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"$libDir/shelly_musl_exec\" \"$libDir/ld-musl-aarch64.so.1\" \"\$HOME/.shelly-runtime/claude/current/claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
+            sb.appendLine("    if [ \"\${SHELLY_UPDATER_NATIVE_CLAUDE:-0}\" = \"1\" ] && [ \$__claude_ok -ne 1 ] && [ -x \"\$HOME/.shelly-runtime/claude/current/claude\" ] && [ -x \"$libDir/shelly_musl_exec\" ] && [ -x \"$libDir/ld-musl-aarch64.so.1\" ]; then")
+            sb.appendLine("      if SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"$libDir/libexec_wrapper_musl.so\" timeout 30 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"$libDir/shelly_musl_exec\" \"$libDir/ld-musl-aarch64.so.1\" \"\$HOME/.shelly-runtime/claude/current/claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
             sb.appendLine("    fi")
-            sb.appendLine("    if [ \$__claude_ok -ne 1 ] && [ -x \"$libDir/claude\" ] && [ -x \"$libDir/shelly_musl_exec\" ] && [ -x \"$libDir/ld-musl-aarch64.so.1\" ]; then")
-            sb.appendLine("      if SHELLY_MUSL_LD_PRELOAD=\"$libDir/libexec_wrapper_musl.so\" timeout 30 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"$libDir/shelly_musl_exec\" \"$libDir/ld-musl-aarch64.so.1\" \"$libDir/claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
+            sb.appendLine("    if [ \"\${SHELLY_UPDATER_NATIVE_CLAUDE:-0}\" = \"1\" ] && [ \$__claude_ok -ne 1 ] && [ -x \"$libDir/claude\" ] && [ -x \"$libDir/shelly_musl_exec\" ] && [ -x \"$libDir/ld-musl-aarch64.so.1\" ]; then")
+            sb.appendLine("      if SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"$libDir/libexec_wrapper_musl.so\" timeout 30 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"$libDir/shelly_musl_exec\" \"$libDir/ld-musl-aarch64.so.1\" \"$libDir/claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
             sb.appendLine("    fi")
             sb.appendLine("    if [ \$__claude_ok -eq 1 ]; then")
             sb.appendLine("      echo '[health] claude --version OK'")
@@ -3338,6 +3360,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __notice=\"\"")
             // Iterate through the npm packages we expect to track @latest.
             sb.appendLine("  for __pkg in @anthropic-ai/claude-code @google/gemini-cli @openai/codex; do")
+            sb.appendLine("    if [ \"\$__pkg\" = \"@anthropic-ai/claude-code\" ] && [ \"\${SHELLY_NPM_CHECK_CLAUDE:-0}\" != \"1\" ]; then")
+            sb.appendLine("      echo '[quick] @anthropic-ai/claude-code: skipped (legacy npm tier pinned; runtime updater owns Claude latest)'")
+            sb.appendLine("      continue")
+            sb.appendLine("    fi")
             sb.appendLine("    local __upstream=\$(timeout 15 /system/bin/linker64 \"$libDir/node\" \"$libDir/node_modules/npm/bin/npm-cli.js\" view \"\$__pkg\" version 2>/dev/null | tail -1)")
             sb.appendLine("    if [ -z \"\$__upstream\" ]; then")
             sb.appendLine("      echo \"[quick] \$__pkg: npm view failed (offline?), skipping\"")
@@ -3510,7 +3536,7 @@ AI-era STEAM education is not primarily about introducing AI tools into classroo
 - Substack: academic papers, journals, conference material, public documents, and recent primary sources. Avoid duplicate sources.
 - X: local development logs, Git history, Obsidian notes, and agent run logs. Do not use Perplexity for X.
 - Source collection: Perplexity only for academic Substack work.
-- X drafting and short-form reasoning: local Qwen3-8B first, Codex CLI only when explicitly selected.
+- X drafting and short-form reasoning: local Qwen3-8B-Q4_K_M first, Codex CLI only when explicitly selected.
 - Image prompts: Gemini API only when needed.
 """.trimIndent() + "\n"
             )
@@ -3585,7 +3611,7 @@ Return 3 variants:
             writeIfMissing(
                 File(project, "templates/qwen-vs-codex-eval.md"),
                 """
-# Qwen3-8B vs Codex Article Evaluation
+# Qwen3-8B-Q4_K_M vs Codex Article Evaluation
 
 Use the same source context and prompt for both models.
 
@@ -3617,6 +3643,7 @@ LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M
 OBSIDIAN_VAULT_PATH=/sdcard/Documents/ObsidianVault
 """.trimIndent() + "\n"
             )
+            migrateContentAgentEnv(envFile)
             envFile.setReadable(false, false)
             envFile.setWritable(false, false)
             envFile.setReadable(true, true)
@@ -3663,7 +3690,7 @@ Prioritize:
 
 Do not use Perplexity, X API, paid APIs, or web scraping. Return short Japanese notes explaining why each item could become a post.
 """.trimIndent(),
-                toolJson = """{"type":"local","model":"Qwen3-8B"}""",
+                toolJson = """{"type":"local","model":"Qwen3-8B-Q4_K_M"}""",
                 outputPath = File(project, "sources/x").absolutePath,
                 schedule = "0 7 * * *",
                 inheritedState = oldXTrendState,
@@ -3704,7 +3731,7 @@ Return:
 
 Keep it casual, useful, and not overclaiming.
 """.trimIndent(),
-                toolJson = """{"type":"local","model":"Qwen3-8B"}""",
+                toolJson = """{"type":"local","model":"Qwen3-8B-Q4_K_M"}""",
                 outputPath = File(project, "drafts/x").absolutePath,
                 schedule = "0 8 * * *",
             )
@@ -3750,15 +3777,15 @@ Return 3 prompt variants in Japanese and English.
                 agentsDir,
                 id = "qwen-codex-article-eval",
                 name = "Qwen Codex Article Eval",
-                description = "Compares Qwen3-8B local output against Codex CLI for article drafting.",
+                description = "Compares Qwen3-8B-Q4_K_M local output against Codex CLI for article drafting.",
                 prompt = """
 Run an A/B article evaluation.
 
-Use the same context and prompt for Qwen3-8B and Codex. Compare which output is more publishable for the STEAM x AI Substack thesis.
+Use the same context and prompt for Qwen3-8B-Q4_K_M and Codex. Compare which output is more publishable for the STEAM x AI Substack thesis.
 
 Focus on thesis alignment, source faithfulness, Japanese readability, structure, originality, and publishability.
 """.trimIndent(),
-                toolJson = """{"type":"ab-article-eval","localModel":"Qwen3-8B","codexCmd":"codex"}""",
+                toolJson = """{"type":"ab-article-eval","localModel":"Qwen3-8B-Q4_K_M","codexCmd":"codex"}""",
                 outputPath = File(project, "evals").absolutePath,
             )
         } catch (e: Exception) {
@@ -3796,7 +3823,45 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
         }
     }
 
-    private val CONTENT_AGENT_VERSION = 3
+    private fun migrateContentAgentEnv(envFile: File) {
+        try {
+            val current = if (envFile.exists()) envFile.readText() else ""
+            val lines = current.lines().filter { it.isNotEmpty() }.toMutableList()
+            var hasUrl = false
+            var hasModel = false
+            val migrated = lines.map { line ->
+                val trimmed = line.trimStart()
+                val assignment = if (trimmed.startsWith("export ")) trimmed.removePrefix("export ").trimStart() else trimmed
+                when {
+                    assignment.startsWith("LOCAL_LLM_URL=") -> {
+                        hasUrl = true
+                        line
+                    }
+                    assignment == "LOCAL_LLM_MODEL=Qwen3-8B" -> {
+                        hasModel = true
+                        line.replace("LOCAL_LLM_MODEL=Qwen3-8B", "LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M")
+                    }
+                    assignment == "LOCAL_LLM_MODEL=\"Qwen3-8B\"" || assignment == "LOCAL_LLM_MODEL='Qwen3-8B'" -> {
+                        hasModel = true
+                        line.replace("LOCAL_LLM_MODEL=\"Qwen3-8B\"", "LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M")
+                            .replace("LOCAL_LLM_MODEL='Qwen3-8B'", "LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M")
+                    }
+                    assignment.startsWith("LOCAL_LLM_MODEL=") -> {
+                        hasModel = true
+                        line
+                    }
+                    else -> line
+                }
+            }.toMutableList()
+            if (!hasUrl) migrated.add("LOCAL_LLM_URL=http://127.0.0.1:8080")
+            if (!hasModel) migrated.add("LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M")
+            envFile.writeText(migrated.joinToString("\n") + "\n")
+        } catch (e: Exception) {
+            android.util.Log.w("HomeInitializer", "agent env migration skipped: ${e.message}")
+        }
+    }
+
+    private val CONTENT_AGENT_VERSION = 4
 
     private fun seedAgent(
         agentsDir: File,

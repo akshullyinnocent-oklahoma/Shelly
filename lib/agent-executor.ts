@@ -123,6 +123,73 @@ json_string_file() {
   fi
 }
 
+http_post_json() {
+  url="$1"
+  body_file="$2"
+  out_file="$3"
+  err_file="$4"
+  if command -v node >/dev/null 2>&1; then
+    node - "$url" "$body_file" > "$out_file" 2> "$err_file" <<'NODEEOF'
+const fs = require('fs');
+const http = require('http');
+const https = require('https');
+
+const [urlText, bodyFile] = process.argv.slice(2);
+const body = fs.readFileSync(bodyFile);
+const url = new URL(urlText);
+const isHttps = url.protocol === 'https:';
+const client = isHttps ? https : http;
+const timeoutSeconds = Number(process.env.HTTP_TIMEOUT_SECONDS || '0');
+const headers = {
+  'Content-Type': 'application/json',
+  'Content-Length': String(body.length),
+};
+if (process.env.HTTP_AUTH_HEADER) {
+  headers.Authorization = process.env.HTTP_AUTH_HEADER;
+}
+if (process.env.HTTP_EXTRA_HEADERS) {
+  for (const line of process.env.HTTP_EXTRA_HEADERS.split('\n')) {
+    const idx = line.indexOf(':');
+    if (idx > 0) {
+      headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    }
+  }
+}
+
+const req = client.request({
+  method: 'POST',
+  protocol: url.protocol,
+  hostname: url.hostname,
+  port: url.port || (isHttps ? 443 : 80),
+  path: url.pathname + url.search,
+  headers,
+}, (res) => {
+  res.setEncoding('utf8');
+  res.on('data', (chunk) => process.stdout.write(chunk));
+  res.on('end', () => {
+    process.exitCode = res.statusCode && res.statusCode >= 400 ? 22 : 0;
+  });
+});
+
+req.on('error', (err) => {
+  console.error(err && err.message ? err.message : String(err));
+  process.exitCode = 1;
+});
+if (Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
+  req.setTimeout(timeoutSeconds * 1000, () => {
+    req.destroy(new Error('request timed out'));
+  });
+}
+req.write(body);
+req.end();
+NODEEOF
+    return $?
+  fi
+
+  echo "No HTTP client available: node is missing or unavailable." > "$err_file"
+  return 127
+}
+
 extract_ai_content() {
   file="$1"
   if command -v python3 >/dev/null 2>&1; then
@@ -191,7 +258,7 @@ local_context_fallback() {
   fi
   echo
   echo "## Next Fix"
-  echo "Start a local OpenAI-compatible Qwen3-8B server or set LOCAL_LLM_URL in ~/.shelly/agents/.env."
+  echo "Start the same local OpenAI-compatible Qwen server used by the AI pane, or set LOCAL_LLM_URL / LOCAL_LLM_MODEL in ~/.shelly/agents/.env."
 }
 
 # Create directories before installing the failure trap so JSON logs have a target.
@@ -377,45 +444,50 @@ rm -f "$PROMPT_FILE"`;
     case 'gemini-api':
       return geminiApiCommand(escapedPrompt, resultVar, tool.model);
     case 'local':
-      const localModel = (tool.model || 'Qwen3-8B').replace(/"/g, '\\"');
+      const localModel = (tool.model || 'Qwen3-8B-Q4_K_M').replace(/"/g, '\\"');
       return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
+	REQUEST_FILE="$HOME/.shelly/tmp/agent-request-$AGENT_ID.json"
 	printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
 	PROMPT_JSON=$(json_string_file "$PROMPT_FILE")
 	LOCAL_URL="\${LOCAL_LLM_URL:-http://127.0.0.1:8080}"
 	LOCAL_MODEL="\${LOCAL_LLM_MODEL:-${localModel}}"
+	printf '{\\"model\\":\\"%s\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":%s}],\\"max_tokens\\":4096}' "$LOCAL_MODEL" "$PROMPT_JSON" > "$REQUEST_FILE"
 	set +e
-	timeout "$TIMEOUT" curl -s "\${LOCAL_URL%/}/v1/chat/completions" \\
-	  -H "Content-Type: application/json" \\
-	  -d "{\\"model\\":\\"$LOCAL_MODEL\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":$PROMPT_JSON}],\\"max_tokens\\":4096}" \\
-	  > "$RESULT_FILE.response.json" 2> "$RESULT_FILE.stderr"
+	HTTP_TIMEOUT_SECONDS="$TIMEOUT" http_post_json "\${LOCAL_URL%/}/v1/chat/completions" "$REQUEST_FILE" "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"
 	LOCAL_EXIT=$?
 	set -e
 	if [ "$LOCAL_EXIT" -ne 0 ] || [ ! -s "$RESULT_FILE.response.json" ]; then
-	  local_context_fallback "curl exit=$LOCAL_EXIT $(head -c 240 "$RESULT_FILE.stderr" 2>/dev/null | tr '\\n' ' ')" > ${resultVar}
+	  local_context_fallback "http exit=$LOCAL_EXIT $(head -c 240 "$RESULT_FILE.stderr" 2>/dev/null | tr '\\n' ' ')" > ${resultVar}
 	else
 	  extract_ai_content "$RESULT_FILE.response.json" > ${resultVar} 2>> "$RESULT_FILE.stderr" || { touch "$BACKEND_ERROR_FILE"; [ -s ${resultVar} ] || cat "$RESULT_FILE.stderr" > ${resultVar}; }
 	fi
 	rm -f "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"
-	rm -f "$PROMPT_FILE"`;
+	rm -f "$PROMPT_FILE" "$REQUEST_FILE"`;
     case 'perplexity':
       const perplexityModel = tool.model || 'sonar';
-	      return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
-	printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
-	PROMPT_JSON=$(json_string_file "$PROMPT_FILE")
-	MODEL='${perplexityModel.replace(/'/g, "'\\''")}'
-	if [ -z "\${PERPLEXITY_API_KEY:-}" ]; then
-	  echo 'Perplexity API key is not set. Add PERPLEXITY_API_KEY to ~/.shelly/agents/.env.' > ${resultVar}
-	  touch "$BACKEND_ERROR_FILE"
-	else
-	timeout "$TIMEOUT" curl -s https://api.perplexity.ai/chat/completions \\
-	  -H "Authorization: Bearer $PERPLEXITY_API_KEY" \\
-	  -H "Content-Type: application/json" \\
-	  -d "{\\"model\\":\\"$MODEL\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":$PROMPT_JSON}]}" \\
-	  > "$RESULT_FILE.response.json" 2> "$RESULT_FILE.stderr" || true
-	extract_ai_content "$RESULT_FILE.response.json" > ${resultVar} 2>> "$RESULT_FILE.stderr" || { touch "$BACKEND_ERROR_FILE"; [ -s ${resultVar} ] || cat "$RESULT_FILE.stderr" > ${resultVar}; }
-	rm -f "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"
-	fi
-	rm -f "$PROMPT_FILE"`;
+		      return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
+		REQUEST_FILE="$HOME/.shelly/tmp/agent-request-$AGENT_ID.json"
+		printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
+		PROMPT_JSON=$(json_string_file "$PROMPT_FILE")
+		MODEL='${perplexityModel.replace(/'/g, "'\\''")}'
+		if [ -z "\${PERPLEXITY_API_KEY:-}" ]; then
+		  echo 'Perplexity API key is not set. Add PERPLEXITY_API_KEY to ~/.shelly/agents/.env.' > ${resultVar}
+		  touch "$BACKEND_ERROR_FILE"
+		else
+		printf '{\\"model\\":\\"%s\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":%s}]}' "$MODEL" "$PROMPT_JSON" > "$REQUEST_FILE"
+		set +e
+		HTTP_AUTH_HEADER="Bearer $PERPLEXITY_API_KEY" HTTP_TIMEOUT_SECONDS="$TIMEOUT" http_post_json "https://api.perplexity.ai/chat/completions" "$REQUEST_FILE" "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"
+		API_EXIT=$?
+		set -e
+		if [ "$API_EXIT" -ne 0 ] || [ ! -s "$RESULT_FILE.response.json" ]; then
+		  touch "$BACKEND_ERROR_FILE"
+		  echo "Perplexity API call failed with exit $API_EXIT: $(head -c 240 "$RESULT_FILE.stderr" 2>/dev/null | tr '\\n' ' ')" > ${resultVar}
+		else
+		  extract_ai_content "$RESULT_FILE.response.json" > ${resultVar} 2>> "$RESULT_FILE.stderr" || { touch "$BACKEND_ERROR_FILE"; [ -s ${resultVar} ] || cat "$RESULT_FILE.stderr" > ${resultVar}; }
+		fi
+		rm -f "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"
+		fi
+		rm -f "$PROMPT_FILE" "$REQUEST_FILE"`;
     case 'ab-article-eval':
       return articleEvalCommand(rawPrompt, resultVar, tool.localModel, tool.codexCmd);
     case 'auto':
@@ -434,7 +506,7 @@ fi`;
 
 function articleEvalCommand(rawPrompt: string, resultVar: string, localModel?: string, codexCmd?: string): string {
   const promptMarker = `SHELLY_AB_PROMPT_${Math.random().toString(36).slice(2)}`;
-  const localModelValue = (localModel || 'Qwen3-8B').replace(/"/g, '\\"');
+  const localModelValue = (localModel || 'Qwen3-8B-Q4_K_M').replace(/"/g, '\\"');
   const codexCmdValue = (codexCmd || 'codex').replace(/"/g, '\\"');
   return `PROJECT_DIR="\${SHELLY_CONTENT_PROJECT:-$HOME/projects/shelly-content-studio}"
 LOCAL_URL="\${LOCAL_LLM_URL:-http://127.0.0.1:8080}"
@@ -493,13 +565,12 @@ PROMPTEOF
 } >> "$RUN_DIR/prompt.md"
 
 PROMPT_JSON=$(json_string_file "$RUN_DIR/prompt.md")
+LOCAL_REQUEST_FILE="$RUN_DIR/local-request.json"
+printf '{\\"model\\":\\"%s\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":%s}],\\"temperature\\":0.7,\\"max_tokens\\":4096}' "$LOCAL_MODEL" "$PROMPT_JSON" > "$LOCAL_REQUEST_FILE"
 
 LOCAL_START=$(date +%s)
 set +e
-timeout "$TIMEOUT" curl -s "\${LOCAL_URL%/}/v1/chat/completions" \\
-  -H "Content-Type: application/json" \\
-  -d "{\\"model\\":\\"$LOCAL_MODEL\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":$PROMPT_JSON}],\\"temperature\\":0.7,\\"max_tokens\\":4096}" \\
-  > "$RUN_DIR/local.response.json" 2> "$RUN_DIR/local.stderr.log"
+HTTP_TIMEOUT_SECONDS="$TIMEOUT" http_post_json "\${LOCAL_URL%/}/v1/chat/completions" "$LOCAL_REQUEST_FILE" "$RUN_DIR/local.response.json" "$RUN_DIR/local.stderr.log"
 LOCAL_EXIT=$?
 set -e
 LOCAL_END=$(date +%s)
@@ -557,7 +628,7 @@ $(cat "$RUN_DIR/metrics.json")
 EVALEOF
 
 cat > ${resultVar} <<RESULTEOF
-# Qwen3-8B vs Codex A/B Article Eval
+# Qwen3-8B-Q4_K_M vs Codex A/B Article Eval
 
 Run directory: $RUN_DIR
 
@@ -580,6 +651,7 @@ RESULTEOF`;
 function geminiApiCommand(escapedPrompt: string, resultVar: string, model?: string): string {
   const defaultModel = model || 'gemini-2.0-flash';
   return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
+REQUEST_FILE="$HOME/.shelly/tmp/agent-request-$AGENT_ID.json"
 printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
 PROMPT_JSON=$(json_string_file "$PROMPT_FILE")
 MODEL="\${GEMINI_MODEL:-${defaultModel.replace(/"/g, '\\"')}}"
@@ -587,15 +659,20 @@ if [ -z "\${GEMINI_API_KEY:-}" ]; then
   echo 'Gemini API key is not set. Add it in Settings before running background agents.' > ${resultVar}
   touch "$BACKEND_ERROR_FILE"
 else
-  timeout "$TIMEOUT" curl -s "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent" \\
-    -H "Content-Type: application/json" \\
-    -H "x-goog-api-key: $GEMINI_API_KEY" \\
-    -d "{\\"contents\\":[{\\"role\\":\\"user\\",\\"parts\\":[{\\"text\\":$PROMPT_JSON}]}],\\"generationConfig\\":{\\"maxOutputTokens\\":4096,\\"temperature\\":0.7}}" \\
-    > "$RESULT_FILE.response.json" 2> "$RESULT_FILE.stderr" || true
-  extract_ai_content "$RESULT_FILE.response.json" > ${resultVar} 2>> "$RESULT_FILE.stderr" || { touch "$BACKEND_ERROR_FILE"; [ -s ${resultVar} ] || cat "$RESULT_FILE.stderr" > ${resultVar}; }
+  printf '{\\"contents\\":[{\\"role\\":\\"user\\",\\"parts\\":[{\\"text\\":%s}]}],\\"generationConfig\\":{\\"maxOutputTokens\\":4096,\\"temperature\\":0.7}}' "$PROMPT_JSON" > "$REQUEST_FILE"
+  set +e
+  HTTP_EXTRA_HEADERS="x-goog-api-key: $GEMINI_API_KEY" HTTP_TIMEOUT_SECONDS="$TIMEOUT" http_post_json "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent" "$REQUEST_FILE" "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"
+  API_EXIT=$?
+  set -e
+  if [ "$API_EXIT" -ne 0 ] || [ ! -s "$RESULT_FILE.response.json" ]; then
+    touch "$BACKEND_ERROR_FILE"
+    echo "Gemini API call failed with exit $API_EXIT: $(head -c 240 "$RESULT_FILE.stderr" 2>/dev/null | tr '\\n' ' ')" > ${resultVar}
+  else
+    extract_ai_content "$RESULT_FILE.response.json" > ${resultVar} 2>> "$RESULT_FILE.stderr" || { touch "$BACKEND_ERROR_FILE"; [ -s ${resultVar} ] || cat "$RESULT_FILE.stderr" > ${resultVar}; }
+  fi
   rm -f "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"
 fi
-rm -f "$PROMPT_FILE"`;
+rm -f "$PROMPT_FILE" "$REQUEST_FILE"`;
 }
 
 export function getScriptPath(agentId: string): string {

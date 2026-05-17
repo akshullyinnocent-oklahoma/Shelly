@@ -36,7 +36,7 @@ export function suggestTool(prompt: string): ToolSuggestion {
   // Priority 1: Qwen/Codex article drafting evaluation
   if (ARTICLE_EVAL_KEYWORDS.some((kw) => lower.includes(kw))) {
     return {
-      tool: { type: 'ab-article-eval', localModel: 'Qwen3-8B', codexCmd: 'codex' },
+      tool: { type: 'ab-article-eval', localModel: 'Qwen3-8B-Q4_K_M', codexCmd: 'codex' },
       label: 'Qwen/Codex A/B Eval',
       reason: 'Article drafting comparison — runs local Qwen and Codex against the same source context',
     };
@@ -98,7 +98,7 @@ export async function checkToolAvailability(
   // Check local LLM
   try {
     const output = await runCommand(
-      'curl -s --max-time 2 http://127.0.0.1:8080/health 2>/dev/null || echo "notfound"'
+      'node -e "const http=require(\'http\'); const req=http.get(\'http://127.0.0.1:8080/health\', res=>{process.stdout.write(\'found\'); res.resume();}); req.setTimeout(2000,()=>req.destroy()); req.on(\'error\',()=>process.stdout.write(\'notfound\'));" 2>/dev/null || echo "notfound"'
     );
     results['local'] = !output.includes('notfound');
   } catch {
