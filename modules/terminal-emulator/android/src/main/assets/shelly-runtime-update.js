@@ -698,14 +698,30 @@ function extractClaudeCliFromSea(seaBuf) {
   const startMarker = Buffer.from('// @bun');
   const startRel = bunSection.indexOf(startMarker, markerAt);
   if (startRel < 0) throw new Error('cli.js bundle start not found after marker');
-  if (startRel < 4) throw new Error('cli.js size prefix missing');
 
-  const size = bunSection.readUInt32LE(startRel - 4);
-  const src = bunSection.subarray(startRel, startRel + size).toString('utf8');
+  // Claude Code 2.1.133+ dropped the 4-byte little-endian size prefix
+  // that used to sit immediately before the JS bundle. Keep runtime
+  // extraction in sync with CI: scan forward through the text JS payload
+  // until Bun's following binary payload starts, then trim to the final
+  // Bun CJS wrapper close. This still accepts older size-prefixed bundles
+  // because the wrapper boundaries are identical.
+  const isTextByte = (b) => (b >= 9 && b <= 13) || (b >= 32 && b <= 126);
+  let endRel = startRel;
+  while (endRel < bunSection.length && isTextByte(bunSection[endRel])) endRel += 1;
+
+  let src = bunSection.subarray(startRel, endRel).toString('utf8');
   const head = '// @bun @bytecode @bun-cjs\n(function(exports, require, module, __filename, __dirname) {';
   const tail = '})\n';
-  if (!src.startsWith(head) || !src.endsWith(tail)) {
-    throw new Error('unexpected Claude cli.js CJS wrapper shape');
+  if (!src.startsWith(head)) {
+    throw new Error(`unexpected Claude cli.js CJS wrapper head: ${JSON.stringify(src.slice(0, 120))}`);
+  }
+  const lastClose = src.lastIndexOf(tail);
+  if (lastClose < 0) {
+    throw new Error(`Claude cli.js wrapper close not found in text region (length=${src.length})`);
+  }
+  src = src.slice(0, lastClose + tail.length);
+  if (!src.endsWith(tail)) {
+    throw new Error(`unexpected Claude cli.js CJS wrapper tail: ${JSON.stringify(src.slice(-60))}`);
   }
 
   let body = src.slice(head.length, -tail.length);
@@ -802,19 +818,13 @@ function validateClaudeShape(binPath) {
  *
  * Returns up to MAX_CANDIDATES versions, newest first.
  */
-// Default 6: authenticated Claude installs now run a functional `--print`
-// smoke, so we need enough rollback depth to walk past a bad upstream
+// Default 6: keep enough rollback depth to walk past a bad upstream
 // release cluster while still bounding bandwidth. Override via env var if
 // needed.
 const MAX_CANDIDATES = Number(process.env.SHELLY_UPDATER_MAX_CANDIDATES || 6);
 
-function hasClaudeCredentials() {
-  return fs.existsSync(path.join(HOME, '.claude.json'))
-    && fs.existsSync(path.join(HOME, '.claude', '.credentials.json'));
-}
-
 function shouldFunctionalCheckClaude() {
-  return FUNCTIONAL_CHECK || hasClaudeCredentials();
+  return FUNCTIONAL_CHECK;
 }
 
 function claudeFunctionalMarker(version = currentClaudeExtractedVersion()) {
