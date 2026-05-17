@@ -130,6 +130,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if ('geminiModel' in newSettings && typeof newSettings.geminiModel === 'string') {
         envUpdates.push(['GEMINI_MODEL', newSettings.geminiModel]);
       }
+      if ('localLlmUrl' in newSettings && typeof newSettings.localLlmUrl === 'string') {
+        envUpdates.push(['LOCAL_LLM_URL', newSettings.localLlmUrl]);
+      }
+      if ('localLlmModel' in newSettings && typeof newSettings.localLlmModel === 'string') {
+        envUpdates.push(['LOCAL_LLM_MODEL', newSettings.localLlmModel]);
+      }
       if (envUpdates.length > 0) {
         const keys = envUpdates.map(([key]) => key);
         const grepPattern = keys.map((key) => `^${key}=`).join('|');

@@ -173,6 +173,26 @@ PYEOF
     cat "$file"
   fi
 }
+local_context_fallback() {
+  local reason="$1"
+  echo "# Local Context Fallback"
+  echo
+  echo "Local LLM was unavailable, so Shelly saved a local-context digest instead of failing silently."
+  echo
+  echo "- reason: $reason"
+  echo "- expected endpoint: \${LOCAL_URL%/}/v1/chat/completions"
+  echo "- expected model: \${LOCAL_MODEL:-unknown}"
+  echo
+  echo "## Candidate Hooks"
+  if [ -s "\${LOCAL_CONTEXT_FILE:-}" ]; then
+    grep -E '^(###|####|- |[0-9a-f]{7,12} )' "$LOCAL_CONTEXT_FILE" 2>/dev/null | head -n 80 || true
+  else
+    echo "- No local context file was generated."
+  fi
+  echo
+  echo "## Next Fix"
+  echo "Start a local OpenAI-compatible Qwen3-8B server or set LOCAL_LLM_URL in ~/.shelly/agents/.env."
+}
 
 # Create directories before installing the failure trap so JSON logs have a target.
 mkdir -p '${tmpDir}' '${locksDir}' "$LOG_DIR"
@@ -363,11 +383,18 @@ rm -f "$PROMPT_FILE"`;
 	PROMPT_JSON=$(json_string_file "$PROMPT_FILE")
 	LOCAL_URL="\${LOCAL_LLM_URL:-http://127.0.0.1:8080}"
 	LOCAL_MODEL="\${LOCAL_LLM_MODEL:-${localModel}}"
+	set +e
 	timeout "$TIMEOUT" curl -s "\${LOCAL_URL%/}/v1/chat/completions" \\
 	  -H "Content-Type: application/json" \\
 	  -d "{\\"model\\":\\"$LOCAL_MODEL\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":$PROMPT_JSON}],\\"max_tokens\\":4096}" \\
-	  > "$RESULT_FILE.response.json" 2> "$RESULT_FILE.stderr" || true
-	extract_ai_content "$RESULT_FILE.response.json" > ${resultVar} 2>> "$RESULT_FILE.stderr" || { touch "$BACKEND_ERROR_FILE"; [ -s ${resultVar} ] || cat "$RESULT_FILE.stderr" > ${resultVar}; }
+	  > "$RESULT_FILE.response.json" 2> "$RESULT_FILE.stderr"
+	LOCAL_EXIT=$?
+	set -e
+	if [ "$LOCAL_EXIT" -ne 0 ] || [ ! -s "$RESULT_FILE.response.json" ]; then
+	  local_context_fallback "curl exit=$LOCAL_EXIT $(head -c 240 "$RESULT_FILE.stderr" 2>/dev/null | tr '\\n' ' ')" > ${resultVar}
+	else
+	  extract_ai_content "$RESULT_FILE.response.json" > ${resultVar} 2>> "$RESULT_FILE.stderr" || { touch "$BACKEND_ERROR_FILE"; [ -s ${resultVar} ] || cat "$RESULT_FILE.stderr" > ${resultVar}; }
+	fi
 	rm -f "$RESULT_FILE.response.json" "$RESULT_FILE.stderr"
 	rm -f "$PROMPT_FILE"`;
     case 'perplexity':

@@ -3489,7 +3489,7 @@ PERPLEXITY_API_KEY=
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.0-flash
 LOCAL_LLM_URL=http://127.0.0.1:8080
-LOCAL_LLM_MODEL=Qwen3-8B
+LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M
 OBSIDIAN_VAULT_PATH=/sdcard/Documents/ObsidianVault
 """.trimIndent() + "\n"
             )
@@ -3613,7 +3613,7 @@ PERPLEXITY_API_KEY=
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.0-flash
 LOCAL_LLM_URL=http://127.0.0.1:8080
-LOCAL_LLM_MODEL=Qwen3-8B
+LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M
 OBSIDIAN_VAULT_PATH=/sdcard/Documents/ObsidianVault
 """.trimIndent() + "\n"
             )
@@ -3778,6 +3778,10 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
         val file = File(agentsDir, "$id.json")
         if (file.exists()) {
             file.delete()
+        }
+        val logsDir = File(agentsDir, "logs/$id")
+        if (logsDir.exists()) {
+            logsDir.deleteRecursively()
         }
     }
 
