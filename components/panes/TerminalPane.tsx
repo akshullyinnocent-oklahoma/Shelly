@@ -561,12 +561,10 @@ export default function TerminalScreen() {
 
   // Japanese input proxy removed — NativeTerminalView handles inline JP input
 
-  // Terminal color scheme from settings — converted to Kotlin prop format
+  // Terminal ANSI palette follows Terminal Theme only. App chrome/UI theme
+  // must not collapse syntax highlighting into one accent color.
   const terminalColorScheme = useMemo(() => {
-    const themeName =
-      settings.uiFont === 'blue' || settings.uiFont === 'orange' || settings.uiFont === 'purple'
-        ? settings.uiFont
-        : settings.terminalTheme ?? 'blue';
+    const themeName = settings.terminalTheme ?? 'shelly';
     const theme = getTerminalTheme(themeName);
     return {
       color0: theme.black,    color1: theme.red,      color2: theme.green,     color3: theme.yellow,
@@ -577,7 +575,7 @@ export default function TerminalScreen() {
       background: theme.background,
       cursor: theme.cursor,
     };
-  }, [settings.terminalTheme, settings.uiFont]);
+  }, [settings.terminalTheme]);
   const terminalPaneBg = usePanelBackground(terminalColorScheme.background);
 
   // Terminal font size honors the user's Settings → Display → Font Size

@@ -780,10 +780,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //            prop with the call site (minified bundle needs more frames)
     //        Gated:
     //          SHELLY_CLAUDE_DIAG=1 → all events + Bun Proxy missing logger
-    //          SHELLY_VERBOSE_CLI_TIER=1 → preload-loaded log only
-    //          (No event listeners under VERBOSE_CLI_TIER because users
-    //          already set it for normal tier debug; adding beforeExit/exit
-    //          would make every claude --version / -p invocation noisy.)
+    //          SHELLY_VERBOSE_CLI_TIER=1 → tier selection messages only
+    //          (No preload logging under VERBOSE_CLI_TIER because users
+    //          already set it for normal tier debug, and preload internals
+    //          must never leak into ordinary Claude prompts.)
     //        Default install: completely silent, zero behaviour change.
     //        Diagnostic install: SHELLY_CLAUDE_DIAG=1 claude → next-install
     //        log capture for root-cause analysis.
@@ -999,7 +999,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      the background after foreground `claude` is fixed.
     // 144: Extend the Claude extracted-Node Bun compatibility preload for
     //      Claude Code 2.1.143 surfaces observed in the bundled cli.js.
-    private const val BASHRC_VERSION = 144
+    private const val BASHRC_VERSION = 145
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2165,20 +2165,16 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             //    bootstrap will trip every Bun-specific API it expects, and
             //    we'll see the exact call sites in stderr.
             //
-            // Both surfaces gate on SHELLY_CLAUDE_DIAG=1 (or
-            // SHELLY_VERBOSE_CLI_TIER=1, which users already set for tier
-            // observability) so the diagnostic noise stays out of normal
-            // claude sessions. Default install: silent, no behaviour
-            // change. Diagnostic install: rich stderr trace.
+            // Both surfaces gate on SHELLY_CLAUDE_DIAG=1 so diagnostic noise
+            // stays out of normal claude sessions. SHELLY_VERBOSE_CLI_TIER is
+            // intentionally limited to tier selection messages, not preload
+            // internals. Default install: silent, no behaviour change.
+            // Diagnostic install: rich stderr trace.
             //
             // This is a PURELY DIAGNOSTIC PR. No fix attempt. Goal: capture
             // enough on-device evidence to identify the real root cause.
             // Codex push-prep review (2026-05-09) fix-ups:
-            //   - Split gates: VERBOSE_CLI_TIER=1 = preload-loaded log ONLY
-            //     (it's already used by users for normal tier debug; adding
-            //     beforeExit/exit listeners here would make every claude
-            //     --version / -p invocation noisy).
-            //   - DIAG=1 = all listeners + Bun Proxy.
+            //   - DIAG=1 = preload-loaded log + all listeners + Bun Proxy.
             //   - uncaughtException -> uncaughtExceptionMonitor: a normal
             //     `uncaughtException` listener SUPPRESSES Node's default
             //     terminate-on-throw behaviour, which would mask the real
@@ -2186,18 +2182,6 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             //     without altering disposition.
             //   - Stack trace truncation 5 -> 10 lines: cli.js is minified,
             //     5 frames is often not enough to identify the call site.
-            sb.appendLine("if (process.env.SHELLY_VERBOSE_CLI_TIER === '1') {")
-            sb.appendLine("  try {")
-            sb.appendLine("    process.stderr.write('[SHELLY-PRELOAD] loaded ' + JSON.stringify({")
-            sb.appendLine("      node: process.version,")
-            sb.appendLine("      argv: process.argv,")
-            sb.appendLine("      isTTYStdin: !!process.stdin.isTTY,")
-            sb.appendLine("      isTTYStdout: !!process.stdout.isTTY,")
-            sb.appendLine("      nodeOptions: process.env.NODE_OPTIONS || null,")
-            sb.appendLine("      cwd: process.cwd(),")
-            sb.appendLine("    }) + '\\n');")
-            sb.appendLine("  } catch (_) {}")
-            sb.appendLine("}")
             sb.appendLine("if (process.env.SHELLY_CLAUDE_DIAG === '1') {")
             sb.appendLine("  try {")
             sb.appendLine("    process.stderr.write('[SHELLY-PRELOAD] loaded ' + JSON.stringify({")
@@ -2431,7 +2415,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("              fi")
             sb.appendLine("            fi")
             sb.appendLine("            if [ -x \"\$__musl_claude\" ]; then")
-            sb.appendLine("              [ -n \"\$SHELLY_SILENT_CLI_TIER\" ] || echo \"[shelly] claude: runtime native failed twice (exit \$__foreground_claude_rc), falling back to APK musl\" >&2")
+            sb.appendLine("              [ -z \"\$SHELLY_VERBOSE_CLI_TIER\" ] || echo \"[shelly] claude: runtime native failed twice (exit \$__foreground_claude_rc), falling back to APK musl\" >&2")
             sb.appendLine("              __shelly_run_claude_musl_clean \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_exec_wrapper\" \"\$__musl_claude\" \"\$@\"")
             sb.appendLine("              __foreground_claude_rc=\$?")
             sb.appendLine("              case \"\$__foreground_claude_rc\" in")
@@ -2463,7 +2447,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      if [ \"\$__foreground_claude_rc\" -eq 0 ] || [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ]; then")
             sb.appendLine("        return \"\$__foreground_claude_rc\"")
             sb.appendLine("      fi")
-            sb.appendLine("      if [ -z \"\$SHELLY_SILENT_CLI_TIER\" ]; then")
+            sb.appendLine("      if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("        echo \"[shelly] claude: native foreground failed (exit \$__foreground_claude_rc), falling back to cli.js tiers\" >&2")
             sb.appendLine("      fi")
             sb.appendLine("    fi")
@@ -2552,7 +2536,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("              printf 'claude=%s %s %s native\\n' \"\$__native_ver\" \"\$(date -u +%s)\" \"\$__runtime_rc\" >> \"\$HOME/.shelly-runtime/.runtime-failures\" 2>/dev/null")
             sb.appendLine("            fi")
             sb.appendLine("          fi")
-            sb.appendLine("          if [ -z \"\$SHELLY_SILENT_CLI_TIER\" ]; then")
+            sb.appendLine("          if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("            echo \"[shelly] claude: runtime latest failed (exit \$__runtime_rc), falling back to APK musl\" >&2")
             sb.appendLine("          fi")
             sb.appendLine("          ;;")
@@ -2595,7 +2579,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("        return 0")
             sb.appendLine("        ;;")
             sb.appendLine("      126|127|132|133|134|135|136|137|138|139|159)")
-            sb.appendLine("        if [ -z \"\$SHELLY_SILENT_CLI_TIER\" ]; then")
+            sb.appendLine("        if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("          echo \"[shelly] claude: Path C-bis failed (exit \$__musl_rc), falling back to cli.js tiers\" >&2")
             sb.appendLine("        fi")
             sb.appendLine("        ;;")
@@ -2624,7 +2608,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    __shelly_paste_tui_end")
             sb.appendLine("    case \"\$__extracted_rc\" in")
             sb.appendLine("      126|127|132|133|134|135|136|137|138|139|159)")
-            sb.appendLine("        if [ -z \"\$SHELLY_SILENT_CLI_TIER\" ]; then")
+            sb.appendLine("        if [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("          echo \"[shelly] claude: extracted Node route failed (exit \$__extracted_rc), falling back to legacy tier\" >&2")
             sb.appendLine("        fi")
             sb.appendLine("        ;;")
@@ -2655,7 +2639,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    echo 'claude CLI not installed — run __shelly_bg_cli_update and retry' >&2")
             sb.appendLine("    return 1")
             sb.appendLine("  fi")
-            sb.appendLine("  if [ \"\$__tier\" != 'auto' ] && [ -z \"\$SHELLY_SILENT_CLI_TIER\" ]; then")
+            sb.appendLine("  if [ \"\$__tier\" != 'auto' ] && [ -n \"\$SHELLY_VERBOSE_CLI_TIER\" ]; then")
             sb.appendLine("    echo \"[shelly] claude: using \$__tier tier (\$__cli_js)\" >&2")
             sb.appendLine("  fi")
             sb.appendLine("  mkdir -p \"\$__claude_tmp\" \"\${TMPDIR:-\$HOME/.tmp}\" \"\$__bun_tmp\" 2>/dev/null")
