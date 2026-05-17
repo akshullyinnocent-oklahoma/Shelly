@@ -72,17 +72,6 @@ static long raw_syscall4(long nr, long a0, long a1, long a2, long a3) {
     return x0;
 }
 
-static long raw_syscall5(long nr, long a0, long a1, long a2, long a3, long a4) {
-    register long x8 asm("x8") = nr;
-    register long x0 asm("x0") = a0;
-    register long x1 asm("x1") = a1;
-    register long x2 asm("x2") = a2;
-    register long x3 asm("x3") = a3;
-    register long x4 asm("x4") = a4;
-    asm volatile("svc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x8) : "memory");
-    return x0;
-}
-
 static int finish_syscall(long ret) {
     if (ret < 0) return -1;
     return (int)ret;
@@ -102,11 +91,6 @@ static long raw_read_call(int fd, void *buf, size_t count) {
 
 static void raw_close_call(int fd) {
     raw_syscall1(__NR_close, fd);
-}
-
-static void raw_exit_group(int status) {
-    raw_syscall1(__NR_exit_group, status);
-    for (;;) {}
 }
 
 static int streq(const char *a, const char *b) {
