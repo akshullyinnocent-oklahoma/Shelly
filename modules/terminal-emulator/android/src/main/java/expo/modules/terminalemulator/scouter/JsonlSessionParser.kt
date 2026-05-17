@@ -4,7 +4,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.time.Instant
-import java.util.Locale
 
 class JsonlSessionParser(
     private val source: ScouterSource,
@@ -17,6 +16,7 @@ class JsonlSessionParser(
     private var totalCostUsd: Double = 0.0
     private var modelName: String? = null
     private var previousCodexTotal: CodexUsage? = null
+    private var codexCwd: String? = null
 
     fun parse(line: String): ScouterEvent? {
         val json = runCatching { JSONObject(line) }.getOrNull() ?: return null
@@ -90,6 +90,7 @@ class JsonlSessionParser(
         val payload = json.optJSONObject("payload")
         if (entryType == "turn_context") {
             modelName = extractCodexModel(payload)
+            codexCwd = extractCodexCwd(json, payload) ?: codexCwd
             return null
         }
         if (entryType != "event_msg" || payload?.optString("type") != "token_count") {
@@ -97,30 +98,34 @@ class JsonlSessionParser(
         }
 
         val info = payload.optJSONObject("info")
-        val raw = normalizeCodexUsage(info?.optJSONObject("last_token_usage"))
-            ?: normalizeCodexUsage(info?.optJSONObject("total_token_usage"))?.let { total ->
-                total.minus(previousCodexTotal)
-            }
-            ?: return null
-        normalizeCodexUsage(info?.optJSONObject("total_token_usage"))?.let { previousCodexTotal = it }
+        codexCwd = extractCodexCwd(json, payload, info) ?: codexCwd
+        val totalUsage = normalizeCodexUsage(info?.optJSONObject("total_token_usage"))
+        val raw = if (totalUsage != null) {
+            val delta = totalUsage.minus(previousCodexTotal)
+            previousCodexTotal = totalUsage
+            delta
+        } else {
+            normalizeCodexUsage(info?.optJSONObject("last_token_usage")) ?: return null
+        }
         if (raw.totalTokens <= 0L) return null
 
         modelName = extractCodexModel(payload) ?: extractCodexModel(info) ?: modelName ?: "gpt-5"
         inputTokens += raw.inputTokens
         outputTokens += raw.outputTokens
         cacheReadInputTokens += raw.cachedInputTokens
+        val cwd = codexCwd ?: file.parentFile?.absolutePath.orEmpty()
 
         return ScouterEvent(
             source = ScouterSource.CODEX,
             sourceVersion = "jsonl",
             timestamp = parseTimestamp(json.optString("timestamp")),
             sessionId = file.nameWithoutExtension,
-            projectName = projectNameFromCwd(file.parentFile?.absolutePath),
-            cwd = file.parentFile?.absolutePath.orEmpty().redactForScouter(),
+            projectName = projectNameFromCwd(cwd),
+            cwd = cwd.redactForScouter(),
             eventType = ScouterEventType.SNAPSHOT,
-            derivedStatus = ScouterStatus.IDLE,
+            derivedStatus = ScouterStatus.THINKING,
             modelName = modelName,
-            tokensUsed = inputTokens + outputTokens + cacheReadInputTokens,
+            tokensUsed = inputTokens + outputTokens,
             inputTokens = inputTokens,
             outputTokens = outputTokens,
             cacheReadInputTokens = cacheReadInputTokens,
@@ -160,6 +165,26 @@ class JsonlSessionParser(
             info?.optString("model_name"),
             metadata?.optString("model")
         )
+    }
+
+    private fun extractCodexCwd(vararg jsonObjects: JSONObject?): String? {
+        for (json in jsonObjects) {
+            if (json == null) continue
+            val cwd = firstNonBlank(
+                json.optString("cwd"),
+                json.optString("current_working_directory"),
+                json.optString("project_path")
+            )
+            if (cwd != null) return cwd
+            val payload = json.optJSONObject("payload")
+            val nested = firstNonBlank(
+                payload?.optString("cwd"),
+                payload?.optString("current_working_directory"),
+                payload?.optString("project_path")
+            )
+            if (nested != null) return nested
+        }
+        return null
     }
 
     private fun normalizeCodexUsage(json: JSONObject?): CodexUsage? {

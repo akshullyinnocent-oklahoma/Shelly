@@ -2,6 +2,7 @@ package expo.modules.terminalemulator.scouter
 
 import org.json.JSONObject
 import java.io.File
+import java.time.Instant
 import java.util.Locale
 
 object EventNormalizer {
@@ -86,6 +87,7 @@ object EventNormalizer {
         return ScouterEvent(
             source = source,
             sourceVersion = firstNonBlank(json.optString("version"), json.optString("sourceVersion")) ?: "jsonl",
+            timestamp = parseTimestamp(firstNonBlank(json.optString("timestamp"), json.optString("time"))),
             sessionId = sessionId,
             projectName = projectNameFromCwd(cwd),
             cwd = cwd.redactForScouter(),
@@ -168,5 +170,11 @@ object EventNormalizer {
             is String -> value.ifBlank { null }
             else -> null
         }
+    }
+
+    private fun parseTimestamp(value: String?): Long {
+        if (value.isNullOrBlank()) return System.currentTimeMillis()
+        value.toLongOrNull()?.let { return it }
+        return runCatching { Instant.parse(value).toEpochMilli() }.getOrDefault(System.currentTimeMillis())
     }
 }

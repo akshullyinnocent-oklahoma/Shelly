@@ -203,19 +203,21 @@ Claude Code JSONL support:
 Codex JSONL support:
 
 - reads `~/.codex/sessions/**/*.jsonl`
-- tracks model updates from `turn_context`
+- tracks model and cwd updates from `turn_context`
 - aggregates `event_msg` / `token_count` entries
-- handles `last_token_usage` directly and falls back to deltas from `total_token_usage`
-- treats `cached_input_tokens` as cache-read tokens
+- prefers deltas from `total_token_usage` to avoid duplicate `token_count` rows, and uses `last_token_usage` only when no cumulative total is available
+- treats `cached_input_tokens` as cache-read tokens without adding them again to total tokens
 
-Phase 1A+ deliberately does not yet implement full ccusage-style daily/monthly reporting, model pricing lookup, or request-id deduplication. The parser pack is scoped to live session display: model, token totals, cache totals, cost when available, latest message, latest tool, and status.
+The JSONL watcher starts existing files from their current end to avoid replaying old CC/Codex history on every Scouter restart. New or recently modified files are tailed from the first complete line, and incomplete trailing JSONL records are left for the next scan.
+
+Phase 1A+ deliberately does not yet implement full ccusage-style daily/monthly reporting, model pricing lookup, or Claude request-id deduplication. The parser pack is scoped to live session display: model, token totals, cache totals, cost when available, latest message, latest tool, and status.
 
 Dogfood checklist for the first week:
 
 - Keep the Medium widget on the home screen and watch stale-state behavior after screen off, app switch, and app restart.
 - Run `shelly scouter hooks` after opening Shelly before testing hooks, because copied ports are process-local.
 - Observe notification volume for completed/error/long-running events.
-- Watch JSONL watcher noise from old CC/Codex history and note whether old sessions should be filtered more aggressively.
+- Watch whether newly started CC/Codex sessions appear without old-history noise after Shelly/Scouter restart.
 - Decide before Phase 1B whether the no-foreground-service constraint is still acceptable for real hook reliability.
 
 ## PoC 5A Notes
