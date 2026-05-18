@@ -169,8 +169,18 @@ export const MODEL_CATALOG: LlamaCppModel[] = [
 // ─── Setup Script Generator ───────────────────────────────────────────────────
 
 const MODELS_DIR = '$HOME/models';
-// llama-server binary path
-const SERVER_BIN = 'llama-server';
+// Resolved inside generated shell scripts. Native exec does not always source
+// interactive shell rc files, so do not rely on $HOME/.local/bin being on PATH.
+const SERVER_BIN = '"$LLAMA_SERVER_BIN"';
+
+const LLAMA_SERVER_BIN_INIT =
+  'LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-$(command -v llama-server 2>/dev/null || printf \'%s\' "$HOME/.local/bin/llama-server")}"';
+
+const HEALTH_CHECK_CMD = [
+  `node -e 'const http=require("http");const req=http.get("http://127.0.0.1:8080/v1/models",res=>{process.exit(res.statusCode>=200&&res.statusCode<300?0:1)});req.on("error",()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1);});' >/dev/null 2>&1`,
+  `curl -fsS --max-time 2 http://127.0.0.1:8080/v1/models >/dev/null 2>&1`,
+  `wget -q -T 2 -O - http://127.0.0.1:8080/v1/models >/dev/null 2>&1`,
+].join(' || ');
 
 /**
  * llama.cppのセットアップステップ一覧を生成する。
@@ -231,10 +241,13 @@ export function buildServerStartCommand(config: LlamaCppServerConfig): string {
 /**
  * 推奨設定でllama-serverを起動するコマンドを生成する（Z Fold6向け）。
  */
-export function buildRecommendedStartCommand(model: LlamaCppModel): string {
+export function buildRecommendedStartCommand(
+  model: LlamaCppModel,
+  modelPath = `${MODELS_DIR}/${model.filename}`,
+): string {
   const config: LlamaCppServerConfig = {
     port: 8080,
-    modelPath: `${MODELS_DIR}/${model.filename}`,
+    modelPath,
     // ctx-sizeを小さくすると起動時間・メモリ・推論速度が大幅改善する
     contextSize: model.useCase === 'chat' ? 2048 : 4096,
     // Snapdragon 8 Gen3: 性能コアは6スレッドまで有効
@@ -247,20 +260,46 @@ export function buildRecommendedStartCommand(model: LlamaCppModel): string {
 /**
  * バックグラウンド常駐起動スクリプト（nohup）を生成する。
  */
-export function buildDaemonStartScript(model: LlamaCppModel): string {
+export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string): string {
   const logFile = `${MODELS_DIR}/llama-server.log`;
   const pidFile = `${MODELS_DIR}/llama-server.pid`;
-  const startCmd = buildRecommendedStartCommand(model);
+  const startCmd = buildRecommendedStartCommand(model, modelPath);
 
   return [
     `# llama-server バックグラウンド起動スクリプト`,
-    `pkill -f llama-server 2>/dev/null || true`,
+    LLAMA_SERVER_BIN_INIT,
+    `if [ ! -x "$LLAMA_SERVER_BIN" ]; then`,
+    `  echo "llama-server not found or not executable: $LLAMA_SERVER_BIN"`,
+    `  exit 1`,
+    `fi`,
+    `mkdir -p ${MODELS_DIR}`,
+    `pkill -f '[l]lama-server' 2>/dev/null || true`,
     `sleep 1`,
     `nohup ${startCmd} > "${logFile}" 2>&1 &`,
     `echo $! > "${pidFile}"`,
     `echo "llama-server started (PID: $(cat ${pidFile}))"`,
     `echo "API: http://127.0.0.1:8080/v1/chat/completions"`,
     `echo "Log: ${logFile}"`,
+    ``,
+    `# Verify that the server did not just fork and crash. The settings UI`,
+    `# treats exit code 0 as a real Running state, so do not return success`,
+    `# until the OpenAI-compatible endpoint is reachable.`,
+    `for i in $(seq 1 180); do`,
+    `  if ${HEALTH_CHECK_CMD}; then`,
+    `    echo "llama-server ready"`,
+    `    exit 0`,
+    `  fi`,
+    `  if ! kill -0 "$(cat "${pidFile}")" 2>/dev/null; then`,
+    `    echo "llama-server exited before becoming ready"`,
+    `    tail -80 "${logFile}" 2>/dev/null || true`,
+    `    exit 1`,
+    `  fi`,
+    `  echo "Waiting for llama-server... ($i/180)"`,
+    `  sleep 1`,
+    `done`,
+    `echo "llama-server is still running but did not become ready on http://127.0.0.1:8080"`,
+    `tail -80 "${logFile}" 2>/dev/null || true`,
+    `exit 1`,
   ].join('\n');
 }
 
@@ -268,14 +307,25 @@ export function buildDaemonStartScript(model: LlamaCppModel): string {
  * llama-serverの停止コマンドを生成する。
  */
 export function buildStopCommand(): string {
-  return `pkill -f llama-server && echo "llama-server stopped" || echo "llama-server not running"`;
+  return `pkill -f '[l]lama-server' && echo "llama-server stopped" || echo "llama-server not running"`;
 }
 
 /**
  * llama-serverの状態確認コマンドを生成する。
  */
 export function buildStatusCommand(): string {
-  return `pgrep -f llama-server > /dev/null && echo "running" || echo "stopped"`;
+  return [
+    `if ${HEALTH_CHECK_CMD}; then`,
+    `  echo "running"`,
+    `  exit 0`,
+    `fi`,
+    `if pgrep -f '[l]lama-server' >/dev/null 2>&1; then`,
+    `  echo "starting_or_unreachable"`,
+    `  exit 1`,
+    `fi`,
+    `echo "stopped"`,
+    `exit 1`,
+  ].join('\n');
 }
 
 /**
@@ -344,8 +394,14 @@ export function buildStartAllScript(model: LlamaCppModel): string {
     `#!/bin/bash`,
     `# Shelly llama-server 起動スクリプト`,
     ``,
+    LLAMA_SERVER_BIN_INIT,
+    `if [ ! -x "$LLAMA_SERVER_BIN" ]; then`,
+    `  echo "llama-server not found or not executable: $LLAMA_SERVER_BIN"`,
+    `  exit 1`,
+    `fi`,
+    ``,
     `# 1. 既存プロセスを停止`,
-    `pkill -f llama-server 2>/dev/null || true`,
+    `pkill -f '[l]lama-server' 2>/dev/null || true`,
     `sleep 1`,
     ``,
     `# 2. llama-serverをバックグラウンドで起動`,
@@ -354,18 +410,24 @@ export function buildStartAllScript(model: LlamaCppModel): string {
     `echo $! > "${pidFile}"`,
     `echo "llama-server started (PID: $(cat ${pidFile}))"`,
     ``,
-    `# 3. llama-serverの起動を待つ（最大15秒）`,
-    `for i in $(seq 1 15); do`,
-    `  if curl -s http://127.0.0.1:8080/health > /dev/null 2>&1; then`,
+    `# 3. llama-serverの起動を待つ（最大180秒）`,
+    `for i in $(seq 1 180); do`,
+    `  if ${HEALTH_CHECK_CMD}; then`,
     `    echo "llama-server ready!"`,
-    `    break`,
+    `    exit 0`,
     `  fi`,
-    `  echo "Waiting for llama-server... ($i/15)"`,
+    `  if ! kill -0 "$(cat "${pidFile}")" 2>/dev/null; then`,
+    `    echo "llama-server exited before becoming ready"`,
+    `    tail -80 "${logFile}" 2>/dev/null || true`,
+    `    exit 1`,
+    `  fi`,
+    `  echo "Waiting for llama-server... ($i/180)"`,
     `  sleep 1`,
     `done`,
     ``,
-    `echo "Done. llama-server is running in background."`,
+    `echo "llama-server is still running but did not become ready on http://127.0.0.1:8080"`,
     `echo "Log: ${logFile}"`,
+    `exit 1`,
   ].join('\n');
 }
 

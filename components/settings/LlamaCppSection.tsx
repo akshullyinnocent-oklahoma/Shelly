@@ -38,9 +38,24 @@ interface LlamaCppSectionProps {
   isConnected: boolean;
   activeModelId: string | null;
   installedModelIds: Set<string>;
+  installedModelPaths?: Record<string, string>;
   onSelectModel: (model: LlamaCppModel) => void;
   onRunCommand: (command: string, label: string) => Promise<{ success: boolean; output?: string }>;
   onUpdateLocalLlmUrl: (url: string) => void;
+}
+
+type ServerStatus = 'unknown' | 'running' | 'starting' | 'stopped';
+
+function resolveServerStatus(result: { success: boolean; output?: string }): ServerStatus {
+  if (result.success) return 'running';
+  const output = result.output ?? '';
+  if (
+    output.includes('starting_or_unreachable') ||
+    output.includes('still running but did not become ready')
+  ) {
+    return 'starting';
+  }
+  return 'stopped';
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -49,6 +64,7 @@ export function LlamaCppSection({
   isConnected,
   activeModelId,
   installedModelIds,
+  installedModelPaths,
   onSelectModel,
   onRunCommand,
   onUpdateLocalLlmUrl,
@@ -56,7 +72,7 @@ export function LlamaCppSection({
   const recommended = getRecommendedModel();
   const [expandedModelId, setExpandedModelId] = useState<string | null>(recommended?.id ?? null);
   const [loadingModelId, setLoadingModelId] = useState<string | null>(null);
-  const [serverStatus, setServerStatus] = useState<'unknown' | 'running' | 'stopped'>('unknown');
+  const [serverStatus, setServerStatus] = useState<ServerStatus>('unknown');
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [setupLog, setSetupLog] = useState<string[]>([]);
   const [showSetupLog, setShowSetupLog] = useState(false);
@@ -66,7 +82,7 @@ export function LlamaCppSection({
     if (!isConnected) return;
     const cmd = buildStatusCommand();
     onRunCommand(cmd, 'Server status check').then((result) => {
-      setServerStatus(result.success ? 'running' : 'stopped');
+      setServerStatus(resolveServerStatus(result));
     });
   }, [isConnected]);
 
@@ -140,16 +156,17 @@ export function LlamaCppSection({
       Alert.alert('Not connected', 'Terminal is not connected.');
       return;
     }
-    const script = buildDaemonStartScript(model);
+    const script = buildDaemonStartScript(model, installedModelPaths?.[model.id]);
     const result = await onRunCommand(script, `${model.name} start`);
     if (result.success) {
       setServerStatus('running');
       onSelectModel(model);
       onUpdateLocalLlmUrl('http://127.0.0.1:8080');
     } else {
-      Alert.alert('Error', 'Failed to start.');
+      setServerStatus(resolveServerStatus(result));
+      Alert.alert('Error', `Failed to start.\n\n${(result.output ?? '').slice(-1200)}`);
     }
-  }, [isConnected, onRunCommand, onSelectModel, onUpdateLocalLlmUrl]);
+  }, [installedModelPaths, isConnected, onRunCommand, onSelectModel, onUpdateLocalLlmUrl]);
 
   const handleStopServer = useCallback(async () => {
     if (!isConnected) return;
@@ -164,7 +181,7 @@ export function LlamaCppSection({
     if (!isConnected) return;
     const cmd = buildStatusCommand();
     const result = await onRunCommand(cmd, 'Server status check');
-    setServerStatus(result.success ? 'running' : 'stopped');
+    setServerStatus(resolveServerStatus(result));
   }, [isConnected, onRunCommand]);
 
   const handleDeleteModel = useCallback(async (model: LlamaCppModel) => {
@@ -212,11 +229,13 @@ export function LlamaCppSection({
           <View style={[
             styles.statusDot,
             serverStatus === 'running' ? styles.statusDotGreen :
+            serverStatus === 'starting' ? styles.statusDotYellow :
             serverStatus === 'stopped' ? styles.statusDotRed :
             styles.statusDotGray,
           ]} />
           <Text style={styles.statusBtnText}>
             {serverStatus === 'running' ? 'Running' :
+             serverStatus === 'starting' ? 'Starting' :
              serverStatus === 'stopped' ? 'Stopped' : 'Unknown'}
           </Text>
         </TouchableOpacity>
@@ -234,7 +253,7 @@ export function LlamaCppSection({
       )}
 
       {/* サーバー停止ボタン */}
-      {serverStatus === 'running' && (
+      {(serverStatus === 'running' || serverStatus === 'starting') && (
         <TouchableOpacity style={styles.stopBtn} onPress={handleStopServer}>
           <MaterialIcons name="stop" size={16} color="#F87171" />
           <Text style={styles.stopBtnText}>Stop server</Text>
@@ -247,6 +266,7 @@ export function LlamaCppSection({
           <Text style={styles.catalogLabel}>Installed</Text>
           {installedModels.map((model) => {
             const isActive = activeModelId === model.id;
+            const canStart = serverStatus !== 'starting' && (serverStatus !== 'running' || !isActive);
             return (
               <View key={model.id} style={[styles.modelCard, isActive && styles.modelCardActive]}>
                 <View style={styles.installedRow}>
@@ -258,7 +278,7 @@ export function LlamaCppSection({
                     <Text style={styles.modelMeta}>{model.sizeGb}GB · RAM {model.ramRequiredGb}GB</Text>
                   </View>
                   <View style={styles.installedActions}>
-                    {!isActive && (
+                    {canStart && (
                       <TouchableOpacity
                         style={[styles.actionBtn, styles.actionBtnPrimary]}
                         onPress={() => handleStartServer(model)}
@@ -365,6 +385,7 @@ const styles = StyleSheet.create({
   },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusDotGreen: { backgroundColor: '#4ADE80' },
+  statusDotYellow: { backgroundColor: '#FACC15' },
   statusDotRed: { backgroundColor: '#F87171' },
   statusDotGray: { backgroundColor: '#4B5563' },
   statusBtnText: { color: '#9CA3AF', fontSize: 12, fontFamily: 'JetBrainsMono_400Regular' },

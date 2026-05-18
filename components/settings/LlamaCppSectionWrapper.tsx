@@ -77,9 +77,9 @@ async function fetchServerModelPathFromPs(): Promise<string | null> {
   );
   const line = (r.stdout ?? '').trim();
   if (!line) return null;
-  // The -m argument is somewhere in the line; match it directly.
-  const m = line.match(/-m\s+(\S+\.gguf)/);
-  return m?.[1] ?? null;
+  // The model argument is somewhere in the line; match common llama.cpp forms.
+  const m = line.match(/(?:-m|--model)\s+("?)(\S+\.gguf)\1/);
+  return m?.[2] ?? null;
 }
 
 // Loose match: lowercased substring in either direction. Example:
@@ -114,6 +114,7 @@ export function LlamaCppSectionWrapper({ onClose }: Props) {
   const [installedModelIds, setInstalledModelIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [installedModelPaths, setInstalledModelPaths] = useState<Record<string, string>>({});
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
   const [activeServerLabel, setActiveServerLabel] = useState<string | null>(null);
 
@@ -140,13 +141,14 @@ export function LlamaCppSectionWrapper({ onClose }: Props) {
       seen.add(key);
       fullPaths.push(path);
     }
-    const basenames = fullPaths.map(basenameOf);
-
     const found = new Set<string>();
+    const paths: Record<string, string> = {};
     for (const model of MODEL_CATALOG) {
-      for (const base of basenames) {
+      for (const path of fullPaths) {
+        const base = basenameOf(path);
         if (basenameMatchesCatalog(base, model.filename)) {
           found.add(model.id);
+          paths[model.id] = path;
           break;
         }
       }
@@ -176,6 +178,7 @@ export function LlamaCppSectionWrapper({ onClose }: Props) {
         for (const model of MODEL_CATALOG) {
           if (basenameMatchesCatalog(base, model.filename)) {
             resolvedActiveId = model.id;
+            paths[model.id] = psPath;
             break;
           }
         }
@@ -188,6 +191,7 @@ export function LlamaCppSectionWrapper({ onClose }: Props) {
       found.add(resolvedActiveId);
     }
     setInstalledModelIds(found);
+    setInstalledModelPaths(paths);
 
     if (resolvedActiveId) {
       setActiveModelId(resolvedActiveId);
@@ -259,6 +263,7 @@ export function LlamaCppSectionWrapper({ onClose }: Props) {
           isConnected={true}
           activeModelId={activeModelId}
           installedModelIds={installedModelIds}
+          installedModelPaths={installedModelPaths}
           onSelectModel={handleSelectModel}
           onRunCommand={handleRun}
           onUpdateLocalLlmUrl={handleUpdateLocalLlmUrl}
