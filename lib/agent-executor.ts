@@ -399,7 +399,7 @@ resolve_llama_server_download_url() {
   node - > "$TMP_DIR/llama-server-url-$AGENT_ID.txt" 2> "$err_file" <<'NODEEOF'
 const https = require('https');
 
-https.get('https://api.github.com/repos/ggml-org/llama.cpp/releases/latest', {
+const req = https.get('https://api.github.com/repos/ggml-org/llama.cpp/releases/latest', {
   headers: { 'User-Agent': 'Shelly-local-llm-installer/1' },
 }, (res) => {
   let body = '';
@@ -421,8 +421,12 @@ https.get('https://api.github.com/repos/ggml-org/llama.cpp/releases/latest', {
     }
     process.stdout.write(asset.browser_download_url);
   });
-}).on('error', (err) => {
-  console.error(err && err.message ? err.message : String(err));
+});
+req.setTimeout(8000, () => {
+  req.destroy(new Error('release lookup timed out'));
+});
+req.on('error', (err) => {
+  console.error('release lookup failed: ' + (err && err.message ? err.message : String(err)));
   process.exit(1);
 });
 NODEEOF
@@ -532,7 +536,7 @@ ensure_local_llm_server() {
 
   server_bin=$(find_llama_server_bin || true)
   if [ -z "$server_bin" ]; then
-    if [ "\${LOCAL_LLM_INSTALL_LLAMA_SERVER:-1}" = "0" ]; then
+    if [ "\${LOCAL_LLM_INSTALL_LLAMA_SERVER:-0}" != "1" ]; then
       echo "auto-start failed: llama-server binary not found in PATH, $HOME/.local/bin, or $HOME/bin" > "$reason_file"
       rmdir "$lock_dir" 2>/dev/null || true
       return 1

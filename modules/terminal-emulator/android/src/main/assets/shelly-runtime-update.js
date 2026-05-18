@@ -284,7 +284,8 @@ if (!globalThis.Bun.JSONL) {
     const original = childProcess[name];
     if (typeof original !== 'function' || original.__shellyShellPatched) return;
     const patched = function(command, options, callback) {
-      if (typeof options === 'function' || options === undefined) return original.call(this, command, { shell: shellyShellPath() }, options);
+      if (typeof options === 'function') return original.call(this, command, { shell: shellyShellPath() }, options);
+      if (options === undefined) return original.call(this, command, { shell: shellyShellPath() }, callback);
       return original.call(this, command, normalizeOptions(options, true), callback);
     };
     try { Object.defineProperty(patched, '__shellyShellPatched', { value: true }); } catch (_) {}
@@ -305,22 +306,33 @@ if (typeof globalThis.Bun.spawn !== 'function') {
     const cmd = Array.isArray(cmdSpec) ? cmdSpec[0] : cmdSpec;
     const args = Array.isArray(cmdSpec) ? cmdSpec.slice(1) : [];
     const spawnOptions = Object.assign({}, options || {});
+    let stdinPayload = null;
     if (spec) {
       if (spec.cwd) spawnOptions.cwd = spec.cwd;
       if (spec.env) spawnOptions.env = Object.assign({}, process.env, spec.env);
-      if (spec.stdin || spec.stdout || spec.stderr) {
-        const map = function(v, fallback) { return v === 'inherit' || v === 'ignore' || v === 'pipe' ? v : fallback; };
-        spawnOptions.stdio = [map(spec.stdin, 'pipe'), map(spec.stdout, 'pipe'), map(spec.stderr, 'pipe')];
+      if (spawnOptions.stdio === undefined) {
+        const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
+        const map = function(v, fallback) { return isMode(v) ? v : fallback; };
+        stdinPayload = spec.stdin && !isMode(spec.stdin) ? spec.stdin : null;
+        spawnOptions.stdio = [stdinPayload ? 'pipe' : map(spec.stdin, 'ignore'), map(spec.stdout, 'pipe'), map(spec.stderr, 'pipe')];
       }
       if (spec.shell !== undefined) spawnOptions.shell = spec.shell;
     }
     if (spawnOptions.shell === true) spawnOptions.shell = process.env.SHELL || '/system/bin/sh';
     const child = childProcess.spawn(String(cmd), args.map(String), spawnOptions);
-    try {
-      const Readable = require('stream').Readable;
-      if (child.stdout && Readable.toWeb) child.stdout = Readable.toWeb(child.stdout);
-      if (child.stderr && Readable.toWeb) child.stderr = Readable.toWeb(child.stderr);
-    } catch (_) {}
+    if (stdinPayload != null && child.stdin) {
+      try {
+        if (typeof stdinPayload === 'string' || Buffer.isBuffer(stdinPayload) || stdinPayload instanceof Uint8Array) {
+          child.stdin.end(stdinPayload);
+        } else if (stdinPayload && typeof stdinPayload.arrayBuffer === 'function') {
+          stdinPayload.arrayBuffer().then(function(ab) { child.stdin.end(Buffer.from(ab)); }, function() { child.stdin.end(); });
+        } else {
+          child.stdin.end(String(stdinPayload));
+        }
+      } catch (_) {
+        try { child.stdin.end(); } catch (_) {}
+      }
+    }
     child.exited = new Promise(function(resolve) {
       child.on('exit', function(code) { resolve(code ?? 0); });
       child.on('error', function() { resolve(1); });

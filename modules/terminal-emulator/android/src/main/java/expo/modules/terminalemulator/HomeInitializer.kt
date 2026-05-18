@@ -1014,7 +1014,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      support Bun.spawn object-form command specs, keep BASH aligned
     //      with the bash-named shell path, and make shelly_shell repair
     //      minimal env when Claude launches it from a sanitized tool env.
-    private const val BASHRC_VERSION = 148
+    // 149: Fix the 148 Claude preload regression: preserve exec callbacks,
+    //      close object-form Bun.spawn stdin payloads, default object-form
+    //      stdin to ignore, stop mutating stdout / stderr streams, and make
+    //      shelly_shell replace wrong LD_PRELOAD.
+    private const val BASHRC_VERSION = 149
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2164,7 +2168,8 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    const original = childProcess[name];")
             sb.appendLine("    if (typeof original !== 'function' || original.__shellyShellPatched) return;")
             sb.appendLine("    const patched = function(command, options, callback) {")
-            sb.appendLine("      if (typeof options === 'function' || options === undefined) return original.call(this, command, { shell: shellyShellPath() }, options);")
+            sb.appendLine("      if (typeof options === 'function') return original.call(this, command, { shell: shellyShellPath() }, options);")
+            sb.appendLine("      if (options === undefined) return original.call(this, command, { shell: shellyShellPath() }, callback);")
             sb.appendLine("      return original.call(this, command, normalizeOptions(options, true), callback);")
             sb.appendLine("    };")
             sb.appendLine("    try { Object.defineProperty(patched, '__shellyShellPatched', { value: true }); } catch (_) {}")
@@ -2185,22 +2190,33 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    const cmd = Array.isArray(cmdSpec) ? cmdSpec[0] : cmdSpec;")
             sb.appendLine("    const args = Array.isArray(cmdSpec) ? cmdSpec.slice(1) : [];")
             sb.appendLine("    const spawnOptions = Object.assign({}, options || {});")
+            sb.appendLine("    let stdinPayload = null;")
             sb.appendLine("    if (spec) {")
             sb.appendLine("      if (spec.cwd) spawnOptions.cwd = spec.cwd;")
             sb.appendLine("      if (spec.env) spawnOptions.env = Object.assign({}, process.env, spec.env);")
-            sb.appendLine("      if (spec.stdin || spec.stdout || spec.stderr) {")
-            sb.appendLine("        const map = function(v, fallback) { return v === 'inherit' || v === 'ignore' || v === 'pipe' ? v : fallback; };")
-            sb.appendLine("        spawnOptions.stdio = [map(spec.stdin, 'pipe'), map(spec.stdout, 'pipe'), map(spec.stderr, 'pipe')];")
+            sb.appendLine("      if (spawnOptions.stdio === undefined) {")
+            sb.appendLine("        const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };")
+            sb.appendLine("        const map = function(v, fallback) { return isMode(v) ? v : fallback; };")
+            sb.appendLine("        stdinPayload = spec.stdin && !isMode(spec.stdin) ? spec.stdin : null;")
+            sb.appendLine("        spawnOptions.stdio = [stdinPayload ? 'pipe' : map(spec.stdin, 'ignore'), map(spec.stdout, 'pipe'), map(spec.stderr, 'pipe')];")
             sb.appendLine("      }")
             sb.appendLine("      if (spec.shell !== undefined) spawnOptions.shell = spec.shell;")
             sb.appendLine("    }")
             sb.appendLine("    if (spawnOptions.shell === true) spawnOptions.shell = process.env.SHELL || '/system/bin/sh';")
             sb.appendLine("    const child = childProcess.spawn(String(cmd), args.map(String), spawnOptions);")
-            sb.appendLine("    try {")
-            sb.appendLine("      const Readable = require('stream').Readable;")
-            sb.appendLine("      if (child.stdout && Readable.toWeb) child.stdout = Readable.toWeb(child.stdout);")
-            sb.appendLine("      if (child.stderr && Readable.toWeb) child.stderr = Readable.toWeb(child.stderr);")
-            sb.appendLine("    } catch (_) {}")
+            sb.appendLine("    if (stdinPayload != null && child.stdin) {")
+            sb.appendLine("      try {")
+            sb.appendLine("        if (typeof stdinPayload === 'string' || Buffer.isBuffer(stdinPayload) || stdinPayload instanceof Uint8Array) {")
+            sb.appendLine("          child.stdin.end(stdinPayload);")
+            sb.appendLine("        } else if (stdinPayload && typeof stdinPayload.arrayBuffer === 'function') {")
+            sb.appendLine("          stdinPayload.arrayBuffer().then(function(ab) { child.stdin.end(Buffer.from(ab)); }, function() { child.stdin.end(); });")
+            sb.appendLine("        } else {")
+            sb.appendLine("          child.stdin.end(String(stdinPayload));")
+            sb.appendLine("        }")
+            sb.appendLine("      } catch (_) {")
+            sb.appendLine("        try { child.stdin.end(); } catch (_) {}")
+            sb.appendLine("      }")
+            sb.appendLine("    }")
             sb.appendLine("    child.exited = new Promise(function(resolve) {")
             sb.appendLine("      child.on('exit', function(code) { resolve(code ?? 0); });")
             sb.appendLine("      child.on('error', function() { resolve(1); });")

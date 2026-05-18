@@ -202,9 +202,13 @@ public final class TerminalSession extends TerminalOutput {
      * Reads terminal output from inputStream, writes user input to outputStream.
      */
     public void initializeWithStreams(InputStream inputStream, OutputStream outputStream, int columns, int rows, int cellWidthPixels, int cellHeightPixels) {
+        initializeWithStreams(inputStream, outputStream, columns, rows, cellWidthPixels, cellHeightPixels, 0);
+    }
+
+    public void initializeWithStreams(InputStream inputStream, OutputStream outputStream, int columns, int rows, int cellWidthPixels, int cellHeightPixels, int shellPid) {
         mEmulator = new TerminalEmulator(this, columns, rows, cellWidthPixels, cellHeightPixels, mTranscriptRows, mClient);
         mTerminalFileDescriptor = -1;
-        mShellPid = 0; // No local process — socat runs in Termux
+        mShellPid = Math.max(0, shellPid);
         mStreamBased = true;
 
         new Thread("TermSessionInputReader[stream]") {

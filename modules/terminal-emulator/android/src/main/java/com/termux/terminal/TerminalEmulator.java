@@ -2789,11 +2789,12 @@ public final class TerminalEmulator {
     }
 
     private boolean isShellyPasteForceTui() {
+        int shellPid = shellyShellPid();
         // Primary: read HOME from the bash process's /proc/<pid>/environ.
         String home = shellyShellHome();
         if (home != null && !home.isEmpty()) {
             File marker = new File(home, ".shelly_paste_force_tui");
-            if (marker.isFile()) return true;
+            if (isShellyPasteForceMarkerActive(marker, shellPid)) return true;
         }
         // Fallback for sessions where shellPid is 0 (stream-based) or
         // /proc reads fail: check the conventional Shelly home path
@@ -2801,7 +2802,27 @@ public final class TerminalEmulator {
         // under a different uid (e.g. work profile), this will miss —
         // acceptable because forceTui is a hint, not a security gate.
         File hardcodedMarker = new File("/data/user/0/dev.shelly.terminal/files/home/.shelly_paste_force_tui");
-        return hardcodedMarker.isFile();
+        return isShellyPasteForceMarkerActive(hardcodedMarker, shellPid);
+    }
+
+    private boolean isShellyPasteForceMarkerActive(File marker, int shellPid) {
+        if (!marker.isFile()) return false;
+        String value = readProcText(marker.getAbsolutePath());
+        if (value == null) return false;
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) return false;
+        try {
+            int markerPid = Integer.parseInt(trimmed.split("\\s+", 2)[0]);
+            if (shellPid > 0 && markerPid != shellPid) return false;
+            if (readProcText("/proc/" + markerPid + "/comm") == null) {
+                marker.delete();
+                return false;
+            }
+            return true;
+        } catch (Throwable t) {
+            marker.delete();
+            return false;
+        }
     }
 
     /**

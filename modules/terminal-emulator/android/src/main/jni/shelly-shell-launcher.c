@@ -42,7 +42,11 @@ static char **copy_env_with_preload(char *const envp[], const char *lib_dir, con
         home_bin[0] = '\0';
     }
     for (; envp && envp[count]; count++) {
-        if (strncmp(envp[count], "LD_PRELOAD=", 11) == 0 && envp[count][11]) need_preload = 0;
+        if (strncmp(envp[count], "LD_PRELOAD=", 11) == 0) {
+            char expected_preload[PATH_MAX + 32];
+            snprintf(expected_preload, sizeof(expected_preload), "%s/libexec_wrapper.so", lib_dir);
+            if (strcmp(envp[count] + 11, expected_preload) == 0) need_preload = 0;
+        }
         if (strncmp(envp[count], "LD_LIBRARY_PATH=", 16) == 0 && envp[count][16]) need_ld_library_path = 0;
         if (strncmp(envp[count], "SHELLY_LIB_DIR=", 15) == 0 && strcmp(envp[count] + 15, lib_dir) == 0) need_shelly_lib_dir = 0;
         if (strncmp(envp[count], "PATH=", 5) == 0 && envp[count][5]) {

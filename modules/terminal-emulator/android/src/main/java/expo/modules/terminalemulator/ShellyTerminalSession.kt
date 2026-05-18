@@ -52,7 +52,7 @@ class ShellyTerminalSession(
         terminalSession = TerminalSession(
             "/bin/true", "/", arrayOf(), arrayOf(), null, this
         )
-        terminalSession.initializeWithStreams(inputStream, outputStream, cols, rows, 1, 1)
+        terminalSession.initializeWithStreams(inputStream, outputStream, cols, rows, 1, 1, childPid)
 
         // Wait for child exit on background thread
         Thread({
