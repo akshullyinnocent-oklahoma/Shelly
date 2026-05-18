@@ -782,11 +782,12 @@ function readFailedVersions() {
 //   shape      — tarball or SEA shape unexpected (validateClaudeShape)
 //   extraction — extractClaudeCliFromSea threw
 //   permission — canary failed because Claude refused a tool permission
+//   timeout    — canary exceeded its wall-clock budget; diagnostic only
 //
 // Cooldown semantics: only `signal` and `exit` and `shape` are recorded
 // to .failed-versions (the binary itself is bad). `auth` / `network` /
-// `extraction` go to .failure-log (diagnostic only) so the user / next
-// updater run sees the history but the version isn't blocked from
+// `timeout` / `extraction` go to .failure-log (diagnostic only) so the user /
+// next updater run sees the history but the version isn't blocked from
 // promotion when the user fixes their auth or net comes back.
 const FAILURE_LOG = path.join(ROOT, '.failure-log');
 const CANARY_SUPPRESSIONS = path.join(ROOT, '.canary-suppressions');
@@ -803,6 +804,7 @@ function classifyFailure({ status, signal, stdout = '', stderr = '', error = nul
   // (128 + signal_number). Node child_process also exposes `signal`
   // directly, which we prefer when present.
   if (error && error.code === 'ETIMEDOUT') return 'network';
+  if (status === 124) return 'timeout';
   if (signal) return 'signal';
   if (typeof status === 'number' && status >= 128) return 'signal';
   // Auth-failure patterns observed in Claude Code stderr/stdout when
@@ -1224,6 +1226,30 @@ function runNodeScript(script, args = [], extraEnv = {}, timeout = 30000) {
   });
 }
 
+function runNodeScriptHardTimeout(script, args = [], extraEnv = {}, timeout = 30000) {
+  const env = { ...process.env, ...extraEnv };
+  const nodeArgs = [
+    path.join(LIB, 'node'),
+    script,
+    ...args,
+  ];
+  if (fs.existsSync('/system/bin/timeout')) {
+    const seconds = String(Math.max(1, Math.ceil(timeout / 1000)));
+    return spawnSync('/system/bin/timeout', [
+      '-s',
+      'KILL',
+      seconds,
+      '/system/bin/linker64',
+      ...nodeArgs,
+    ], {
+      env,
+      encoding: 'utf8',
+      timeout: timeout + 5000,
+    });
+  }
+  return runNodeScript(script, args, extraEnv, timeout);
+}
+
 function resultSummary(result) {
   if (!result) return 'result=<null>';
   const parts = [`status=${result.status}`];
@@ -1503,6 +1529,11 @@ function claudeCanaryResult(name, result, expectedRe) {
 
 function runClaudeExtractedFunctionalCanaries(cli) {
   const bashNonce = `SHELLY_BASH_${crypto.randomBytes(8).toString('hex')}`;
+  const canaryDiag = process.env.SHELLY_UPDATER_CANARY_DIAG === '1';
+  const parsedTimeout = Number(process.env.SHELLY_UPDATER_CANARY_TIMEOUT_MS || 60000);
+  const canaryTimeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout >= 5000
+    ? parsedTimeout
+    : 60000;
   const checks = [
     {
       name: 'print-ok',
@@ -1523,17 +1554,21 @@ function runClaudeExtractedFunctionalCanaries(cli) {
         'bypassPermissions',
         'Use the Bash tool to run this exact command: printf "$SHELLY_BASH_CANARY_NONCE". Return only the command output.',
       ],
-      env: { SHELLY_BASH_CANARY_NONCE: bashNonce },
+      env: {
+        SHELLY_BASH_CANARY_NONCE: bashNonce,
+        ...(canaryDiag ? { SHELLY_CLAUDE_DIAG: '1' } : {}),
+      },
       expected: new RegExp(escapeRegExp(bashNonce)),
     });
   }
 
   const passed = [];
   for (const check of checks) {
-    const result = runNodeScript(cli, check.args, claudeExtractedNodeSmokeEnv({
+    info(`[claude] functional canary ${check.name} start`);
+    const result = runNodeScriptHardTimeout(cli, check.args, claudeExtractedNodeSmokeEnv({
       SHELLY_SILENT_CLI_TIER: '1',
       ...(check.env || {}),
-    }), 120000);
+    }), canaryTimeoutMs);
     const verdict = claudeCanaryResult(check.name, result, check.expected);
     if (!verdict.ok) return { ...verdict, passed };
     passed.push(check.name);

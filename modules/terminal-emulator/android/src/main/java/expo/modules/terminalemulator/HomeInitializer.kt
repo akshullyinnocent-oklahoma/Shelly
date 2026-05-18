@@ -1057,7 +1057,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 160: Expand Claude's spawn(command, [], { shell }) Bash-tool path into
     //      an explicit $HOME/bin/bash -lc command before Node's shell path can
     //      hit the Android SIGSEGV seen in the v159 canary.
-    private const val BASHRC_VERSION = 160
+    // 161: Make the authenticated Claude functional canary observable and
+    //      bounded: print per-step progress, wrap the extracted CLI launch in
+    //      Android's timeout command, and include sanitized Bash-tool spawn
+    //      traces only for explicit canary runs.
+    private const val BASHRC_VERSION = 161
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -3390,7 +3394,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  esac")
             sb.appendLine("}")
             sb.appendLine("shelly-doctor() { SHELLY_LIB_DIR=\"$libDir\" _run $libDir/node \"\$HOME/.shelly-doctor.js\" \"\$@\"; }")
-            sb.appendLine("shelly-runtime-canary() { SHELLY_UPDATER_FUNCTIONAL_CHECK=1 SHELLY_LIB_DIR=\"$libDir\" _run $libDir/node \"\$HOME/.shelly-runtime-update.js\" claude --force; }")
+            sb.appendLine("shelly-runtime-canary() { SHELLY_UPDATER_FUNCTIONAL_CHECK=1 SHELLY_UPDATER_CANARY_DIAG=1 SHELLY_LIB_DIR=\"$libDir\" _run $libDir/node \"\$HOME/.shelly-runtime-update.js\" claude --force; }")
             sb.appendLine("shelly-claude-bash-canary() {")
             sb.appendLine("  local __runtime_cli=\"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
             sb.appendLine("  local __apk_cli=\"$libDir/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
