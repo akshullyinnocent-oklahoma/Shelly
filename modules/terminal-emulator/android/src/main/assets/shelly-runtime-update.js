@@ -322,6 +322,7 @@ if (!globalThis.Bun.JSONL) {
     out.SHELLY_LIB_DIR = out.SHELLY_LIB_DIR || shellyLibDir();
     out.LD_LIBRARY_PATH = out.LD_LIBRARY_PATH || shellyLibDir();
     out.LD_PRELOAD = out.LD_PRELOAD || (shellyLibDir() + '/libexec_wrapper.so');
+    out.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = out.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB || '0';
     out.ANDROID_ROOT = out.ANDROID_ROOT || process.env.ANDROID_ROOT || '/system';
     out.ANDROID_DATA = out.ANDROID_DATA || process.env.ANDROID_DATA || '/data';
     out.TMPDIR = out.TMPDIR || process.env.TMPDIR || (shellyHome() + '/.tmp');
@@ -333,11 +334,11 @@ if (!globalThis.Bun.JSONL) {
   const shellyShellValue = function(value) {
     if (value === true || value === undefined) return shellyShellPath();
     const s = String(value);
-    return (s === '/bin/sh' || s === '/bin/bash' || s === 'sh' || s === 'bash') ? shellyShellPath() : value;
+    return (s === '/bin/sh' || s === '/bin/bash' || s === '/usr/bin/sh' || s === '/usr/bin/bash' || s === 'sh' || s === 'bash') ? shellyShellPath() : value;
   };
   const shellyCommandValue = function(value) {
     const s = String(value);
-    return (s === '/bin/sh' || s === '/bin/bash' || s === 'sh' || s === 'bash') ? shellyShellPath() : value;
+    return (s === '/bin/sh' || s === '/bin/bash' || s === '/usr/bin/sh' || s === '/usr/bin/bash' || s === 'sh' || s === 'bash') ? shellyShellPath() : value;
   };
   const normalizeOptions = function(options, forceShell) {
     const out = (!options || typeof options !== 'object') ? {} : Object.assign({}, options);
@@ -427,16 +428,20 @@ if (!globalThis.Bun.JSONL) {
         : (spec && typeof spec.onExit === 'function' ? spec.onExit : null);
       delete spawnOptions.onExit;
       let stdinPayload = null;
+      const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
       if (spec) {
         if (spec.cwd) spawnOptions.cwd = spec.cwd;
         if (spec.env) spawnOptions.env = shellyRepairEnv(spec.env);
         if (spawnOptions.stdio === undefined) {
-          const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
           const map = function(v, fallback) { return isMode(v) ? v : fallback; };
           stdinPayload = spec.stdin && !isMode(spec.stdin) ? spec.stdin : null;
           spawnOptions.stdio = [stdinPayload ? 'pipe' : map(spec.stdin, 'ignore'), map(spec.stdout, 'pipe'), map(spec.stderr, 'pipe')];
         }
         if (spec.shell !== undefined) spawnOptions.shell = spec.shell;
+      }
+      if (!spec && spawnOptions.stdio === undefined && spawnOptions.stdin !== undefined && !isMode(spawnOptions.stdin)) {
+        stdinPayload = spawnOptions.stdin;
+        spawnOptions.stdin = 'pipe';
       }
       applyBunSpawnOptions(spawnOptions);
       return {
@@ -498,15 +503,21 @@ if (!globalThis.Bun.JSONL) {
       const cmd = Array.isArray(cmdSpec) ? cmdSpec[0] : cmdSpec;
       const args = Array.isArray(cmdSpec) ? cmdSpec.slice(1) : [];
       const spawnOptions = Object.assign({}, options || {});
+      let stdinPayload = null;
+      const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
       if (spec) {
         if (spec.cwd) spawnOptions.cwd = spec.cwd;
         if (spec.env) spawnOptions.env = shellyRepairEnv(spec.env);
         if (spawnOptions.stdio === undefined) {
-          const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
           const map = function(v, fallback) { return isMode(v) ? v : fallback; };
-          spawnOptions.stdio = [map(spec.stdin, 'ignore'), map(spec.stdout, 'pipe'), map(spec.stderr, 'pipe')];
+          stdinPayload = spec.stdin && !isMode(spec.stdin) ? spec.stdin : null;
+          spawnOptions.stdio = [stdinPayload ? 'pipe' : map(spec.stdin, 'ignore'), map(spec.stdout, 'pipe'), map(spec.stderr, 'pipe')];
         }
         if (spec.shell !== undefined) spawnOptions.shell = spec.shell;
+      }
+      if (!spec && spawnOptions.stdio === undefined && spawnOptions.stdin !== undefined && !isMode(spawnOptions.stdin)) {
+        stdinPayload = spawnOptions.stdin;
+        spawnOptions.stdin = 'pipe';
       }
       if (spawnOptions.stdio === undefined && (
         spawnOptions.stdin !== undefined || spawnOptions.stdout !== undefined || spawnOptions.stderr !== undefined
@@ -518,6 +529,7 @@ if (!globalThis.Bun.JSONL) {
       delete spawnOptions.stdin;
       delete spawnOptions.stdout;
       delete spawnOptions.stderr;
+      if (stdinPayload != null && spawnOptions.input === undefined) spawnOptions.input = stdinPayload;
       const result = childProcess.spawnSync(String(shellyCommandValue(cmd)), args.map(String), normalizeOptions(spawnOptions, false));
       const exitCode = result.status ?? (result.error ? 1 : 0);
       return {
@@ -1026,6 +1038,7 @@ function claudeExtractedNodeSmokeEnv(extraEnv = {}) {
     DISABLE_AUTOUPDATER: '1',
     DISABLE_INSTALLATION_CHECKS: '1',
     NO_UPDATE_NOTIFIER: '1',
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '0',
     TMPDIR: GENERIC_TMP,
     BUN_TMPDIR: CLAUDE_BUN_TMP,
     CLAUDE_TMPDIR: CLAUDE_TMP,

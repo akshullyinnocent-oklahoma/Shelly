@@ -187,7 +187,8 @@ static const char *rewrite_path(const char *pathname, char *const envp[], char *
     if (!pathname) return NULL;
     if (streq(pathname, "/bin/sh") || streq(pathname, "sh")) return "/system/bin/sh";
     if (streq(pathname, "/usr/bin/env") || streq(pathname, "env")) return "/system/bin/env";
-    if (streq(pathname, "/bin/bash") || streq(pathname, "bash")) {
+    if (streq(pathname, "/bin/bash") || streq(pathname, "/usr/bin/bash") ||
+        streq(pathname, "/usr/bin/sh") || streq(pathname, "bash")) {
         const char *shell = env_value(envp, "SHELL=");
         if (trusted_shell_path(shell)) return shell;
     }
@@ -240,16 +241,13 @@ int execve(const char *pathname, char *const argv[], char *const envp[]) {
     char rewrite_buf[PATH_BUF_SIZE];
     const char *rewritten = rewrite_path(pathname, (char *const *)child_env, rewrite_buf, sizeof(rewrite_buf));
     if (!rewritten) return -1;
-    if (rewritten != pathname) {
+    if (!should_linker_exec(rewritten)) {
         return raw_execve_call(rewritten, argv, (char *const *)child_env);
-    }
-    if (!should_linker_exec(pathname)) {
-        return raw_execve_call(pathname, argv, (char *const *)child_env);
     }
 
     char *new_argv[MAX_ARGC + 2];
-    if (build_linker_argv(pathname, argv, new_argv) != 0) {
-        return raw_execve_call(pathname, argv, (char *const *)child_env);
+    if (build_linker_argv(rewritten, argv, new_argv) != 0) {
+        return raw_execve_call(rewritten, argv, (char *const *)child_env);
     }
     return raw_execve_call(LINKER64, new_argv, (char *const *)child_env);
 }

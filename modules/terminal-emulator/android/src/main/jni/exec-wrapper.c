@@ -154,7 +154,8 @@ static const char *rewrite_path(const char *pathname, char *const envp[], char *
     if (!pathname) return NULL;
     if (streq(pathname, "/bin/sh") || streq(pathname, "sh")) return "/system/bin/sh";
     if (streq(pathname, "/usr/bin/env") || streq(pathname, "env")) return "/system/bin/env";
-    if (streq(pathname, "/bin/bash") || streq(pathname, "bash")) {
+    if (streq(pathname, "/bin/bash") || streq(pathname, "/usr/bin/bash") ||
+        streq(pathname, "/usr/bin/sh") || streq(pathname, "bash")) {
         const char *shell = env_value(envp, "SHELL=");
         if (trusted_shell_path(shell)) return shell;
     }
