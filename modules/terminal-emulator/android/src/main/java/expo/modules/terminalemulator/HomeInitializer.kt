@@ -1040,6 +1040,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
 
         File(home, "projects").mkdirs()
+        migrateExistingAgentEnv(home)
         if (shouldSeedShellyContentStudio(home)) {
             seedShellyContentStudio(home)
         }
@@ -3738,6 +3739,7 @@ GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.0-flash
 LOCAL_LLM_URL=http://127.0.0.1:8080
 LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M
+LOCAL_LLM_INSTALL_LLAMA_SERVER=1
 OBSIDIAN_VAULT_PATH=/sdcard/Documents/ObsidianVault
 """.trimIndent() + "\n"
             )
@@ -3862,6 +3864,7 @@ GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.0-flash
 LOCAL_LLM_URL=http://127.0.0.1:8080
 LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M
+LOCAL_LLM_INSTALL_LLAMA_SERVER=1
 OBSIDIAN_VAULT_PATH=/sdcard/Documents/ObsidianVault
 """.trimIndent() + "\n"
             )
@@ -4051,6 +4054,7 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
             val lines = current.lines().filter { it.isNotEmpty() }.toMutableList()
             var hasUrl = false
             var hasModel = false
+            var hasInstallLlamaServer = false
             val migrated = lines.map { line ->
                 val trimmed = line.trimStart()
                 val assignment = if (trimmed.startsWith("export ")) trimmed.removePrefix("export ").trimStart() else trimmed
@@ -4072,14 +4076,26 @@ Focus on thesis alignment, source faithfulness, Japanese readability, structure,
                         hasModel = true
                         line
                     }
+                    assignment.startsWith("LOCAL_LLM_INSTALL_LLAMA_SERVER=") -> {
+                        hasInstallLlamaServer = true
+                        line
+                    }
                     else -> line
                 }
             }.toMutableList()
             if (!hasUrl) migrated.add("LOCAL_LLM_URL=http://127.0.0.1:8080")
             if (!hasModel) migrated.add("LOCAL_LLM_MODEL=Qwen3-8B-Q4_K_M")
+            if (!hasInstallLlamaServer) migrated.add("LOCAL_LLM_INSTALL_LLAMA_SERVER=1")
             envFile.writeText(migrated.joinToString("\n") + "\n")
         } catch (e: Exception) {
             android.util.Log.w("HomeInitializer", "agent env migration skipped: ${e.message}")
+        }
+    }
+
+    private fun migrateExistingAgentEnv(home: File) {
+        val envFile = File(home, ".shelly/agents/.env")
+        if (envFile.exists()) {
+            migrateContentAgentEnv(envFile)
         }
     }
 

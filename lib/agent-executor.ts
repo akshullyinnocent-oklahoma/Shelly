@@ -676,8 +676,11 @@ local_context_fallback() {
   echo "Local LLM was unavailable, so Shelly saved a local-context digest instead of failing silently."
   echo
   echo "- reason: $reason"
+  echo "- script version: \${SHELLY_AGENT_SCRIPT_VERSION:-unknown}"
+  echo "- auto-install llama-server: \${LOCAL_LLM_INSTALL_LLAMA_SERVER:-0}"
   echo "- expected endpoint: \${LOCAL_URL%/}/v1/chat/completions"
   echo "- expected model: \${LOCAL_MODEL:-unknown}"
+  echo "- PATH head: $(printf '%s' "$PATH" | cut -d: -f1-4)"
   echo
   echo "## Candidate Hooks"
   if [ -s "\${LOCAL_CONTEXT_FILE:-}" ]; then
