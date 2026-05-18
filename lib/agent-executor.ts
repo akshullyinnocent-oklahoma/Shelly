@@ -439,7 +439,6 @@ NODEEOF
 install_llama_server_bin() {
   err_file="$TMP_DIR/llama-server-install-$AGENT_ID.err"
   mkdir -p "$HOME/.local/bin" "$TMP_DIR"
-  archive_file="$TMP_DIR/llama-server-android-arm64.archive"
   extract_dir="$TMP_DIR/llama-server-android-arm64"
   rm -rf "$extract_dir"
   mkdir -p "$extract_dir"
@@ -449,6 +448,11 @@ install_llama_server_bin() {
     echo "auto-install failed: could not resolve latest Android arm64 llama-server asset: $(head -c 300 "$TMP_DIR/llama-server-release-$AGENT_ID.err" 2>/dev/null | tr '\\n' ' ')"
     return 1
   fi
+  case "$url" in
+    *.zip) archive_file="$TMP_DIR/llama-server-android-arm64.zip" ;;
+    *.tgz) archive_file="$TMP_DIR/llama-server-android-arm64.tgz" ;;
+    *) archive_file="$TMP_DIR/llama-server-android-arm64.tar.gz" ;;
+  esac
   if ! download_file_node "$url" "$archive_file" "$err_file"; then
     echo "auto-install failed: could not download llama-server from $url: $(head -c 300 "$err_file" 2>/dev/null | tr '\\n' ' ')"
     return 1
@@ -460,10 +464,32 @@ install_llama_server_bin() {
 
   extracted=$(find "$extract_dir" -type f -name 'llama-server' 2>/dev/null | head -n 1 || true)
   if [ -z "$extracted" ]; then
-    echo "auto-install failed: llama-server binary was not found inside downloaded zip"
+    echo "auto-install failed: llama-server binary was not found inside downloaded archive"
     return 1
   fi
-  cp "$extracted" "$HOME/.local/bin/llama-server"
+
+  install_dir="$HOME/.local/llama.cpp"
+  install_tmp="$HOME/.local/llama.cpp.tmp"
+  rm -rf "$install_tmp"
+  mkdir -p "$install_tmp"
+  cp -R "$extract_dir"/. "$install_tmp"/
+  installed_binary=$(find "$install_tmp" -type f -name 'llama-server' 2>/dev/null | head -n 1 || true)
+  if [ -z "$installed_binary" ]; then
+    echo "auto-install failed: llama-server binary disappeared during install copy"
+    return 1
+  fi
+  chmod +x "$installed_binary"
+  rm -rf "$install_dir"
+  mv "$install_tmp" "$install_dir"
+  installed_binary=$(find "$install_dir" -type f -name 'llama-server' 2>/dev/null | head -n 1 || true)
+  binary_dir=$(dirname "$installed_binary")
+  lib_dirs=$(find "$install_dir" -type f -name '*.so*' -exec dirname {} \\; 2>/dev/null | sort -u | tr '\\n' ':' || true)
+
+  cat > "$HOME/.local/bin/llama-server" <<WRAPPEREOF
+#!/bin/sh
+export LD_LIBRARY_PATH="\${lib_dirs}\${binary_dir}:\${install_dir}:\${install_dir}/lib:\${LD_LIBRARY_PATH:-}"
+exec "$installed_binary" "$@"
+WRAPPEREOF
   chmod +x "$HOME/.local/bin/llama-server"
   printf '%s\\n' "$HOME/.local/bin/llama-server"
 }
@@ -519,13 +545,15 @@ ensure_local_llm_server() {
 
   lock_dir="$LOCKS_DIR/local-llm-server-start.lock"
   lock_acquired=0
-  for _i in $(seq 1 30); do
+  _i=0
+  while [ "$_i" -lt 30 ]; do
     if mkdir "$lock_dir" 2>/dev/null; then
       lock_acquired=1
       break
     fi
     local_llm_ready "$base_url" 3 "$TMP_DIR/local-llm-ready-$AGENT_ID.err" && return 0
     sleep 1
+    _i=$((_i + 1))
   done
   if [ "$lock_acquired" != "1" ]; then
     echo "auto-start skipped: could not acquire start lock $lock_dir" > "$reason_file"
@@ -566,12 +594,14 @@ ensure_local_llm_server() {
   echo $! > "$pid_file"
 
   ready_seconds="\${LOCAL_LLM_START_TIMEOUT_SECONDS:-90}"
-  for _i in $(seq 1 "$ready_seconds"); do
+  _i=0
+  while [ "$_i" -lt "$ready_seconds" ]; do
     if local_llm_ready "$base_url" 3 "$TMP_DIR/local-llm-ready-$AGENT_ID.err"; then
       rmdir "$lock_dir" 2>/dev/null || true
       return 0
     fi
     sleep 1
+    _i=$((_i + 1))
   done
 
   {

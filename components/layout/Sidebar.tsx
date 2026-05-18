@@ -22,7 +22,7 @@ import { readDirEntries } from '@/lib/fs-native';
 import { logInfo } from '@/lib/debug-logger';
 import { useAgentStore } from '@/store/agent-store';
 import { useTerminalStore } from '@/store/terminal-store';
-import { deleteAgent, syncAgentRunLogsFromDisk } from '@/lib/agent-manager';
+import { deleteAgent, runAgentNow, syncAgentRunLogsFromDisk } from '@/lib/agent-manager';
 import { useSettingsStore } from '@/store/settings-store';
 import { usePaneStore } from '@/store/pane-store';
 import { useMultiPaneStore } from '@/hooks/use-multi-pane';
@@ -267,7 +267,7 @@ export function Sidebar() {
   const handleRunScheduledAgent = React.useCallback(async (agentId: string, agentName: string) => {
     setPendingAgentIds((prev) => new Set(prev).add(agentId));
     try {
-      await TerminalEmulator.runAgent(agentId);
+      await runAgentNow(agentId, runCommandForAgentSync);
       setTimeout(() => void refreshRunningAgents(), 1_000);
       setTimeout(() => void refreshRunningAgents(), 5_000);
       setTimeout(() => {
