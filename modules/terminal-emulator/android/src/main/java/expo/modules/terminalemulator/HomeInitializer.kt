@@ -1054,7 +1054,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 159: Add explicit Claude Bash-tool canary diagnostics and spawn tracing
     //      behind SHELLY_CLAUDE_DIAG=1 so the remaining exit-1/no-output
     //      subprocess failure can be captured without noisy normal startup.
-    private const val BASHRC_VERSION = 159
+    // 160: Expand Claude's spawn(command, [], { shell }) Bash-tool path into
+    //      an explicit $HOME/bin/bash -lc command before Node's shell path can
+    //      hit the Android SIGSEGV seen in the v159 canary.
+    private const val BASHRC_VERSION = 160
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2255,11 +2258,30 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    out.env = shellyRepairEnv(out.env);")
             sb.appendLine("    return out;")
             sb.appendLine("  };")
+            sb.appendLine("  const expandShellSpawn = function(name, args) {")
+            sb.appendLine("    if (name !== 'spawn' && name !== 'spawnSync') return;")
+            sb.appendLine("    if (typeof args[0] !== 'string') return;")
+            sb.appendLine("    const command = String(args[0]);")
+            sb.appendLine("    const optionsIndex = args.length >= 3 ? 2 : (args.length >= 2 && !Array.isArray(args[1]) ? 1 : -1);")
+            sb.appendLine("    if (optionsIndex < 0) return;")
+            sb.appendLine("    const options = args[optionsIndex];")
+            sb.appendLine("    if (!options || typeof options !== 'object' || options.shell === undefined || options.shell === false) return;")
+            sb.appendLine("    const commandArgs = Array.isArray(args[1]) ? args[1] : [];")
+            sb.appendLine("    if (commandArgs.length !== 0) return;")
+            sb.appendLine("    const shell = shellyShellValue(options.shell);")
+            sb.appendLine("    const nextOptions = Object.assign({}, options);")
+            sb.appendLine("    delete nextOptions.shell;")
+            sb.appendLine("    args[0] = String(shell);")
+            sb.appendLine("    args[1] = ['-lc', command];")
+            sb.appendLine("    args[2] = nextOptions;")
+            sb.appendLine("  };")
             sb.appendLine("  const wrap = function(name, index) {")
             sb.appendLine("    const original = childProcess[name];")
             sb.appendLine("    if (typeof original !== 'function' || original.__shellyShellPatched) return;")
             sb.appendLine("    const patched = function(...args) {")
-            sb.appendLine("      const before = { cmd: shellyDiagCommand(args[0]), argCount: Array.isArray(args[1]) ? args[1].length : null, options: args[2] || args[1] };")
+            sb.appendLine("      const beforeOptions = args[2] || args[1];")
+            sb.appendLine("      const beforeHasShell = beforeOptions && typeof beforeOptions === 'object' && beforeOptions.shell !== undefined && beforeOptions.shell !== false;")
+            sb.appendLine("      const before = { cmd: beforeHasShell ? '[redacted command]' : shellyDiagCommand(args[0]), argCount: Array.isArray(args[1]) ? args[1].length : null, options: beforeOptions };")
             sb.appendLine("      if ((name === 'spawn' || name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') && args.length > 0) {")
             sb.appendLine("        args[0] = shellyCommandValue(args[0]);")
             sb.appendLine("      }")
@@ -2267,6 +2289,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      if (i >= 0) args[i] = normalizeOptions(args[i], false);")
             sb.appendLine("      else if (name === 'execFile' && typeof args[args.length - 1] === 'function') args.splice(args.length - 1, 0, normalizeOptions(undefined, false));")
             sb.appendLine("      else if (name === 'spawn' || name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') args.push(normalizeOptions(undefined, false));")
+            sb.appendLine("      expandShellSpawn(name, args);")
             sb.appendLine("      shellyDiagLog('child_process.' + name, { before: shellyDiagValue(before), after: { cmd: shellyDiagCommand(args[0]), argCount: Array.isArray(args[1]) ? args[1].length : null, options: shellyDiagValue(args[2] || args[1]) } });")
             sb.appendLine("      return original.apply(this, args);")
             sb.appendLine("    };")

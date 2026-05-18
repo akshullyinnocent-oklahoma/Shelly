@@ -380,11 +380,30 @@ if (!globalThis.Bun.JSONL) {
     out.env = shellyRepairEnv(out.env);
     return out;
   };
+  const expandShellSpawn = function(name, args) {
+    if (name !== 'spawn' && name !== 'spawnSync') return;
+    if (typeof args[0] !== 'string') return;
+    const command = String(args[0]);
+    const optionsIndex = args.length >= 3 ? 2 : (args.length >= 2 && !Array.isArray(args[1]) ? 1 : -1);
+    if (optionsIndex < 0) return;
+    const options = args[optionsIndex];
+    if (!options || typeof options !== 'object' || options.shell === undefined || options.shell === false) return;
+    const commandArgs = Array.isArray(args[1]) ? args[1] : [];
+    if (commandArgs.length !== 0) return;
+    const shell = shellyShellValue(options.shell);
+    const nextOptions = Object.assign({}, options);
+    delete nextOptions.shell;
+    args[0] = String(shell);
+    args[1] = ['-lc', command];
+    args[2] = nextOptions;
+  };
   const wrap = function(name, index) {
     const original = childProcess[name];
     if (typeof original !== 'function' || original.__shellyShellPatched) return;
     const patched = function(...args) {
-      const before = { cmd: shellyDiagCommand(args[0]), argCount: Array.isArray(args[1]) ? args[1].length : null, options: args[2] || args[1] };
+      const beforeOptions = args[2] || args[1];
+      const beforeHasShell = beforeOptions && typeof beforeOptions === 'object' && beforeOptions.shell !== undefined && beforeOptions.shell !== false;
+      const before = { cmd: beforeHasShell ? '[redacted command]' : shellyDiagCommand(args[0]), argCount: Array.isArray(args[1]) ? args[1].length : null, options: beforeOptions };
       if ((name === 'spawn' || name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') && args.length > 0) {
         args[0] = shellyCommandValue(args[0]);
       }
@@ -392,6 +411,7 @@ if (!globalThis.Bun.JSONL) {
       if (i >= 0) args[i] = normalizeOptions(args[i], false);
       else if (name === 'execFile' && typeof args[args.length - 1] === 'function') args.splice(args.length - 1, 0, normalizeOptions(undefined, false));
       else if (name === 'spawn' || name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') args.push(normalizeOptions(undefined, false));
+      expandShellSpawn(name, args);
       shellyDiagLog('child_process.' + name, { before: shellyDiagValue(before), after: { cmd: shellyDiagCommand(args[0]), argCount: Array.isArray(args[1]) ? args[1].length : null, options: shellyDiagValue(args[2] || args[1]) } });
       return original.apply(this, args);
     };
