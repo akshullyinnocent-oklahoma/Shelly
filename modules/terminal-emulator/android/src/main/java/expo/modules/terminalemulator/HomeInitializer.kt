@@ -1068,7 +1068,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      the shelly_shell launcher. Claude still sees SHELL/BASH as
     //      $HOME/bin/bash, while the bionic exec wrapper handles linker64
     //      dispatch for Bash-tool child processes.
-    private const val BASHRC_VERSION = 163
+    // 164: Add a targeted Bash-tool trace command. v163 real-device data
+    //      proved shell env and Node pipe fallback work; the remaining failure
+    //      is Claude's Bash tool path returning no output.
+    private const val BASHRC_VERSION = 164
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -3423,6 +3426,22 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __nonce=\"SHELLY_BASH_\$(date +%s)_\$\$\"")
             sb.appendLine("  SHELLY_CLAUDE_DIAG=1 USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 SHELL=\"\$HOME/bin/bash\" BASH=\"\$HOME/bin/bash\" SHELLY_LIB_DIR=\"$libDir\" PATH=\"\$HOME/bin:$libDir:\${PATH:-/system/bin:/vendor/bin}\" LD_LIBRARY_PATH=\"$libDir\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$HOME/.claude-tmp}\" CLAUDE_TMPDIR=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\" NODE_OPTIONS=\"\$__node_options\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" BASH_ENV= ENV= SHELLY_BASH_CANARY_NONCE=\"\$__nonce\" _run $libDir/node \"\$__cli\" --print --allowedTools Bash --tools Bash --permission-mode bypassPermissions 'Use the Bash tool to run this exact command: printf \"\$SHELLY_BASH_CANARY_NONCE\". Return only the command output.'")
             sb.appendLine("}")
+            sb.appendLine("shelly-bash-tool-trace() {")
+            sb.appendLine("  echo \"=== T1: direct bash -lc ===\"")
+            sb.appendLine("  local __out __rc __nonce __cli __node_options")
+            sb.appendLine("  __out=\$(\"\$HOME/bin/bash\" -lc 'printf HELLO_T1' 2>&1); __rc=\$?; printf 'T1 out=%q rc=%d\\n' \"\$__out\" \"\$__rc\"")
+            sb.appendLine("  echo \"=== T2: env -i + LD_PRELOAD + bash -lc ===\"")
+            sb.appendLine("  __out=\$(/system/bin/env -i HOME=\"\$HOME\" PATH=\"\$PATH\" SHELL=\"\$HOME/bin/bash\" BASH=\"\$HOME/bin/bash\" SHELLY_LIB_DIR=\"$libDir\" LD_LIBRARY_PATH=\"$libDir\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" \"\$HOME/bin/bash\" -lc 'printf HELLO_T2' 2>&1); __rc=\$?; printf 'T2 out=%q rc=%d\\n' \"\$__out\" \"\$__rc\"")
+            sb.appendLine("  echo \"=== T3: node spawnSync bash -lc with pipe stdio ===\"")
+            sb.appendLine("  SHELL=\"\$HOME/bin/bash\" BASH=\"\$HOME/bin/bash\" SHELLY_LIB_DIR=\"$libDir\" LD_LIBRARY_PATH=\"$libDir\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" /system/bin/linker64 $libDir/node -e 'const cp=require(\"child_process\"); const r=cp.spawnSync(process.env.HOME+\"/bin/bash\",[\"-lc\",\"printf HELLO_T3\"],{stdio:[\"ignore\",\"pipe\",\"pipe\"],env:process.env}); console.log(JSON.stringify({status:r.status,signal:r.signal,stdout:r.stdout&&r.stdout.toString(),stderr:r.stderr&&r.stderr.toString(),error:r.error&&r.error.message}));'")
+            sb.appendLine("  echo \"=== T4: claude --print without Bash tool ===\"")
+            sb.appendLine("  __nonce=\"SHELLY_T4_\$(date +%s)_\$\$\"")
+            sb.appendLine("  __cli=\"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
+            sb.appendLine("  [ -f \"\$__cli\" ] || __cli=\"$libDir/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
+            sb.appendLine("  __node_options=\"--require=\$__shelly_node_compat_preload --require=\$__shelly_claude_node_preload\"")
+            sb.appendLine("  USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 SHELL=\"\$HOME/bin/bash\" BASH=\"\$HOME/bin/bash\" SHELLY_LIB_DIR=\"$libDir\" PATH=\"\$HOME/bin:$libDir:\${PATH:-/system/bin:/vendor/bin}\" LD_LIBRARY_PATH=\"$libDir\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$HOME/.claude-tmp}\" CLAUDE_TMPDIR=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\" NODE_OPTIONS=\"\$__node_options\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" BASH_ENV= ENV= timeout 30 /system/bin/linker64 $libDir/node \"\$__cli\" --print \"Reply with exactly: \$__nonce\" 2>&1 | head -20")
+            sb.appendLine("  echo \"T4 nonce=\$__nonce\"")
+            sb.appendLine("}")
             sb.appendLine("shelly-claude-diagnose() {")
             sb.appendLine("  local __runtime_extracted=\"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
             sb.appendLine("  local __apk_extracted=\"$libDir/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
@@ -3467,7 +3486,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  shelly-doctor | sed -n '/^claude extracted/p;/^claude canary/p;/^claude musl runtime/p;/^claude apk/p'")
             sb.appendLine("  printf '\\nRun shelly-runtime-canary for the authenticated Bash-tool gate.\\n'")
             sb.appendLine("}")
-            sb.appendLine("export -f shelly-update-clis shelly-doctor shelly-runtime-canary shelly-claude-bash-canary shelly-claude-diagnose")
+            sb.appendLine("export -f shelly-update-clis shelly-doctor shelly-runtime-canary shelly-claude-bash-canary shelly-bash-tool-trace shelly-claude-diagnose")
             sb.appendLine("__shelly_runtime_update_marker=\"\$HOME/.shelly-runtime/.last_update\"")
             sb.appendLine("__shelly_runtime_update_interval=86400")
             sb.appendLine("__shelly_runtime_quick_marker=\"\$HOME/.shelly-runtime/.last_quick_check\"")
