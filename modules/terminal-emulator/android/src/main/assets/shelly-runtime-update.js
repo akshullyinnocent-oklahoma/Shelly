@@ -307,7 +307,14 @@ if (!globalThis.Bun.JSONL) {
     if (value.stdin !== undefined) out.stdin = typeof value.stdin === 'string' ? value.stdin : typeof value.stdin;
     if (value.stdout !== undefined) out.stdout = value.stdout;
     if (value.stderr !== undefined) out.stderr = value.stderr;
-    if (value.stdio !== undefined) out.stdio = value.stdio;
+    if (value.stdio !== undefined) {
+      out.stdio = (Array.isArray(value.stdio) ? value.stdio : [value.stdio]).map(function(item) {
+        return item === null ? 'null'
+          : typeof item === 'number' ? 'fd:' + item
+          : typeof item === 'object' ? 'obj:' + Object.keys(item).join(',')
+          : String(item);
+      });
+    }
     if (value.env) {
       out.env = {};
       for (const key of ['HOME', 'PATH', 'SHELL', 'BASH', 'SHELLY_LIB_DIR', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'TMPDIR', 'BUN_TMPDIR', 'CLAUDE_TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB']) {
@@ -468,7 +475,11 @@ if (!globalThis.Bun.JSONL) {
       return typeof stream.Writable?.toWeb === 'function' ? stream.Writable.toWeb(value) : value;
     };
     const applyBunSpawnOptions = function(spawnOptions) {
-      const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
+      const isMode = function(v) {
+        return v === 'inherit' || v === 'ignore' || v === 'pipe'
+          || (typeof v === 'number' && Number.isFinite(v) && v >= 0)
+          || (v && typeof v === 'object' && typeof v.fd === 'number');
+      };
       const map = function(v, fallback) { return isMode(v) ? v : fallback; };
       if (spawnOptions.stdio === undefined && (
         spawnOptions.stdin !== undefined || spawnOptions.stdout !== undefined || spawnOptions.stderr !== undefined
@@ -494,7 +505,11 @@ if (!globalThis.Bun.JSONL) {
         : (spec && typeof spec.onExit === 'function' ? spec.onExit : null);
       delete spawnOptions.onExit;
       let stdinPayload = null;
-      const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
+      const isMode = function(v) {
+        return v === 'inherit' || v === 'ignore' || v === 'pipe'
+          || (typeof v === 'number' && Number.isFinite(v) && v >= 0)
+          || (v && typeof v === 'object' && typeof v.fd === 'number');
+      };
       if (spec) {
         if (spec.cwd) spawnOptions.cwd = spec.cwd;
         if (spec.env) spawnOptions.env = shellyRepairEnv(spec.env);
@@ -571,7 +586,11 @@ if (!globalThis.Bun.JSONL) {
       const args = Array.isArray(cmdSpec) ? cmdSpec.slice(1) : [];
       const spawnOptions = Object.assign({}, options || {});
       let stdinPayload = null;
-      const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
+      const isMode = function(v) {
+        return v === 'inherit' || v === 'ignore' || v === 'pipe'
+          || (typeof v === 'number' && Number.isFinite(v) && v >= 0)
+          || (v && typeof v === 'object' && typeof v.fd === 'number');
+      };
       if (spec) {
         if (spec.cwd) spawnOptions.cwd = spec.cwd;
         if (spec.env) spawnOptions.env = shellyRepairEnv(spec.env);
@@ -589,7 +608,11 @@ if (!globalThis.Bun.JSONL) {
       if (spawnOptions.stdio === undefined && (
         spawnOptions.stdin !== undefined || spawnOptions.stdout !== undefined || spawnOptions.stderr !== undefined
       )) {
-        const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };
+        const isMode = function(v) {
+          return v === 'inherit' || v === 'ignore' || v === 'pipe'
+            || (typeof v === 'number' && Number.isFinite(v) && v >= 0)
+            || (v && typeof v === 'object' && typeof v.fd === 'number');
+        };
         const map = function(v, fallback) { return isMode(v) ? v : fallback; };
         spawnOptions.stdio = [map(spawnOptions.stdin, 'ignore'), map(spawnOptions.stdout, 'pipe'), map(spawnOptions.stderr, 'pipe')];
       }

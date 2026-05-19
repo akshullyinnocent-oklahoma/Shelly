@@ -1071,7 +1071,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 164: Add a targeted Bash-tool trace command. v163 real-device data
     //      proved shell env and Node pipe fallback work; the remaining failure
     //      is Claude's Bash tool path returning no output.
-    private const val BASHRC_VERSION = 164
+    // 165: Preserve numeric fd and fd-backed stdio modes in the Bun.spawn
+    //      polyfill so Claude's Bash-tool fd routing is not silently replaced.
+    private const val BASHRC_VERSION = 165
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2202,7 +2204,14 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    if (value.stdin !== undefined) out.stdin = typeof value.stdin === 'string' ? value.stdin : typeof value.stdin;")
             sb.appendLine("    if (value.stdout !== undefined) out.stdout = value.stdout;")
             sb.appendLine("    if (value.stderr !== undefined) out.stderr = value.stderr;")
-            sb.appendLine("    if (value.stdio !== undefined) out.stdio = value.stdio;")
+            sb.appendLine("    if (value.stdio !== undefined) {")
+            sb.appendLine("      out.stdio = (Array.isArray(value.stdio) ? value.stdio : [value.stdio]).map(function(item) {")
+            sb.appendLine("        return item === null ? 'null'")
+            sb.appendLine("          : typeof item === 'number' ? 'fd:' + item")
+            sb.appendLine("          : typeof item === 'object' ? 'obj:' + Object.keys(item).join(',')")
+            sb.appendLine("          : String(item);")
+            sb.appendLine("      });")
+            sb.appendLine("    }")
             sb.appendLine("    if (value.env) {")
             sb.appendLine("      out.env = {};")
             sb.appendLine("      for (const key of ['HOME', 'PATH', 'SHELL', 'BASH', 'SHELLY_LIB_DIR', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'TMPDIR', 'BUN_TMPDIR', 'CLAUDE_TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB']) {")
@@ -2363,7 +2372,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      return typeof stream.Writable?.toWeb === 'function' ? stream.Writable.toWeb(value) : value;")
             sb.appendLine("    };")
             sb.appendLine("    const applyBunSpawnOptions = function(spawnOptions) {")
-            sb.appendLine("      const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };")
+            sb.appendLine("      const isMode = function(v) {")
+            sb.appendLine("        return v === 'inherit' || v === 'ignore' || v === 'pipe'")
+            sb.appendLine("          || (typeof v === 'number' && Number.isFinite(v) && v >= 0)")
+            sb.appendLine("          || (v && typeof v === 'object' && typeof v.fd === 'number');")
+            sb.appendLine("      };")
             sb.appendLine("      const map = function(v, fallback) { return isMode(v) ? v : fallback; };")
             sb.appendLine("      if (spawnOptions.stdio === undefined && (")
             sb.appendLine("        spawnOptions.stdin !== undefined || spawnOptions.stdout !== undefined || spawnOptions.stderr !== undefined")
@@ -2389,7 +2402,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("        : (spec && typeof spec.onExit === 'function' ? spec.onExit : null);")
             sb.appendLine("      delete spawnOptions.onExit;")
             sb.appendLine("      let stdinPayload = null;")
-            sb.appendLine("      const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };")
+            sb.appendLine("      const isMode = function(v) {")
+            sb.appendLine("        return v === 'inherit' || v === 'ignore' || v === 'pipe'")
+            sb.appendLine("          || (typeof v === 'number' && Number.isFinite(v) && v >= 0)")
+            sb.appendLine("          || (v && typeof v === 'object' && typeof v.fd === 'number');")
+            sb.appendLine("      };")
             sb.appendLine("      if (spec) {")
             sb.appendLine("        if (spec.cwd) spawnOptions.cwd = spec.cwd;")
             sb.appendLine("        if (spec.env) spawnOptions.env = shellyRepairEnv(spec.env);")
@@ -2466,7 +2483,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      const args = Array.isArray(cmdSpec) ? cmdSpec.slice(1) : [];")
             sb.appendLine("      const spawnOptions = Object.assign({}, options || {});")
             sb.appendLine("      let stdinPayload = null;")
-            sb.appendLine("      const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };")
+            sb.appendLine("      const isMode = function(v) {")
+            sb.appendLine("        return v === 'inherit' || v === 'ignore' || v === 'pipe'")
+            sb.appendLine("          || (typeof v === 'number' && Number.isFinite(v) && v >= 0)")
+            sb.appendLine("          || (v && typeof v === 'object' && typeof v.fd === 'number');")
+            sb.appendLine("      };")
             sb.appendLine("      if (spec) {")
             sb.appendLine("        if (spec.cwd) spawnOptions.cwd = spec.cwd;")
             sb.appendLine("        if (spec.env) spawnOptions.env = shellyRepairEnv(spec.env);")
@@ -2484,7 +2505,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      if (spawnOptions.stdio === undefined && (")
             sb.appendLine("        spawnOptions.stdin !== undefined || spawnOptions.stdout !== undefined || spawnOptions.stderr !== undefined")
             sb.appendLine("      )) {")
-            sb.appendLine("        const isMode = function(v) { return v === 'inherit' || v === 'ignore' || v === 'pipe'; };")
+            sb.appendLine("        const isMode = function(v) {")
+            sb.appendLine("          return v === 'inherit' || v === 'ignore' || v === 'pipe'")
+            sb.appendLine("            || (typeof v === 'number' && Number.isFinite(v) && v >= 0)")
+            sb.appendLine("            || (v && typeof v === 'object' && typeof v.fd === 'number');")
+            sb.appendLine("        };")
             sb.appendLine("        const map = function(v, fallback) { return isMode(v) ? v : fallback; };")
             sb.appendLine("        spawnOptions.stdio = [map(spawnOptions.stdin, 'ignore'), map(spawnOptions.stdout, 'pipe'), map(spawnOptions.stderr, 'pipe')];")
             sb.appendLine("      }")
