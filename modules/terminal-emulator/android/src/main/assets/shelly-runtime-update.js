@@ -403,7 +403,7 @@ if (!globalThis.Bun.JSONL) {
     try {
       require('fs').appendFileSync(
         shellyHome() + '/.shelly-claude-patch.log',
-        Date.now() + ' ' + message + '\n'
+        Date.now() + ' ' + message + String.fromCharCode(10)
       );
     } catch (_) {}
   };

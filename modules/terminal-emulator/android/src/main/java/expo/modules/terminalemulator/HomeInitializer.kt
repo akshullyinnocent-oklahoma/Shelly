@@ -2308,7 +2308,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    try {")
             sb.appendLine("      require('fs').appendFileSync(")
             sb.appendLine("        shellyHome() + '/.shelly-claude-patch.log',")
-            sb.appendLine("        Date.now() + ' ' + message + '\\n'")
+            sb.appendLine("        Date.now() + ' ' + message + String.fromCharCode(10)")
             sb.appendLine("      );")
             sb.appendLine("    } catch (_) {}")
             sb.appendLine("  };")
