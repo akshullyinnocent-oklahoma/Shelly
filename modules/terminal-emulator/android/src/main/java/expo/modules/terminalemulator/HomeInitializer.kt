@@ -1077,7 +1077,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      inner bash keeps Shelly's loader variables after env scrubbing.
     // 167: Move that injection to immediately before the nested bash command so
     //      later env assignments cannot override Shelly's loader variables.
-    private const val BASHRC_VERSION = 167
+    // 168: Match both /data/user/0 and /data/data aliases for the nested bash
+    //      path used by Claude's generated Bash-tool shell string.
+    private const val BASHRC_VERSION = 168
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2282,19 +2284,35 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    const s = String(value);")
             sb.appendLine("    return (s === '/bin/sh' || s === '/bin/bash' || s === '/usr/bin/sh' || s === '/usr/bin/bash' || s === 'sh' || s === 'bash') ? shellyShellPath() : value;")
             sb.appendLine("  };")
+            sb.appendLine("  const shellyShellPathCandidates = function() {")
+            sb.appendLine("    const seen = Object.create(null);")
+            sb.appendLine("    const out = [];")
+            sb.appendLine("    const add = function(value) {")
+            sb.appendLine("      if (!value) return;")
+            sb.appendLine("      const text = String(value);")
+            sb.appendLine("      if (!text || seen[text]) return;")
+            sb.appendLine("      seen[text] = true;")
+            sb.appendLine("      out.push(text);")
+            sb.appendLine("      if (text.indexOf('/data/user/0/') === 0) add(text.replace(/^\\/data\\/user\\/0\\//, '/data/data/'));")
+            sb.appendLine("      if (text.indexOf('/data/data/') === 0) add(text.replace(/^\\/data\\/data\\//, '/data/user/0/'));")
+            sb.appendLine("    };")
+            sb.appendLine("    add(shellyShellPath());")
+            sb.appendLine("    add(process.env.BASH);")
+            sb.appendLine("    add(shellyHome() + '/bin/bash');")
+            sb.appendLine("    return out;")
+            sb.appendLine("  };")
             sb.appendLine("  const shellyPatchNestedEnvArgs = function(args) {")
             sb.appendLine("    if (!Array.isArray(args)) return args;")
             sb.appendLine("    const libDir = shellyLibDir();")
             sb.appendLine("    const inject = 'LD_LIBRARY_PATH=' + libDir + ' LD_PRELOAD=' + libDir + '/libexec_wrapper.so ';")
-            sb.appendLine("    const shellPath = String(shellyShellPath());")
             sb.appendLine("    return args.map(function(arg) {")
             sb.appendLine("      if (typeof arg !== 'string') return arg;")
             sb.appendLine("      const marker = arg.indexOf('&& env ');")
             sb.appendLine("      if (marker < 0) return arg;")
             sb.appendLine("      const tail = arg.slice(marker);")
-            sb.appendLine("      const quotedSingle = \"'\" + shellPath + \"'\";")
-            sb.appendLine("      const quotedDouble = '\"' + shellPath + '\"';")
-            sb.appendLine("      const candidates = [quotedSingle, quotedDouble, shellPath]")
+            sb.appendLine("      const candidates = shellyShellPathCandidates().flatMap(function(shellPath) {")
+            sb.appendLine("        return [\"'\" + shellPath + \"'\", '\"' + shellPath + '\"', shellPath];")
+            sb.appendLine("      })")
             sb.appendLine("        .map(function(token) { return { token, index: tail.indexOf(token) }; })")
             sb.appendLine("        .filter(function(item) { return item.index >= 0; })")
             sb.appendLine("        .sort(function(a, b) { return a.index - b.index; });")

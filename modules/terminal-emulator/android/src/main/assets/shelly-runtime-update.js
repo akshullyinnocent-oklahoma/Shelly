@@ -381,19 +381,35 @@ if (!globalThis.Bun.JSONL) {
     const s = String(value);
     return (s === '/bin/sh' || s === '/bin/bash' || s === '/usr/bin/sh' || s === '/usr/bin/bash' || s === 'sh' || s === 'bash') ? shellyShellPath() : value;
   };
+  const shellyShellPathCandidates = function() {
+    const seen = Object.create(null);
+    const out = [];
+    const add = function(value) {
+      if (!value) return;
+      const text = String(value);
+      if (!text || seen[text]) return;
+      seen[text] = true;
+      out.push(text);
+      if (text.indexOf('/data/user/0/') === 0) add(text.replace(/^\/data\/user\/0\//, '/data/data/'));
+      if (text.indexOf('/data/data/') === 0) add(text.replace(/^\/data\/data\//, '/data/user/0/'));
+    };
+    add(shellyShellPath());
+    add(process.env.BASH);
+    add(shellyHome() + '/bin/bash');
+    return out;
+  };
   const shellyPatchNestedEnvArgs = function(args) {
     if (!Array.isArray(args)) return args;
     const libDir = shellyLibDir();
     const inject = 'LD_LIBRARY_PATH=' + libDir + ' LD_PRELOAD=' + libDir + '/libexec_wrapper.so ';
-    const shellPath = String(shellyShellPath());
     return args.map(function(arg) {
       if (typeof arg !== 'string') return arg;
       const marker = arg.indexOf('&& env ');
       if (marker < 0) return arg;
       const tail = arg.slice(marker);
-      const quotedSingle = "'" + shellPath + "'";
-      const quotedDouble = '"' + shellPath + '"';
-      const candidates = [quotedSingle, quotedDouble, shellPath]
+      const candidates = shellyShellPathCandidates().flatMap(function(shellPath) {
+        return ["'" + shellPath + "'", '"' + shellPath + '"', shellPath];
+      })
         .map(function(token) { return { token, index: tail.indexOf(token) }; })
         .filter(function(item) { return item.index >= 0; })
         .sort(function(a, b) { return a.index - b.index; });
