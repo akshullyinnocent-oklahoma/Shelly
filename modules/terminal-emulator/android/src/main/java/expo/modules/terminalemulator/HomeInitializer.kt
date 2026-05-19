@@ -1085,7 +1085,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      apply the nested-env repair to exec/execSync command strings too.
     // 171: Extend file-only Claude subprocess tracing to classify spawn/exec
     //      shapes, stdio/env repair state, and child exit status.
-    private const val BASHRC_VERSION = 171
+    // 172: Add file-only native exec-wrapper tracing, gated by the same
+    //      SHELLY_CLAUDE_PATCH_TRACE flags, so Claude Bash-tool paths that
+    //      bypass JS child_process/Bun wrappers can be seen at execve.
+    private const val BASHRC_VERSION = 172
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
