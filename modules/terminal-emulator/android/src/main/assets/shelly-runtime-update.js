@@ -407,35 +407,49 @@ if (!globalThis.Bun.JSONL) {
       );
     } catch (_) {}
   };
-  const shellyPatchNestedEnvArgs = function(args) {
-    if (!Array.isArray(args)) return args;
+  shellyPatchTrace('preload loaded argvCount=' + (process.argv ? process.argv.length : 0));
+  const shellyPatchNestedEnvString = function(arg, source) {
+    if (typeof arg !== 'string') return arg;
+    const marker = arg.indexOf('&& env ');
+    if (marker < 0) {
+      shellyPatchTrace(source + ' no-marker length=' + arg.length);
+      return arg;
+    }
+    const tail = arg.slice(marker);
+    const candidates = shellyShellPathCandidates().flatMap(function(shellPath) {
+      return ["'" + shellPath + "'", '"' + shellPath + '"', shellPath];
+    })
+      .map(function(token) { return { token, index: tail.indexOf(token) }; })
+      .filter(function(item) { return item.index >= 0; })
+      .sort(function(a, b) { return a.index - b.index; });
+    if (candidates.length === 0) {
+      shellyPatchTrace(source + ' miss no-candidate marker=' + marker + ' tailLength=' + tail.length + ' candidateCount=' + shellyShellPathCandidates().length);
+      return arg;
+    }
     const libDir = shellyLibDir();
     const inject = 'LD_LIBRARY_PATH=' + libDir + ' LD_PRELOAD=' + libDir + '/libexec_wrapper.so ';
-    return args.map(function(arg) {
-      if (typeof arg !== 'string') return arg;
-      const marker = arg.indexOf('&& env ');
-      if (marker < 0) return arg;
-      const tail = arg.slice(marker);
-      const candidates = shellyShellPathCandidates().flatMap(function(shellPath) {
-        return ["'" + shellPath + "'", '"' + shellPath + '"', shellPath];
-      })
-        .map(function(token) { return { token, index: tail.indexOf(token) }; })
-        .filter(function(item) { return item.index >= 0; })
-        .sort(function(a, b) { return a.index - b.index; });
-      if (candidates.length === 0) {
-        shellyPatchTrace('miss no-candidate marker=' + marker + ' tailLength=' + tail.length + ' candidateCount=' + shellyShellPathCandidates().length);
-        return arg;
+    const picked = candidates[0];
+    const absoluteIndex = marker + picked.index;
+    const prefix = arg.slice(0, absoluteIndex);
+    if (prefix.slice(-inject.length) === inject) {
+      shellyPatchTrace(source + ' skip already-injected token=' + JSON.stringify(picked.token));
+      return arg;
+    }
+    shellyPatchTrace(source + ' fired token=' + JSON.stringify(picked.token) + ' index=' + absoluteIndex);
+    return prefix + inject + arg.slice(absoluteIndex);
+  };
+  const shellyPatchNestedEnvArgs = function(args) {
+    if (!Array.isArray(args)) return args;
+    let stringArgCount = 0;
+    let markerCount = 0;
+    args.forEach(function(arg) {
+      if (typeof arg === 'string') {
+        stringArgCount += 1;
+        if (arg.indexOf('&& env ') >= 0) markerCount += 1;
       }
-      const picked = candidates[0];
-      const absoluteIndex = marker + picked.index;
-      const prefix = arg.slice(0, absoluteIndex);
-      if (prefix.slice(-inject.length) === inject) {
-        shellyPatchTrace('skip already-injected token=' + JSON.stringify(picked.token));
-        return arg;
-      }
-      shellyPatchTrace('fired token=' + JSON.stringify(picked.token) + ' index=' + absoluteIndex);
-      return prefix + inject + arg.slice(absoluteIndex);
     });
+    shellyPatchTrace('nestedArgs entry argCount=' + args.length + ' stringArgCount=' + stringArgCount + ' markerCount=' + markerCount);
+    return args.map(function(arg) { return shellyPatchNestedEnvString(arg, 'argv'); });
   };
   const normalizeOptions = function(options, forceShell) {
     const out = (!options || typeof options !== 'object') ? {} : Object.assign({}, options);
@@ -466,6 +480,7 @@ if (!globalThis.Bun.JSONL) {
     const patched = function(...args) {
       const beforeOptions = args[2] || args[1];
       const beforeHasShell = beforeOptions && typeof beforeOptions === 'object' && beforeOptions.shell !== undefined && beforeOptions.shell !== false;
+      shellyPatchTrace('child entry name=' + name + ' argc=' + args.length + ' arg1Array=' + Array.isArray(args[1]) + ' beforeHasShell=' + Boolean(beforeHasShell));
       const before = { cmd: beforeHasShell ? '[redacted command]' : shellyDiagCommand(args[0]), argCount: Array.isArray(args[1]) ? args[1].length : null, options: beforeOptions };
       if ((name === 'spawn' || name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') && args.length > 0) {
         args[0] = shellyCommandValue(args[0]);
@@ -488,6 +503,8 @@ if (!globalThis.Bun.JSONL) {
     const original = childProcess[name];
     if (typeof original !== 'function' || original.__shellyShellPatched) return;
     const patched = function(command, options, callback) {
+      shellyPatchTrace('exec entry name=' + name + ' hasOptions=' + (options !== undefined) + ' optionsIsCallback=' + (typeof options === 'function'));
+      command = shellyPatchNestedEnvString(command, 'exec.' + name);
       if (typeof options === 'function') {
         const normalized = normalizeOptions(undefined, true);
         shellyDiagLog('child_process.' + name, { command: '[redacted shell command]', options: shellyDiagValue(normalized) });
@@ -594,6 +611,7 @@ if (!globalThis.Bun.JSONL) {
     };
     globalThis.Bun.spawn = function shellyBunSpawn(command, options) {
       const normalized = normalizeBunSpawnSpec(command, options);
+      shellyPatchTrace('Bun.spawn entry argCount=' + normalized.args.length + ' hasShell=' + Boolean(normalized.options && normalized.options.shell) + ' hasStdinPayload=' + (normalized.stdinPayload != null));
       shellyDiagLog('Bun.spawn', { cmd: shellyDiagCommand(normalized.cmd), argCount: normalized.args.length, options: shellyDiagValue(normalized.options), hasStdinPayload: normalized.stdinPayload != null, hasOnExit: Boolean(normalized.onExit) });
       const child = childProcess.spawn(normalized.cmd, normalized.args, normalized.options);
       if (normalized.stdinPayload != null && child.stdin) {
@@ -682,6 +700,7 @@ if (!globalThis.Bun.JSONL) {
       const normalizedCmd = String(shellyCommandValue(cmd));
       const normalizedArgs = args.map(String);
       const normalizedOptions = normalizeOptions(spawnOptions, false);
+      shellyPatchTrace('Bun.spawnSync entry argCount=' + normalizedArgs.length + ' hasShell=' + Boolean(normalizedOptions && normalizedOptions.shell) + ' hasInput=' + (normalizedOptions.input !== undefined));
       shellyDiagLog('Bun.spawnSync', { cmd: shellyDiagCommand(normalizedCmd), argCount: normalizedArgs.length, options: shellyDiagValue(normalizedOptions), hasInput: normalizedOptions.input !== undefined });
       const result = childProcess.spawnSync(normalizedCmd, normalizedArgs, normalizedOptions);
       const exitCode = result.status ?? (result.error ? 1 : 0);
