@@ -408,6 +408,115 @@ if (!globalThis.Bun.JSONL) {
     } catch (_) {}
   };
   shellyPatchTrace('preload loaded argvCount=' + (process.argv ? process.argv.length : 0));
+  const shellyTraceCommandKind = function(value) {
+    if (value == null) return 'null';
+    const text = String(value);
+    const base = text.split('/').filter(Boolean).pop() || text;
+    if (base === 'bash' || base === 'sh' || base === 'shelly_shell') return base;
+    if (base === 'env' || base === 'node' || base === 'bun' || base === 'timeout') return base;
+    if (base.indexOf('claude') >= 0) return 'claude';
+    return 'other';
+  };
+  const shellyTraceArgTags = function(value) {
+    if (typeof value !== 'string') return 'nonstring';
+    const tags = ['len=' + value.length];
+    if (value === '-c' || value === '-lc' || value === '-l' || value === '-i' || value === '--') tags.push('flag=' + value);
+    if (value.indexOf('LD_PRELOAD') >= 0) tags.push('ldpreload');
+    if (value.indexOf('LD_LIBRARY_PATH') >= 0) tags.push('ldpath');
+    if (value.indexOf('SHELLY_PATCH_OK') >= 0) tags.push('patchok');
+    if (value.indexOf('SHELLY_BASH_CANARY') >= 0) tags.push('canary');
+    if (value.indexOf('SHELLY_LIB_DIR') >= 0) tags.push('libdir');
+    if (value.indexOf('/dev/fd') >= 0) tags.push('devfd');
+    if (value.indexOf('/proc/self/fd') >= 0) tags.push('procfd');
+    if (value.indexOf('BASH_XTRACEFD') >= 0) tags.push('xtracefd');
+    if (value.indexOf('CLAUDE_CODE_TMPDIR') >= 0) tags.push('claudetmp');
+    if (value.indexOf('TMPDIR') >= 0) tags.push('tmpdir');
+    if (value.indexOf('printf') >= 0) tags.push('printf');
+    if (value.indexOf('exec') >= 0) tags.push('exec');
+    if (value.indexOf('exit') >= 0) tags.push('exit');
+    if (value.indexOf('trap') >= 0) tags.push('trap');
+    if (value.indexOf('set -e') >= 0 || value.indexOf('set -o errexit') >= 0) tags.push('sete');
+    if (value.indexOf('env') >= 0) tags.push('env');
+    if (value.indexOf('|') >= 0) tags.push('pipe');
+    if (value.indexOf('>') >= 0 || value.indexOf('<') >= 0) tags.push('redir');
+    if (value.indexOf('$(') >= 0 || value.indexOf(String.fromCharCode(96)) >= 0) tags.push('cmdsubst');
+    if (value.indexOf('<<') >= 0) tags.push('heredoc');
+    if (value.indexOf('bash') >= 0 || value.indexOf('/sh') >= 0) tags.push('shellword');
+    return tags.join(':');
+  };
+  const shellyTraceArgsShape = function(args) {
+    if (!Array.isArray(args)) return 'not-array';
+    return args.map(function(arg) { return shellyTraceArgTags(arg); }).join(',');
+  };
+  const shellyTraceStdioShape = function(value) {
+    if (value === undefined) return 'unset';
+    const list = Array.isArray(value) ? value : [value];
+    return list.map(function(item) {
+      if (item === null) return 'null';
+      if (item === undefined) return 'undefined';
+      if (typeof item === 'number') return 'fd:' + item;
+      if (typeof item === 'string') return (item === 'pipe' || item === 'ignore' || item === 'inherit' || item === 'ipc') ? item : 'string';
+      if (item && typeof item === 'object' && typeof item.fd === 'number') return 'objfd:' + item.fd;
+      return typeof item;
+    }).join(',');
+  };
+  const shellyTraceRawString = function(value) {
+    return JSON.stringify(String(value).slice(0, 300));
+  };
+  const shellyTraceRawChildShape = function(prefix, args, options) {
+    if (process.env.SHELLY_CLAUDE_PATCH_RAW !== '1') return;
+    try {
+      if (Array.isArray(args)) {
+        args.forEach(function(arg, i) {
+          shellyPatchTrace(prefix + ' rawArg' + i + '=' + shellyTraceRawString(arg));
+        });
+      }
+      const env = options && options.env;
+      if (env) {
+        shellyPatchTrace(prefix + ' rawEnvKeys=' + Object.keys(env).sort().join(','));
+        ['PATH', 'SHELL', 'BASH', 'HOME', 'TMPDIR', 'CLAUDE_CODE_TMPDIR', 'SHELLY_LIB_DIR', 'LD_LIBRARY_PATH', 'LD_PRELOAD'].forEach(function(key) {
+          if (env[key] !== undefined) shellyPatchTrace(prefix + ' rawEnv.' + key + '=' + shellyTraceRawString(env[key]));
+        });
+      }
+    } catch (_) {}
+  };
+  const shellyTraceEnvShape = function(options) {
+    const env = options && options.env;
+    return [
+      'hasEnv=' + Boolean(env),
+      'envLD=' + Boolean(env && env.LD_PRELOAD),
+      'envLib=' + Boolean(env && env.LD_LIBRARY_PATH),
+      'envShell=' + Boolean(env && env.SHELL),
+      'envBash=' + Boolean(env && env.BASH),
+      'envShellyLib=' + Boolean(env && env.SHELLY_LIB_DIR),
+      'envScrub=' + Boolean(env && env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB),
+      'envPath=' + Boolean(env && env.PATH),
+      'envAndroidRoot=' + Boolean(env && env.ANDROID_ROOT),
+      'envAndroidData=' + Boolean(env && env.ANDROID_DATA),
+      'envTmp=' + Boolean(env && env.TMPDIR),
+      'envClaudeTmp=' + Boolean(env && env.CLAUDE_CODE_TMPDIR),
+    ].join(' ');
+  };
+  const shellyTraceOptionsShape = function(options) {
+    if (!options || typeof options !== 'object') return 'options=none';
+    let shellKind = 'none';
+    if (options.shell === true) shellKind = 'true';
+    else if (typeof options.shell === 'string') shellKind = shellyTraceCommandKind(options.shell);
+    return 'stdio=' + shellyTraceStdioShape(options.stdio)
+      + ' shell=' + shellKind
+      + ' ' + shellyTraceEnvShape(options);
+  };
+  const shellyTraceChildShape = function(prefix, cmd, args, options) {
+    shellyPatchTrace(prefix
+      + ' cmdKind=' + shellyTraceCommandKind(cmd)
+      + ' cmdLen=' + (cmd == null ? 0 : String(cmd).length)
+      + ' argShape=' + shellyTraceArgsShape(args)
+      + ' ' + shellyTraceOptionsShape(options));
+  };
+  const shellyTraceErrorCode = function(error) {
+    if (!error) return 'none';
+    return String(error.code || error.name || 'error');
+  };
   const shellyPatchNestedEnvString = function(arg, source) {
     if (typeof arg !== 'string') return arg;
     const marker = arg.indexOf('&& env ');
@@ -493,8 +602,36 @@ if (!globalThis.Bun.JSONL) {
       if ((name === 'spawn' || name === 'spawnSync' || name === 'execFile' || name === 'execFileSync') && shellyCommandValue(args[0]) === shellyShellPath() && Array.isArray(args[1])) {
         args[1] = shellyPatchNestedEnvArgs(args[1]);
       }
+      const afterOptions = args.length >= 3 && args[2] && typeof args[2] === 'object' && !Array.isArray(args[2]) && typeof args[2] !== 'function'
+        ? args[2]
+        : (args.length >= 2 && args[1] && typeof args[1] === 'object' && !Array.isArray(args[1]) && typeof args[1] !== 'function' ? args[1] : null);
+      shellyTraceChildShape('child normalized name=' + name, args[0], Array.isArray(args[1]) ? args[1] : [], afterOptions);
+      shellyTraceRawChildShape('child raw name=' + name, Array.isArray(args[1]) ? args[1] : [], afterOptions);
       shellyDiagLog('child_process.' + name, { before: shellyDiagValue(before), after: { cmd: shellyDiagCommand(args[0]), argCount: Array.isArray(args[1]) ? args[1].length : null, options: shellyDiagValue(args[2] || args[1]) } });
-      return original.apply(this, args);
+      if (name === 'spawnSync') {
+        const result = original.apply(this, args);
+        shellyPatchTrace('child result name=spawnSync status=' + result.status + ' signal=' + (result.signal || 'none') + ' error=' + shellyTraceErrorCode(result.error) + ' stdoutLen=' + (result.stdout ? result.stdout.length : 0) + ' stderrLen=' + (result.stderr ? result.stderr.length : 0));
+        return result;
+      }
+      if (name === 'execFileSync') {
+        try {
+          const result = original.apply(this, args);
+          shellyPatchTrace('child result name=execFileSync ok=true stdoutLen=' + (result ? result.length : 0));
+          return result;
+        } catch (error) {
+          shellyPatchTrace('child result name=execFileSync throw=' + shellyTraceErrorCode(error) + ' status=' + (error && error.status !== undefined ? error.status : 'unknown') + ' signal=' + (error && error.signal ? error.signal : 'none') + ' stdoutLen=' + (error && error.stdout ? error.stdout.length : 0) + ' stderrLen=' + (error && error.stderr ? error.stderr.length : 0));
+          throw error;
+        }
+      }
+      const child = original.apply(this, args);
+      try {
+        if (child && typeof child.on === 'function') {
+          child.on('exit', function(code, signal) {
+            shellyPatchTrace('child result name=' + name + ' exit=' + (code === null || code === undefined ? 'null' : code) + ' signal=' + (signal || 'none'));
+          });
+        }
+      } catch (_) {}
+      return child;
     };
     try { Object.defineProperty(patched, '__shellyShellPatched', { value: true }); } catch (_) {}
     childProcess[name] = patched;
@@ -507,16 +644,39 @@ if (!globalThis.Bun.JSONL) {
       command = shellyPatchNestedEnvString(command, 'exec.' + name);
       if (typeof options === 'function') {
         const normalized = normalizeOptions(undefined, true);
+        shellyTraceChildShape('exec normalized name=' + name, normalized.shell, ['-c', String(command)], normalized);
         shellyDiagLog('child_process.' + name, { command: '[redacted shell command]', options: shellyDiagValue(normalized) });
         return original.call(this, command, normalized, options);
       }
       if (options === undefined) {
         const normalized = normalizeOptions(undefined, true);
+        shellyTraceChildShape('exec normalized name=' + name, normalized.shell, ['-c', String(command)], normalized);
         shellyDiagLog('child_process.' + name, { command: '[redacted shell command]', options: shellyDiagValue(normalized) });
+        if (name === 'execSync') {
+          try {
+            const result = original.call(this, command, normalized, callback);
+            shellyPatchTrace('exec result name=' + name + ' ok=true stdoutLen=' + (result ? result.length : 0));
+            return result;
+          } catch (error) {
+            shellyPatchTrace('exec result name=' + name + ' throw=' + shellyTraceErrorCode(error) + ' status=' + (error && error.status !== undefined ? error.status : 'unknown') + ' signal=' + (error && error.signal ? error.signal : 'none') + ' stdoutLen=' + (error && error.stdout ? error.stdout.length : 0) + ' stderrLen=' + (error && error.stderr ? error.stderr.length : 0));
+            throw error;
+          }
+        }
         return original.call(this, command, normalized, callback);
       }
       const normalized = normalizeOptions(options, true);
+      shellyTraceChildShape('exec normalized name=' + name, normalized.shell, ['-c', String(command)], normalized);
       shellyDiagLog('child_process.' + name, { command: '[redacted shell command]', options: shellyDiagValue(normalized) });
+      if (name === 'execSync') {
+        try {
+          const result = original.call(this, command, normalized, callback);
+          shellyPatchTrace('exec result name=' + name + ' ok=true stdoutLen=' + (result ? result.length : 0));
+          return result;
+        } catch (error) {
+          shellyPatchTrace('exec result name=' + name + ' throw=' + shellyTraceErrorCode(error) + ' status=' + (error && error.status !== undefined ? error.status : 'unknown') + ' signal=' + (error && error.signal ? error.signal : 'none') + ' stdoutLen=' + (error && error.stdout ? error.stdout.length : 0) + ' stderrLen=' + (error && error.stderr ? error.stderr.length : 0));
+          throw error;
+        }
+      }
       return original.call(this, command, normalized, callback);
     };
     try { Object.defineProperty(patched, '__shellyShellPatched', { value: true }); } catch (_) {}
