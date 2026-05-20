@@ -1094,7 +1094,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 174: Stop exporting LD_LIBRARY_PATH globally. Android system binaries
     //      such as toybox/cat must not load Shelly's app-private libs; set the
     //      loader path only around _run and explicit Claude/Node launches.
-    private const val BASHRC_VERSION = 174
+    // 175: Export _run and invalidate stale Claude shell snapshots once per
+    //      bashrc version. Claude Code restores functions with base64 during
+    //      Bash-tool shell startup; Shelly's base64 wrapper needs _run in child
+    //      shells or the snapshot self-breaks and Bash tool returns exit 1.
+    private const val BASHRC_VERSION = 175
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1668,6 +1672,20 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      return 64")
             sb.appendLine("      ;;")
             sb.appendLine("  esac")
+            sb.appendLine("}")
+            sb.appendLine("export -f _run")
+            sb.appendLine("__shelly_claude_reset_shell_snapshots() {")
+            sb.appendLine("  local __dir=\"\$HOME/.claude/shell-snapshots\"")
+            sb.appendLine("  local __stamp=\"\$__dir/.shelly-bashrc-version\"")
+            sb.appendLine("  local __seen=\"\"")
+            sb.appendLine("  [ -d \"\$__dir\" ] || /system/bin/env -u LD_LIBRARY_PATH /system/bin/mkdir -p \"\$__dir\" 2>/dev/null || return 0")
+            sb.appendLine("  if [ -r \"\$__stamp\" ]; then IFS= read -r __seen < \"\$__stamp\" || true; fi")
+            sb.appendLine("  if [ \"\$__seen\" != \"\$BASHRC_VERSION\" ]; then")
+            sb.appendLine("    if /system/bin/env -u LD_LIBRARY_PATH /system/bin/rm -f \"\$__dir\"/snapshot-bash-* 2>/dev/null; then")
+            sb.appendLine("      printf '%s\\n' \"\$BASHRC_VERSION\" > \"\$__stamp\" 2>/dev/null || true")
+            sb.appendLine("      [ -z \"\${SHELLY_VERBOSE_CLI_TIER:-}\" ] || echo \"[shelly] claude: reset shell snapshots for bashrc \$BASHRC_VERSION\" >&2")
+            sb.appendLine("    fi")
+            sb.appendLine("  fi")
             sb.appendLine("}")
             sb.appendLine("__shelly_run_node_clean() {")
             sb.appendLine("  local __shelly_tmp=\"\${TMPDIR:-\$HOME/.tmp}\"")
@@ -2982,6 +3000,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // Shelly HOME trust first so post-login onboarding does not enter
             // the Bun-crashing trust prompt.
             sb.appendLine("claude() {")
+            sb.appendLine("  __shelly_claude_reset_shell_snapshots")
             sb.appendLine("  local __trampoline=\"$libDir/shelly_musl_exec\"")
             sb.appendLine("  local __musl_claude=\"$libDir/claude\"")
             sb.appendLine("  local __musl_ld=\"$libDir/ld-musl-aarch64.so.1\"")
