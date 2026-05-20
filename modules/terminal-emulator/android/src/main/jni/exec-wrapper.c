@@ -213,6 +213,11 @@ static int trace_flag_enabled(char *const envp[], const char *name_eq) {
     return v && v[0] == '1' && v[1] == '\0';
 }
 
+static int native_trace_enabled(char *const envp[]) {
+    return trace_flag_enabled(envp, "SHELLY_CLAUDE_PATCH_TRACE=") &&
+           trace_flag_enabled(envp, "SHELLY_CLAUDE_NATIVE_TRACE=");
+}
+
 static const char *base_name(const char *path) {
     const char *base = path;
     if (!path) return NULL;
@@ -248,7 +253,7 @@ static void trace_write_line(char *const envp[], const char *line, size_t len) {
     char path[PATH_BUF_SIZE];
     const char *home;
     int fd;
-    if (!trace_flag_enabled(envp, "SHELLY_CLAUDE_PATCH_TRACE=")) return;
+    if (!native_trace_enabled(envp)) return;
     home = trace_env_value(envp, "HOME=");
     if (append_log_path(path, sizeof(path), home) != 0) return;
     fd = raw_open_append(path);
@@ -263,7 +268,7 @@ static void trace_exec_event(const char *stage, const char *pathname, const char
     size_t n = 0;
     int raw = trace_flag_enabled(envp, "SHELLY_CLAUDE_PATCH_RAW=");
     unsigned int argc = 0;
-    if (!trace_flag_enabled(envp, "SHELLY_CLAUDE_PATCH_TRACE=")) return;
+    if (!native_trace_enabled(envp)) return;
     if (argv) {
         while (argv[argc] && argc < MAX_ARGC) argc++;
     }
