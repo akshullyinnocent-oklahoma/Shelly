@@ -295,6 +295,7 @@ if (!globalThis.Bun.JSONL) {
   };
 }
 (function shellyPatchClaudeChildProcessShell() {
+  const SHELLY_CLAUDE_SHELL_PATCH_VERSION = 2;
   const childProcess = require('child_process');
   const shellyDiag = process.env.SHELLY_CLAUDE_DIAG === '1';
   const shellyDiagValue = function(value) {
@@ -526,10 +527,25 @@ if (!globalThis.Bun.JSONL) {
     }
     const tail = arg.slice(marker);
     const candidates = shellyShellPathCandidates().flatMap(function(shellPath) {
-      return ["'" + shellPath + "'", '"' + shellPath + '"', shellPath];
+      return ["'" + shellPath + "'", '"' + shellPath + '"', shellPath].flatMap(function(token) {
+        const matches = [];
+        let from = 0;
+        while (from < tail.length) {
+          const index = tail.indexOf(token, from);
+          if (index < 0) break;
+          matches.push({ token, shellPath, index });
+          from = index + token.length;
+        }
+        return matches;
+      });
     })
-      .map(function(token) { return { token, index: tail.indexOf(token) }; })
-      .filter(function(item) { return item.index >= 0; })
+      .filter(function(item) {
+        if (item.index < 0) return false;
+        const prev = item.index === 0 ? ' ' : tail[item.index - 1];
+        if (prev === '=') return false;
+        if (item.token[0] !== "'" && item.token[0] !== '"' && prev !== ' ' && prev !== '\t' && prev !== '\n') return false;
+        return true;
+      })
       .sort(function(a, b) { return a.index - b.index; });
     if (candidates.length === 0) {
       shellyPatchTrace(source + ' miss no-candidate marker=' + marker + ' tailLength=' + tail.length + ' candidateCount=' + shellyShellPathCandidates().length);
@@ -538,14 +554,19 @@ if (!globalThis.Bun.JSONL) {
     const libDir = shellyLibDir();
     const inject = 'LD_LIBRARY_PATH=' + libDir + ' LD_PRELOAD=' + libDir + '/libexec_wrapper.so ';
     const picked = candidates[0];
+    const commandPrefix = '/system/bin/linker64 ';
     const absoluteIndex = marker + picked.index;
     const prefix = arg.slice(0, absoluteIndex);
-    if (prefix.slice(-inject.length) === inject) {
+    if (prefix.slice(-(inject.length + commandPrefix.length)) === inject + commandPrefix) {
       shellyPatchTrace(source + ' skip already-injected token=' + JSON.stringify(picked.token));
       return arg;
     }
-    shellyPatchTrace(source + ' fired token=' + JSON.stringify(picked.token) + ' index=' + absoluteIndex);
-    return prefix + inject + arg.slice(absoluteIndex);
+    if (prefix.slice(-inject.length) === inject) {
+      shellyPatchTrace(source + ' fired token=' + JSON.stringify(picked.token) + ' index=' + absoluteIndex + ' linker=1 existing-env=1');
+      return prefix + commandPrefix + arg.slice(absoluteIndex);
+    }
+    shellyPatchTrace(source + ' fired token=' + JSON.stringify(picked.token) + ' index=' + absoluteIndex + ' linker=1');
+    return prefix + inject + commandPrefix + arg.slice(absoluteIndex);
   };
   const shellyPatchNestedEnvArgs = function(args) {
     if (!Array.isArray(args)) return args;

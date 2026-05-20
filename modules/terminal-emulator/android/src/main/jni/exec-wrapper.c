@@ -215,19 +215,17 @@ static int trace_flag_enabled(char *const envp[], const char *name_eq) {
 }
 
 static int native_trace_enabled(char *const envp[]) {
-    (void)envp;
     /*
-     * v174: keep the native exec interceptor on the hot path only.
+     * Keep native exec tracing off the normal hot path. It is enabled only by
+     * Shelly's explicit Claude Bash canary so regular terminals, Codex, Gemini,
+     * and Claude TUI sessions never inherit diagnostic I/O.
      *
-     * The v171-v173 diagnostic trace was useful for narrowing Claude's Bash
-     * route, but real-device crash logs showed libexec_wrapper.so segfaulting
-     * inside the execve interposer during ordinary shell startup. The wrapper
-     * is loaded into app-private bash/node processes and must never become a
-     * reason that normal system commands fail. JS-side Claude tracing remains
-     * available; native tracing can be reintroduced only behind a simpler,
-     * separately smoke-tested implementation.
+     * Require three gates so stale user env such as SHELLY_CLAUDE_NATIVE_TRACE=1
+     * cannot accidentally turn this back on.
      */
-    return 0;
+    return trace_flag_enabled(envp, "SHELLY_CLAUDE_PATCH_TRACE=") &&
+           trace_flag_enabled(envp, "SHELLY_CLAUDE_NATIVE_TRACE=") &&
+           trace_flag_enabled(envp, "SHELLY_CLAUDE_CANARY_TRACE=");
 }
 
 static const char *base_name(const char *path) {
