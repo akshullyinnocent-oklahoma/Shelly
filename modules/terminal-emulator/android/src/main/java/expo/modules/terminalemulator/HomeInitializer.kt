@@ -1091,7 +1091,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 173: Add an internal SHELLY_CLAUDE_NATIVE_TRACE gate for native tracing.
     //      User-exported PATCH_TRACE must not make ordinary shell helpers
     //      such as chmod/trust-seed Node run through the verbose native path.
-    private const val BASHRC_VERSION = 173
+    // 174: Stop exporting LD_LIBRARY_PATH globally. Android system binaries
+    //      such as toybox/cat must not load Shelly's app-private libs; set the
+    //      loader path only around _run and explicit Claude/Node launches.
+    private const val BASHRC_VERSION = 174
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1303,8 +1306,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
 
             val sb = StringBuilder()
 
-            // Environment — preserve PATH/LD_LIBRARY_PATH if already set by
-            // shelly-pty.c (which includes lib dir, npm bins, etc.)
+            // Environment — keep Shelly's private loader path out of the
+            // global shell. Android system binaries can segfault if they
+            // resolve DSOs from the app-private lib dir; _run and generated
+            // shims add LD_LIBRARY_PATH only around app-private binaries.
             sb.appendLine("export HOME=\"${home.absolutePath}\"")
             sb.appendLine("export TERM=xterm-256color")
             sb.appendLine("export COLORTERM=truecolor")
@@ -1323,7 +1328,8 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("export SHELLY_AUTO_UPDATE_CLIS=0")
             sb.appendLine("export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0")
             sb.appendLine("export PATH=\"${home.absolutePath}/bin:\${PATH:-$libDir}:/system/bin:/vendor/bin\"")
-            sb.appendLine("export LD_LIBRARY_PATH=\"\${LD_LIBRARY_PATH:-$libDir}\"")
+            sb.appendLine("export SHELLY_LD_LIBRARY_PATH=\"$libDir\"")
+            sb.appendLine("unset LD_LIBRARY_PATH")
             // bug #128 (2026-04-27): tell git where to find its
             // transport helpers (git-remote-https / git-remote-http).
             // LibExtractor places them at $libDir alongside the git
@@ -1358,7 +1364,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  echo 'shelly: SHELLY_LIB_DIR is not set; open a fresh Shelly shell' >&2")
             sb.appendLine("  exit 1")
             sb.appendLine("fi")
-            sb.appendLine("exec /system/bin/linker64 \"\$SHELLY_LIB_DIR/node\" - \"\$@\" <<'SHELLY_HELPER_NODE'")
+            sb.appendLine("LD_LIBRARY_PATH=\"\$SHELLY_LIB_DIR\" exec /system/bin/linker64 \"\$SHELLY_LIB_DIR/node\" - \"\$@\" <<'SHELLY_HELPER_NODE'")
             sb.appendLine("const fs = require('fs');")
             sb.appendLine("const path = require('path');")
             sb.appendLine("const args = process.argv.slice(2);")
@@ -1439,18 +1445,21 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("if [ -z \"\${SHELLY_LIB_DIR:-}\" ]; then")
             sb.appendLine("  SHELLY_LIB_DIR=\"$libDir\"")
             sb.appendLine("fi")
+            sb.appendLine("__shelly_linker64() {")
+            sb.appendLine("  LD_LIBRARY_PATH=\"\$SHELLY_LIB_DIR\" /system/bin/linker64 \"\$@\"")
+            sb.appendLine("}")
             sb.appendLine("__codex_home=\"\${CODEX_HOME:-\$HOME/.codex}\"")
             sb.appendLine("__codex_auth=\"\$__codex_home/auth.json\"")
             sb.appendLine("__codex_auth_ok=0")
             sb.appendLine("if [ -s \"\$__codex_auth\" ]; then")
-            sb.appendLine("  /system/bin/linker64 \"\$SHELLY_LIB_DIR/node\" -e 'const fs=require(\"fs\");try{const a=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\"));process.exit(a&&a.auth_mode===\"chatgpt\"&&a.tokens&&a.tokens.refresh_token?0:1)}catch(_){process.exit(1)}' \"\$__codex_auth\" >/dev/null 2>&1 && __codex_auth_ok=1")
+            sb.appendLine("  __shelly_linker64 \"\$SHELLY_LIB_DIR/node\" -e 'const fs=require(\"fs\");try{const a=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\"));process.exit(a&&a.auth_mode===\"chatgpt\"&&a.tokens&&a.tokens.refresh_token?0:1)}catch(_){process.exit(1)}' \"\$__codex_auth\" >/dev/null 2>&1 && __codex_auth_ok=1")
             sb.appendLine("fi")
             sb.appendLine("if [ \"\$#\" -eq 0 ] && [ \"\$__codex_auth_ok\" != \"1\" ]; then")
             sb.appendLine("  echo '[shelly] Codex sign-in required; opening Shelly device-code login.'")
-            sb.appendLine("  /system/bin/linker64 \"\$SHELLY_LIB_DIR/node\" \"\$HOME/.shelly-codex-auth.js\" --open || exit \$?")
+            sb.appendLine("  __shelly_linker64 \"\$SHELLY_LIB_DIR/node\" \"\$HOME/.shelly-codex-auth.js\" --open || exit \$?")
             sb.appendLine("  __codex_auth_ok=0")
             sb.appendLine("  if [ -s \"\$__codex_auth\" ]; then")
-            sb.appendLine("    /system/bin/linker64 \"\$SHELLY_LIB_DIR/node\" -e 'const fs=require(\"fs\");try{const a=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\"));process.exit(a&&a.auth_mode===\"chatgpt\"&&a.tokens&&a.tokens.refresh_token?0:1)}catch(_){process.exit(1)}' \"\$__codex_auth\" >/dev/null 2>&1 && __codex_auth_ok=1")
+            sb.appendLine("    __shelly_linker64 \"\$SHELLY_LIB_DIR/node\" -e 'const fs=require(\"fs\");try{const a=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\"));process.exit(a&&a.auth_mode===\"chatgpt\"&&a.tokens&&a.tokens.refresh_token?0:1)}catch(_){process.exit(1)}' \"\$__codex_auth\" >/dev/null 2>&1 && __codex_auth_ok=1")
             sb.appendLine("  fi")
             sb.appendLine("  if [ \"\$__codex_auth_ok\" != \"1\" ]; then")
             sb.appendLine("    echo \"codex: login did not create \$__codex_auth\" >&2")
@@ -1468,7 +1477,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    [ -x \"\$__runtime_exec\" ] && __exec=\"\$__runtime_exec\"")
             sb.appendLine("    if [ -x \"\$__exec\" ]; then")
             sb.appendLine("      shift")
-            sb.appendLine("      exec /system/bin/linker64 \"\$__exec\" \"\$@\"")
+            sb.appendLine("      LD_LIBRARY_PATH=\"\$SHELLY_LIB_DIR\" exec /system/bin/linker64 \"\$__exec\" \"\$@\"")
             sb.appendLine("    fi")
             sb.appendLine("    echo \"codex: codex_exec binary missing at \$__exec\" >&2")
             sb.appendLine("    exit 127")
@@ -1476,7 +1485,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  resume|review|help)")
             sb.appendLine("    [ -x \"\$__runtime_exec\" ] && __exec=\"\$__runtime_exec\"")
             sb.appendLine("    if [ -x \"\$__exec\" ]; then")
-            sb.appendLine("      exec /system/bin/linker64 \"\$__exec\" \"\$@\"")
+            sb.appendLine("      LD_LIBRARY_PATH=\"\$SHELLY_LIB_DIR\" exec /system/bin/linker64 \"\$__exec\" \"\$@\"")
             sb.appendLine("    fi")
             sb.appendLine("    echo \"codex: codex_exec binary missing at \$__exec\" >&2")
             sb.appendLine("    exit 127")
@@ -1484,7 +1493,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("esac")
             sb.appendLine("[ -x \"\$__runtime_tui\" ] && __tui=\"\$__runtime_tui\"")
             sb.appendLine("if [ -x \"\$__tui\" ]; then")
-            sb.appendLine("  exec /system/bin/linker64 \"\$__tui\" \"\$@\"")
+            sb.appendLine("  LD_LIBRARY_PATH=\"\$SHELLY_LIB_DIR\" exec /system/bin/linker64 \"\$__tui\" \"\$@\"")
             sb.appendLine("fi")
             sb.appendLine("echo \"codex: codex_tui binary missing at \$__tui\" >&2")
             sb.appendLine("exit 127")
@@ -1653,7 +1662,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("# Run binary via linker64 (SELinux blocks direct execve on app_data_file)")
             sb.appendLine("_run() {")
             sb.appendLine("  case \"\${1:-}\" in")
-            sb.appendLine("    /*) /system/bin/linker64 \"\$@\" ;;")
+            sb.appendLine("    /*) LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"\$@\" ;;")
             sb.appendLine("    *)")
             sb.appendLine("      printf '_run: first arg must be an absolute path, got: %s\\n' \"\${1:-(empty)}\" >&2")
             sb.appendLine("      return 64")
@@ -1666,7 +1675,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  /system/bin/env -i \\")
             sb.appendLine("    HOME=\"\$HOME\" PWD=\"\$PWD\" USER=\"\${USER:-shelly}\" LOGNAME=\"\${LOGNAME:-shelly}\" SHELL=\"\$SHELL\" \\")
             sb.appendLine("    TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" LANG=\"\${LANG:-C.UTF-8}\" LC_ALL=\"\${LC_ALL:-C.UTF-8}\" \\")
-            sb.appendLine("    PATH=\"\$PATH\" LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\" ANDROID_DATA=\"\${ANDROID_DATA:-/data}\" ANDROID_ROOT=\"\${ANDROID_ROOT:-/system}\" \\")
+            sb.appendLine("    PATH=\"\$PATH\" LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" ANDROID_DATA=\"\${ANDROID_DATA:-/data}\" ANDROID_ROOT=\"\${ANDROID_ROOT:-/system}\" \\")
             sb.appendLine("    TMPDIR=\"\$__shelly_tmp\" \\")
             sb.appendLine("    NPM_CONFIG_PREFIX=\"\${NPM_CONFIG_PREFIX:-\$HOME/.npm-global}\" XDG_CONFIG_HOME=\"\${XDG_CONFIG_HOME:-\$HOME/.config}\" XDG_CACHE_HOME=\"\${XDG_CACHE_HOME:-\$HOME/.cache}\" XDG_DATA_HOME=\"\${XDG_DATA_HOME:-\$HOME/.local/share}\" \\")
             sb.appendLine("    TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 SHELLY_AUTO_UPDATE_CLIS=0 \\")
@@ -1699,7 +1708,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  /system/bin/env -i \\")
             sb.appendLine("    HOME=\"\$HOME\" PWD=\"\$PWD\" USER=\"\${USER:-shelly}\" LOGNAME=\"\${LOGNAME:-shelly}\" SHELL=\"\$SHELL\" \\")
             sb.appendLine("    TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\" LANG=\"\${LANG:-C.UTF-8}\" LC_ALL=\"\${LC_ALL:-C.UTF-8}\" \\")
-            sb.appendLine("    PATH=\"\$PATH\" LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\" ANDROID_DATA=\"\${ANDROID_DATA:-/data}\" ANDROID_ROOT=\"\${ANDROID_ROOT:-/system}\" \\")
+            sb.appendLine("    PATH=\"\$PATH\" LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" ANDROID_DATA=\"\${ANDROID_DATA:-/data}\" ANDROID_ROOT=\"\${ANDROID_ROOT:-/system}\" \\")
             sb.appendLine("    TMPDIR=\"\$__shelly_tmp\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\$__claude_tmp\" CLAUDE_TMPDIR=\"\$__claude_tmp\" \\")
             sb.appendLine("    XDG_CONFIG_HOME=\"\${XDG_CONFIG_HOME:-\$HOME/.config}\" XDG_CACHE_HOME=\"\${XDG_CACHE_HOME:-\$HOME/.cache}\" XDG_DATA_HOME=\"\${XDG_DATA_HOME:-\$HOME/.local/share}\" \\")
             sb.appendLine("    NO_UPDATE_NOTIFIER=1 USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" \\")
@@ -2883,7 +2892,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  [ -n \"\$HOME\" ] || return 0")
             sb.appendLine("  [ -x \"$libDir/node\" ] || return 0")
             sb.appendLine("  mkdir -p \"\$HOME/.claude\" 2>/dev/null || true")
-            sb.appendLine("  /system/bin/linker64 \"$libDir/node\" - \"\$HOME\" <<'__SHELLY_CLAUDE_HOME_TRUST__' >/dev/null || true")
+            sb.appendLine("  LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" - \"\$HOME\" <<'__SHELLY_CLAUDE_HOME_TRUST__' >/dev/null || true")
             sb.appendLine("const fs = require('fs');")
             sb.appendLine("const path = require('path');")
             sb.appendLine("const homeArg = process.argv[2];")
@@ -2982,7 +2991,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    local __base=\"\$2\"")
             sb.appendLine("    local __bin=\"\"")
             sb.appendLine("    if [ -f \"\$__pkg\" ]; then")
-            sb.appendLine("      __bin=\$(timeout 10 /system/bin/linker64 \"$libDir/node\" -e 'try{const p=require(process.argv[1]);const b=p.bin;if(typeof b===\"string\"){process.stdout.write(b)}else if(b&&typeof b===\"object\"){const k=Object.keys(b);if(k.length){process.stdout.write(b[k[0]])}}}catch(e){}' \"\$__pkg\" 2>/dev/null)")
+            sb.appendLine("      __bin=\$(timeout 10 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" -e 'try{const p=require(process.argv[1]);const b=p.bin;if(typeof b===\"string\"){process.stdout.write(b)}else if(b&&typeof b===\"object\"){const k=Object.keys(b);if(k.length){process.stdout.write(b[k[0]])}}}catch(e){}' \"\$__pkg\" 2>/dev/null)")
             sb.appendLine("      if [ -n \"\$__bin\" ] && [ -f \"\$__base/\$__bin\" ]; then")
             sb.appendLine("        printf '%s' \"\$__base/\$__bin\"")
             sb.appendLine("      fi")
@@ -3014,7 +3023,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    __ver=\$(cat \"\$__cache\" 2>/dev/null | tr -d '\\n')")
             sb.appendLine("    case \"\$__ver\" in [0-9]*.[0-9]*.[0-9]*) printf '%s' \"\$__ver\"; return 0 ;; esac")
             sb.appendLine("    [ -x \"\$__musl_claude\" ] || return 1")
-            sb.appendLine("    __ver=\$(SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" timeout 10 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" --version 2>/dev/null | sed -n 's/^\\([0-9][0-9.]*\\).*/\\1/p' | head -1)")
+            sb.appendLine("    __ver=\$(SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" timeout 10 /system/bin/env -u LD_PRELOAD LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" --version 2>/dev/null | sed -n 's/^\\([0-9][0-9.]*\\).*/\\1/p' | head -1)")
             sb.appendLine("    case \"\$__ver\" in [0-9]*.[0-9]*.[0-9]*) mkdir -p \"\$(dirname \"\$__cache\")\" 2>/dev/null; printf '%s' \"\$__ver\" > \"\$__cache\" 2>/dev/null || true; printf '%s' \"\$__ver\"; return 0 ;; esac")
             sb.appendLine("    return 1")
             sb.appendLine("  }")
@@ -3185,7 +3194,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("        echo '[shelly] claude: runtime latest (musl Bun SEA)' >&2")
             sb.appendLine("      fi")
             sb.appendLine("      __shelly_paste_tui_begin")
-            sb.appendLine("      BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__runtime_claude\" \"\$@\"")
+            sb.appendLine("      BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__runtime_claude\" \"\$@\"")
             sb.appendLine("      local __runtime_rc=$?")
             // Retry list updated 2026-05-08 per Codex review: 133 (SIGTRAP)
             // and 135 (SIGBUS) added — both observed on Z Fold6 with Bun
@@ -3196,7 +3205,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      case \"\$__runtime_rc\" in")
             sb.appendLine("        133|134|135|139|159)")
             sb.appendLine("          rm -f \"\$__bun_tmp\"/.*.node 2>/dev/null")
-            sb.appendLine("          BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__runtime_claude\" \"\$@\"")
+            sb.appendLine("          BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__runtime_claude\" \"\$@\"")
             sb.appendLine("          __runtime_rc=$?")
             sb.appendLine("          ;;")
             sb.appendLine("      esac")
@@ -3245,14 +3254,14 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    fi")
             sb.appendLine("    if { [ \"\${SHELLY_FORCE_NATIVE_CLAUDE:-0}\" = \"1\" ] || { [ \"\${SHELLY_PREFER_NATIVE_CLAUDE:-0}\" = \"1\" ] && ! __shelly_claude_native_in_cooldown; }; } && [ -x \"\$__musl_claude\" ]; then")
             sb.appendLine("    __shelly_paste_tui_begin")
-            sb.appendLine("    BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" \"\$@\"")
+            sb.appendLine("    BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" \"\$@\"")
             sb.appendLine("    local __musl_rc=$?")
             // 137 dropped per Codex review (SIGKILL/OOM is not a cache-clear-
             // recoverable signal); list matches the runtime-tier block above.
             sb.appendLine("    case \"\$__musl_rc\" in")
             sb.appendLine("      133|134|135|139|159)")
             sb.appendLine("        rm -f \"\$__bun_tmp\"/.*.node 2>/dev/null")
-            sb.appendLine("        BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" \"\$@\"")
+            sb.appendLine("        BUN_TMPDIR=\"\$__bun_tmp\" SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"\$__musl_exec_wrapper\" /system/bin/env -u LD_PRELOAD LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"\$__trampoline\" \"\$__musl_ld\" \"\$__musl_claude\" \"\$@\"")
             sb.appendLine("        __musl_rc=$?")
             sb.appendLine("        ;;")
             sb.appendLine("    esac")
@@ -3300,7 +3309,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    fi")
             sb.appendLine("    local __out=\"\"")
             sb.appendLine("    local __rc=0")
-            sb.appendLine("    __out=\$(USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" NODE_OPTIONS=\"\$__shelly_claude_node_options\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" BASH_ENV= ENV= timeout 15 /system/bin/linker64 \"$libDir/node\" \"\$__cli\" --version 2>&1)")
+            sb.appendLine("    __out=\$(USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\$__bun_tmp\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$__claude_tmp}\" CLAUDE_TMPDIR=\"\$__claude_tmp\" NODE_OPTIONS=\"\$__shelly_claude_node_options\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" BASH_ENV= ENV= timeout 15 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" \"\$__cli\" --version 2>&1)")
             sb.appendLine("    __rc=\$?")
             sb.appendLine("    case \"\$__out\" in *'[DBG-A'*|*'[CKPT-'*|*'claude-code_2-1-131_harness'*)")
             sb.appendLine("      [ -z \"\$SHELLY_VERBOSE_CLI_TIER\" ] || echo '[shelly] claude: runtime extracted stale harness detected; using APK extracted tier' >&2")
@@ -3416,7 +3425,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __gemini_pkg=\"\$__gemini_base/package.json\"")
             sb.appendLine("  local __gemini_bin=\"bundle/gemini.js\"")
             sb.appendLine("  if [ -f \"\$__gemini_pkg\" ]; then")
-            sb.appendLine("    local __pkg_bin=\$(timeout 10 /system/bin/linker64 \"$libDir/node\" -e 'try{const p=require(process.argv[1]);const b=p.bin;if(typeof b===\"string\"){process.stdout.write(b)}else if(b&&typeof b===\"object\"){const v=b.gemini||b[Object.keys(b)[0]];if(v)process.stdout.write(v)}}catch(e){}' \"\$__gemini_pkg\" 2>/dev/null)")
+            sb.appendLine("    local __pkg_bin=\$(timeout 10 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" -e 'try{const p=require(process.argv[1]);const b=p.bin;if(typeof b===\"string\"){process.stdout.write(b)}else if(b&&typeof b===\"object\"){const v=b.gemini||b[Object.keys(b)[0]];if(v)process.stdout.write(v)}}catch(e){}' \"\$__gemini_pkg\" 2>/dev/null)")
             sb.appendLine("    [ -n \"\$__pkg_bin\" ] && __gemini_bin=\"\$__pkg_bin\"")
             sb.appendLine("  fi")
             sb.appendLine("  local __gemini_entry=\"\$__gemini_base/\$__gemini_bin\"")
@@ -3697,7 +3706,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __expected=\"\$(cat \"\$HOME/.shelly-runtime/claude-extracted/version\" 2>/dev/null | tr -d '\\n')\"")
             sb.appendLine("  local __out=\"\"")
             sb.appendLine("  if [ -n \"\$__expected\" ] && [ -f \"\$__runtime_cli\" ] && grep -q '__SHELLY_CLAUDE_BUN_EXTRACTED__' \"\$__runtime_cli\" 2>/dev/null && grep -q 'shellyPatchClaudeChildProcessShell' \"\$__runtime_cli\" 2>/dev/null; then")
-            sb.appendLine("    __out=\$(USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 SHELL=\"\$HOME/bin/bash\" BASH=\"\$HOME/bin/bash\" SHELLY_LIB_DIR=\"$libDir\" PATH=\"\$HOME/bin:$libDir:\${PATH:-/system/bin:/vendor/bin}\" LD_LIBRARY_PATH=\"$libDir\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$HOME/.claude-tmp}\" CLAUDE_TMPDIR=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\" NODE_OPTIONS=\"\$__node_options\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" BASH_ENV= ENV= timeout 15 /system/bin/linker64 \"$libDir/node\" \"\$__runtime_cli\" --version 2>&1)")
+            sb.appendLine("    __out=\$(USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 SHELL=\"\$HOME/bin/bash\" BASH=\"\$HOME/bin/bash\" SHELLY_LIB_DIR=\"$libDir\" PATH=\"\$HOME/bin:$libDir:\${PATH:-/system/bin:/vendor/bin}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$HOME/.claude-tmp}\" CLAUDE_TMPDIR=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\" NODE_OPTIONS=\"\$__node_options\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" BASH_ENV= ENV= timeout 15 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" \"\$__runtime_cli\" --version 2>&1)")
             sb.appendLine("    case \"\$__out\" in")
             sb.appendLine("      *'[DBG-A'*|*'[CKPT-'*|*'claude-code_2-1-131_harness'*) ;;")
             sb.appendLine("      *\"\$__expected\"*) __cli=\"\$__runtime_cli\" ;;")
@@ -3720,7 +3729,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  __cli=\"\$HOME/.shelly-runtime/claude-extracted/current/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
             sb.appendLine("  [ -f \"\$__cli\" ] || __cli=\"$libDir/node_modules/@anthropic-ai/claude-code-extracted/cli.js\"")
             sb.appendLine("  __node_options=\"--require=\$__shelly_node_compat_preload --require=\$__shelly_claude_node_preload\"")
-            sb.appendLine("  USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 SHELL=\"\$HOME/bin/bash\" BASH=\"\$HOME/bin/bash\" SHELLY_LIB_DIR=\"$libDir\" PATH=\"\$HOME/bin:$libDir:\${PATH:-/system/bin:/vendor/bin}\" LD_LIBRARY_PATH=\"$libDir\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$HOME/.claude-tmp}\" CLAUDE_TMPDIR=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\" NODE_OPTIONS=\"\$__node_options\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" BASH_ENV= ENV= timeout 30 /system/bin/linker64 $libDir/node \"\$__cli\" --print \"Reply with exactly: \$__nonce\" 2>&1 | head -20")
+            sb.appendLine("  USE_BUILTIN_RIPGREP=0 DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1 NO_UPDATE_NOTIFIER=1 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0 SHELL=\"\$HOME/bin/bash\" BASH=\"\$HOME/bin/bash\" SHELLY_LIB_DIR=\"$libDir\" PATH=\"\$HOME/bin:$libDir:\${PATH:-/system/bin:/vendor/bin}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" BUN_TMPDIR=\"\${BUN_TMPDIR:-\$HOME/.bun-tmp}\" CLAUDE_CODE_TMPDIR=\"\${CLAUDE_CODE_TMPDIR:-\$HOME/.claude-tmp}\" CLAUDE_TMPDIR=\"\${CLAUDE_TMPDIR:-\$HOME/.claude-tmp}\" NODE_OPTIONS=\"\$__node_options\" LD_PRELOAD=\"$libDir/libexec_wrapper.so\" BASH_ENV= ENV= timeout 30 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 $libDir/node \"\$__cli\" --print \"Reply with exactly: \$__nonce\" 2>&1 | head -20")
             sb.appendLine("  echo \"T4 nonce=\$__nonce\"")
             sb.appendLine("}")
             sb.appendLine("shelly-claude-diagnose() {")
@@ -4019,7 +4028,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // Pre-check: node binary itself must work. Three CLI failures
             // with the same root cause ("node won't start") are useless
             // diagnostics; surface this once and bail.
-            sb.appendLine("  if ! timeout 30 /system/bin/linker64 \"$libDir/node\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
+            sb.appendLine("  if ! timeout 30 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
             sb.appendLine("    echo '[health] node --version FAILED — bundled node is broken; aborting health check' >&2")
             sb.appendLine("    __healthy=0")
             sb.appendLine("  fi")
@@ -4031,21 +4040,21 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    local __claude_pkg=\"\$__staging/node_modules/@anthropic-ai/claude-code/package.json\"")
             sb.appendLine("    local __new_claude=\"\"")
             sb.appendLine("    if [ -f \"\$__claude_pkg\" ]; then")
-            sb.appendLine("      __new_claude=\$(timeout 10 /system/bin/linker64 \"$libDir/node\" -e 'try{const p=require(process.argv[1]);const b=p.bin;if(typeof b===\"string\"){process.stdout.write(b)}else if(b&&typeof b===\"object\"){const v=b.claude||b[Object.keys(b)[0]];if(v)process.stdout.write(v)}}catch(e){}' \"\$__claude_pkg\" 2>/dev/null)")
+            sb.appendLine("      __new_claude=\$(timeout 10 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" -e 'try{const p=require(process.argv[1]);const b=p.bin;if(typeof b===\"string\"){process.stdout.write(b)}else if(b&&typeof b===\"object\"){const v=b.claude||b[Object.keys(b)[0]];if(v)process.stdout.write(v)}}catch(e){}' \"\$__claude_pkg\" 2>/dev/null)")
             sb.appendLine("    fi")
             sb.appendLine("    local __claude_ok=0")
             sb.appendLine("    if [ -n \"\$__new_claude\" ] && [ -f \"\$__staging/node_modules/@anthropic-ai/claude-code/\$__new_claude\" ]; then")
             sb.appendLine("      case \"\$__new_claude\" in")
             sb.appendLine("        *.js|cli.js)")
-            sb.appendLine("          if timeout 30 /system/bin/linker64 \"$libDir/node\" \"\$__staging/node_modules/@anthropic-ai/claude-code/\$__new_claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
+            sb.appendLine("          if timeout 30 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" \"\$__staging/node_modules/@anthropic-ai/claude-code/\$__new_claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
             sb.appendLine("          ;;")
             sb.appendLine("      esac")
             sb.appendLine("    fi")
             sb.appendLine("    if [ \"\${SHELLY_UPDATER_NATIVE_CLAUDE:-0}\" = \"1\" ] && [ \$__claude_ok -ne 1 ] && [ -x \"\$HOME/.shelly-runtime/claude/current/claude\" ] && [ -x \"$libDir/shelly_musl_exec\" ] && [ -x \"$libDir/ld-musl-aarch64.so.1\" ]; then")
-            sb.appendLine("      if SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"$libDir/libexec_wrapper_musl.so\" timeout 30 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"$libDir/shelly_musl_exec\" \"$libDir/ld-musl-aarch64.so.1\" \"\$HOME/.shelly-runtime/claude/current/claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
+            sb.appendLine("      if SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"$libDir/libexec_wrapper_musl.so\" timeout 30 /system/bin/env -u LD_PRELOAD LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/shelly_musl_exec\" \"$libDir/ld-musl-aarch64.so.1\" \"\$HOME/.shelly-runtime/claude/current/claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
             sb.appendLine("    fi")
             sb.appendLine("    if [ \"\${SHELLY_UPDATER_NATIVE_CLAUDE:-0}\" = \"1\" ] && [ \$__claude_ok -ne 1 ] && [ -x \"$libDir/claude\" ] && [ -x \"$libDir/shelly_musl_exec\" ] && [ -x \"$libDir/ld-musl-aarch64.so.1\" ]; then")
-            sb.appendLine("      if SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"$libDir/libexec_wrapper_musl.so\" timeout 30 /system/bin/env -u LD_PRELOAD /system/bin/linker64 \"$libDir/shelly_musl_exec\" \"$libDir/ld-musl-aarch64.so.1\" \"$libDir/claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
+            sb.appendLine("      if SHELLY_MUSL_DISABLE_POSIX_SPAWN=1 SHELLY_MUSL_LD_PRELOAD=\"$libDir/libexec_wrapper_musl.so\" timeout 30 /system/bin/env -u LD_PRELOAD LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/shelly_musl_exec\" \"$libDir/ld-musl-aarch64.so.1\" \"$libDir/claude\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then __claude_ok=1; fi")
             sb.appendLine("    fi")
             sb.appendLine("    if [ \$__claude_ok -eq 1 ]; then")
             sb.appendLine("      echo '[health] claude --version OK'")
@@ -4076,7 +4085,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    if [ -f \"\$__gemini_pkg\" ]; then")
             // Use node to parse package.json bin (which can be a string or object).
             // Fail-safe: empty output if anything goes wrong.
-            sb.appendLine("      __new_gemini=\$(timeout 10 /system/bin/linker64 \"$libDir/node\" -e 'try{const p=require(process.argv[1]);const b=p.bin;if(typeof b===\"string\"){process.stdout.write(b)}else if(b&&typeof b===\"object\"){const k=Object.keys(b);if(k.length){process.stdout.write(b[k[0]])}}}catch(e){}' \"\$__gemini_pkg\" 2>/dev/null)")
+            sb.appendLine("      __new_gemini=\$(timeout 10 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" -e 'try{const p=require(process.argv[1]);const b=p.bin;if(typeof b===\"string\"){process.stdout.write(b)}else if(b&&typeof b===\"object\"){const k=Object.keys(b);if(k.length){process.stdout.write(b[k[0]])}}}catch(e){}' \"\$__gemini_pkg\" 2>/dev/null)")
             sb.appendLine("    fi")
             sb.appendLine("    if [ -n \"\$__new_gemini\" ]; then")
             // package.json bin is relative to its package dir. Resolve.
@@ -4092,7 +4101,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // function already sets GEMINI_CLI_NO_RELAUNCH=true and
             // --max-old-space-size=5557; the bg updater smoke probe must
             // do the same or every Gemini upgrade smoke test fails.
-            sb.appendLine("        if ! TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 timeout 30 /system/bin/linker64 \"$libDir/node\" --max-old-space-size=5557 \"\$__gemini_abs\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
+            sb.appendLine("        if ! TERMUX_VERSION=\"\${TERMUX_VERSION:-shelly}\" GEMINI_CLI_NO_RELAUNCH=true NO_UPDATE_NOTIFIER=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATE_CHECK=1 GEMINI_CLI_DISABLE_AUTO_UPDATE=1 SHELLY_AUTO_UPDATE_CLIS=0 USE_BUILTIN_RIPGREP=0 DISABLE_INSTALLATION_CHECKS=1 timeout 30 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" --max-old-space-size=5557 \"\$__gemini_abs\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
             sb.appendLine("          echo '[health] gemini --version FAILED' >&2")
             sb.appendLine("          __healthy=0")
             sb.appendLine("        else")
@@ -4111,7 +4120,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  if [ \$__healthy -eq 1 ]; then")
             sb.appendLine("    local __new_codex=\"\$__staging/node_modules/@openai/codex/bin/codex.js\"")
             sb.appendLine("    if [ -f \"\$__new_codex\" ]; then")
-            sb.appendLine("      if ! timeout 30 /system/bin/linker64 \"$libDir/node\" \"\$__new_codex\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
+            sb.appendLine("      if ! timeout 30 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" \"\$__new_codex\" --version 2>&1 | grep -Eq \"\$__ver_re\"; then")
             sb.appendLine("        echo '[health] codex.js --version FAILED' >&2")
             sb.appendLine("        __healthy=0")
             sb.appendLine("      else")
@@ -4217,7 +4226,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      echo '[quick] @anthropic-ai/claude-code: skipped (legacy npm tier pinned; runtime updater owns Claude latest)'")
             sb.appendLine("      continue")
             sb.appendLine("    fi")
-            sb.appendLine("    local __upstream=\$(timeout 15 /system/bin/linker64 \"$libDir/node\" \"$libDir/node_modules/npm/bin/npm-cli.js\" view \"\$__pkg\" version 2>/dev/null | tail -1)")
+            sb.appendLine("    local __upstream=\$(timeout 15 /system/bin/env LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"$libDir/node\" \"$libDir/node_modules/npm/bin/npm-cli.js\" view \"\$__pkg\" version 2>/dev/null | tail -1)")
             sb.appendLine("    if [ -z \"\$__upstream\" ]; then")
             sb.appendLine("      echo \"[quick] \$__pkg: npm view failed (offline?), skipping\"")
             sb.appendLine("      continue")

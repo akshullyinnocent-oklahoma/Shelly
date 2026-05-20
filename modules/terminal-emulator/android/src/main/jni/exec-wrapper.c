@@ -12,6 +12,7 @@
 
 #define LINKER64 "/system/bin/linker64"
 #define MAX_ARGC 4096
+#define MAX_ENVP 4096
 #define PATH_BUF_SIZE 4096
 
 #ifndef AT_FDCWD
@@ -214,8 +215,19 @@ static int trace_flag_enabled(char *const envp[], const char *name_eq) {
 }
 
 static int native_trace_enabled(char *const envp[]) {
-    return trace_flag_enabled(envp, "SHELLY_CLAUDE_PATCH_TRACE=") &&
-           trace_flag_enabled(envp, "SHELLY_CLAUDE_NATIVE_TRACE=");
+    (void)envp;
+    /*
+     * v174: keep the native exec interceptor on the hot path only.
+     *
+     * The v171-v173 diagnostic trace was useful for narrowing Claude's Bash
+     * route, but real-device crash logs showed libexec_wrapper.so segfaulting
+     * inside the execve interposer during ordinary shell startup. The wrapper
+     * is loaded into app-private bash/node processes and must never become a
+     * reason that normal system commands fail. JS-side Claude tracing remains
+     * available; native tracing can be reintroduced only behind a simpler,
+     * separately smoke-tested implementation.
+     */
+    return 0;
 }
 
 static const char *base_name(const char *path) {
@@ -395,6 +407,55 @@ static int should_linker_exec(const char *pathname) {
            is_elf(pathname);
 }
 
+static int should_scrub_system_env(const char *pathname) {
+    return pathname &&
+           !streq(pathname, LINKER64) &&
+           (starts_with(pathname, "/system/") ||
+            starts_with(pathname, "/vendor/") ||
+            starts_with(pathname, "/apex/"));
+}
+
+static int scrub_system_envp(char *const envp[], char **out) {
+    int n = 0;
+    if (!envp) {
+        out[0] = NULL;
+        return 0;
+    }
+    for (int i = 0; envp[i]; i++) {
+        if (starts_with(envp[i], "LD_LIBRARY_PATH=") ||
+            starts_with(envp[i], "LD_PRELOAD=")) {
+            continue;
+        }
+        if (n >= MAX_ENVP - 1) {
+            return -1;
+        }
+        out[n++] = envp[i];
+    }
+    out[n] = NULL;
+    return 0;
+}
+
+static int add_app_loader_envp(char *const envp[], char **out, char *ld_buf, size_t ld_buf_size) {
+    char *const *source = envp ? envp : environ;
+    const char *lib_dir = env_value(envp, "SHELLY_LIB_DIR=");
+    size_t nbuf = 0;
+    int n = 0;
+
+    if (!lib_dir || !lib_dir[0]) return -1;
+    if (append_str(ld_buf, ld_buf_size, &nbuf, "LD_LIBRARY_PATH=") != 0) return -1;
+    if (append_str(ld_buf, ld_buf_size, &nbuf, lib_dir) != 0) return -1;
+
+    if (source) {
+        for (int i = 0; source[i]; i++) {
+            if (n >= MAX_ENVP - 2) return -1;
+            out[n++] = source[i];
+        }
+    }
+    out[n++] = ld_buf;
+    out[n] = NULL;
+    return 0;
+}
+
 static int build_linker_argv(const char *pathname, char *const argv[], char **out) {
     int argc = 0;
     if (argv) {
@@ -424,12 +485,26 @@ int execve(const char *pathname, char *const argv[], char *const envp[]) {
     }
     linker_exec = should_linker_exec(rewritten);
     trace_exec_event("execve", pathname, rewritten, argv, envp, linker_exec);
-    if (!linker_exec) return raw_execve_call(rewritten, argv, envp);
+    if (!linker_exec) {
+        char *scrubbed_env[MAX_ENVP];
+        if (should_scrub_system_env(rewritten) &&
+            scrub_system_envp(envp, scrubbed_env) == 0) {
+            return raw_execve_call(rewritten, argv, scrubbed_env);
+        }
+        return raw_execve_call(rewritten, argv, envp);
+    }
 
     char *new_argv[MAX_ARGC + 2];
     if (build_linker_argv(rewritten, argv, new_argv) != 0) {
         trace_exec_event("linker-argv-failed", pathname, rewritten, argv, envp, 0);
         return raw_execve_call(rewritten, argv, envp);
+    }
+    if (!env_value(envp, "LD_LIBRARY_PATH=")) {
+        char *app_env[MAX_ENVP];
+        char ld_buf[PATH_BUF_SIZE + 32];
+        if (add_app_loader_envp(envp, app_env, ld_buf, sizeof(ld_buf)) == 0) {
+            return raw_execve_call(LINKER64, new_argv, app_env);
+        }
     }
     return raw_execve_call(LINKER64, new_argv, envp);
 }
