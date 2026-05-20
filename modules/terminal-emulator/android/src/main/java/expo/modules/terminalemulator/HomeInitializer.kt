@@ -1102,7 +1102,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      LD_LIBRARY_PATH scrubbed. PATH starts with Shelly libs, and using
     //      bare cat/chmod/mkdir/grep during startup can segfault before the
     //      heredoc terminates, leaking preload JavaScript into new terminals.
-    private const val BASHRC_VERSION = 178
+    // 179: Avoid env(1) as the startup scrubber; env itself can be launched
+    //      under the bad loader state. Clear LD_* globally and call toybox
+    //      applets directly with empty loader vars for startup maintenance.
+    private const val BASHRC_VERSION = 179
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1338,11 +1341,16 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("export PATH=\"${home.absolutePath}/bin:\${PATH:-$libDir}:/system/bin:/vendor/bin\"")
             sb.appendLine("export SHELLY_LD_LIBRARY_PATH=\"$libDir\"")
             sb.appendLine("unset LD_LIBRARY_PATH")
-            sb.appendLine("__shelly_sys() { /system/bin/env -u LD_LIBRARY_PATH -u LD_PRELOAD \"\$@\"; }")
-            sb.appendLine("__shelly_cat() { __shelly_sys /system/bin/toybox cat \"\$@\"; }")
-            sb.appendLine("__shelly_chmod() { __shelly_sys /system/bin/toybox chmod \"\$@\"; }")
-            sb.appendLine("__shelly_grep() { __shelly_sys /system/bin/toybox grep \"\$@\"; }")
-            sb.appendLine("__shelly_mkdir() { __shelly_sys /system/bin/toybox mkdir \"\$@\"; }")
+            sb.appendLine("unset LD_PRELOAD")
+            sb.appendLine("__shelly_toybox() { LD_LIBRARY_PATH= LD_PRELOAD= /system/bin/toybox \"\$@\"; }")
+            sb.appendLine("__shelly_cat() { __shelly_toybox cat \"\$@\"; }")
+            sb.appendLine("__shelly_chmod() { __shelly_toybox chmod \"\$@\"; }")
+            sb.appendLine("__shelly_grep() { __shelly_toybox grep \"\$@\"; }")
+            sb.appendLine("__shelly_mkdir() { __shelly_toybox mkdir \"\$@\"; }")
+            sb.appendLine("__shelly_rm() { __shelly_toybox rm \"\$@\"; }")
+            sb.appendLine("__shelly_ln() { __shelly_toybox ln \"\$@\"; }")
+            sb.appendLine("__shelly_readlink() { __shelly_toybox readlink \"\$@\"; }")
+            sb.appendLine("__shelly_basename() { __shelly_toybox basename \"\$@\"; }")
             // bug #128 (2026-04-27): tell git where to find its
             // transport helpers (git-remote-https / git-remote-http).
             // LibExtractor places them at $libDir alongside the git
@@ -1529,7 +1537,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // SELinux label allows it), no script-read audit involved.
             // We additionally export BROWSER so tools that ignore PATH
             // and only honour the env var also hit the binary.
-            sb.appendLine("ln -sf \"\$SHELLY_LIB_DIR/shelly_xdg_open\" \"\$HOME/bin/xdg-open\" 2>/dev/null || true")
+            sb.appendLine("__shelly_ln -sf \"\$SHELLY_LIB_DIR/shelly_xdg_open\" \"\$HOME/bin/xdg-open\" 2>/dev/null || true")
             sb.appendLine("export BROWSER=\"\$HOME/bin/xdg-open\"")
             // v39: point every bundled TLS client at the Mozilla CA bundle
             // we extract to ~/.shelly-ssl/. Without these exports curl/node/
@@ -1687,10 +1695,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  local __dir=\"\$HOME/.claude/shell-snapshots\"")
             sb.appendLine("  local __stamp=\"\$__dir/.shelly-bashrc-version\"")
             sb.appendLine("  local __seen=\"\"")
-            sb.appendLine("  [ -d \"\$__dir\" ] || /system/bin/env -u LD_LIBRARY_PATH /system/bin/mkdir -p \"\$__dir\" 2>/dev/null || return 0")
+            sb.appendLine("  [ -d \"\$__dir\" ] || __shelly_mkdir -p \"\$__dir\" 2>/dev/null || return 0")
             sb.appendLine("  if [ -r \"\$__stamp\" ]; then IFS= read -r __seen < \"\$__stamp\" || true; fi")
             sb.appendLine("  if [ \"\$__seen\" != \"\$BASHRC_VERSION\" ]; then")
-            sb.appendLine("    if /system/bin/env -u LD_LIBRARY_PATH /system/bin/rm -f \"\$__dir\"/snapshot-bash-* 2>/dev/null; then")
+            sb.appendLine("    if __shelly_rm -f \"\$__dir\"/snapshot-bash-* 2>/dev/null; then")
             sb.appendLine("      printf '%s\\n' \"\$BASHRC_VERSION\" > \"\$__stamp\" 2>/dev/null || true")
             sb.appendLine("      [ -z \"\${SHELLY_VERBOSE_CLI_TIER:-}\" ] || echo \"[shelly] claude: reset shell snapshots for bashrc \$BASHRC_VERSION\" >&2")
             sb.appendLine("    fi")
@@ -1937,7 +1945,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("  __cur=\"\${1:-}\"")
             sb.appendLine("  [ -n \"\$__cur\" ] || __cur=\$(cat \"\$__vf\" 2>/dev/null | tr -d '\\n')")
             sb.appendLine("  if [ -z \"\$__cur\" ]; then")
-            sb.appendLine("    __cur=\$(basename \"\$(readlink \"\$HOME/.shelly-runtime/claude/current\" 2>/dev/null)\" 2>/dev/null)")
+            sb.appendLine("    __cur=\$(__shelly_basename \"\$(__shelly_readlink \"\$HOME/.shelly-runtime/claude/current\" 2>/dev/null)\" 2>/dev/null)")
             sb.appendLine("  fi")
             sb.appendLine("  [ -n \"\$__cur\" ] || return 1")
             sb.appendLine("  case \"\$__cur\" in [0-9]*.[0-9]*.[0-9]*) ;; *) return 1 ;; esac")
@@ -1959,9 +1967,9 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // Tool functions
             sb.appendLine("# v51: PATH-visible Android-compatible shell/env for AI CLIs")
             sb.appendLine("__shelly_bash_target=\"\$SHELLY_LIB_DIR/libbash.so\"")
-            sb.appendLine("if [ ! -e \"\$HOME/bin/bash\" ] || [ \"\$(readlink \"\$HOME/bin/bash\" 2>/dev/null)\" != \"\$__shelly_bash_target\" ]; then")
-            sb.appendLine("  rm -f \"\$HOME/bin/bash\" 2>/dev/null")
-            sb.appendLine("  ln -s \"\$__shelly_bash_target\" \"\$HOME/bin/bash\" 2>/dev/null || true")
+            sb.appendLine("if [ ! -e \"\$HOME/bin/bash\" ] || [ \"\$(__shelly_readlink \"\$HOME/bin/bash\" 2>/dev/null)\" != \"\$__shelly_bash_target\" ]; then")
+            sb.appendLine("  __shelly_rm -f \"\$HOME/bin/bash\" 2>/dev/null")
+            sb.appendLine("  __shelly_ln -s \"\$__shelly_bash_target\" \"\$HOME/bin/bash\" 2>/dev/null || true")
             sb.appendLine("fi")
             sb.appendLine("unset __shelly_bash_target")
             // v52/v163: re-point $SHELL at $HOME/bin/bash so tools that validate
@@ -1971,13 +1979,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             // libexec_wrapper.so.
             sb.appendLine("export SHELL=\"\$HOME/bin/bash\"")
             sb.appendLine("export BASH=\"\$SHELL\"")
-            sb.appendLine("if [ ! -e \"\$HOME/bin/sh\" ] || [ \"\$(readlink \"\$HOME/bin/sh\" 2>/dev/null)\" != \"/system/bin/sh\" ]; then")
-            sb.appendLine("  rm -f \"\$HOME/bin/sh\" 2>/dev/null")
-            sb.appendLine("  ln -s \"/system/bin/sh\" \"\$HOME/bin/sh\" 2>/dev/null || true")
+            sb.appendLine("if [ ! -e \"\$HOME/bin/sh\" ] || [ \"\$(__shelly_readlink \"\$HOME/bin/sh\" 2>/dev/null)\" != \"/system/bin/sh\" ]; then")
+            sb.appendLine("  __shelly_rm -f \"\$HOME/bin/sh\" 2>/dev/null")
+            sb.appendLine("  __shelly_ln -s \"/system/bin/sh\" \"\$HOME/bin/sh\" 2>/dev/null || true")
             sb.appendLine("fi")
-            sb.appendLine("if [ ! -e \"\$HOME/bin/env\" ] || [ \"\$(readlink \"\$HOME/bin/env\" 2>/dev/null)\" != \"/system/bin/env\" ]; then")
-            sb.appendLine("  rm -f \"\$HOME/bin/env\" 2>/dev/null")
-            sb.appendLine("  ln -s \"/system/bin/env\" \"\$HOME/bin/env\" 2>/dev/null || true")
+            sb.appendLine("if [ ! -e \"\$HOME/bin/env\" ] || [ \"\$(__shelly_readlink \"\$HOME/bin/env\" 2>/dev/null)\" != \"/system/bin/env\" ]; then")
+            sb.appendLine("  __shelly_rm -f \"\$HOME/bin/env\" 2>/dev/null")
+            sb.appendLine("  __shelly_ln -s \"/system/bin/env\" \"\$HOME/bin/env\" 2>/dev/null || true")
             sb.appendLine("fi")
             sb.appendLine("bash() { _run $libDir/libbash.so \"\$@\"; }")
             sb.appendLine("node() { _run $libDir/node \"\$@\"; }")
