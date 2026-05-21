@@ -45,6 +45,22 @@
 
 **Why not now**: v5.3.1 の価値は Claude Code + Codex の real Android CLI 体験、API-backed AI Pane、更新済み Local LLM catalog にある。Gemini CLI を launch blocker にすると、既に動く主要体験のリリースを遅らせる割に品質保証ができない。
 
+### Claude Bash nested-env matcher cleanup
+
+**優先度**: P2
+**状態**: v185 の self-healing `shelly_shell` 復帰により release blocker から除外。
+
+**症状**:
+- commit `ac1d8f0e` 系の `shellyPatchNestedEnvString` は Claude Code 2.1.145 の `$HOME/bin/bash -c -l "... env ... $HOME/bin/bash ..."` 形状では `markerCount=0` で発火しない。
+- v185 では `$HOME/bin/bash -> $SHELLY_LIB_DIR/shelly_shell` に戻し、launcher 側で scrubbed env を修復するため、この JS 側 matcher は Bash-tool 復旧の主経路ではなくなった。
+
+**戻す条件**:
+1. Claude Code 最新の Bash harness 文字列形状を fixture 化する。
+2. `shellyPatchNestedEnvString` と関連 trace の要否を判定し、不要なら削除する。
+3. 削除する場合は authenticated Bash canary と `env -i HOME="$HOME" "$HOME/bin/bash" -lc ...` smoke を両方通す。
+
+**Why not now**: 今回の修正範囲は 2.1.145 の exit 1 復旧に限定する。dead matcher 撤去は blast radius が JS child_process/Bun polyfill 側に広がるため、別 PR で fixture 付きにする。
+
 ## 🟢 現状サマリ (2026-05-08、BASHRC_VERSION 81、PR #34 + #37 着地)
 
 **Phase 1 OAuth bridge 実機完了** (Galaxy Z Fold6 / Android 14):
@@ -1721,6 +1737,7 @@ claude() {
 - **2026-04-21**: bug #117 Path C-bis **end-to-end 成立** ✅。Windows PC + WSL2 Ubuntu 24.04 + musl.cc `aarch64-linux-musl-gcc` で musl v1.2.4 を `src/network/resolvconf.c` patch 後に cross-build (633 KB stripped)。Termux 実機で `./ld-musl ./claude --print "reply with OK"` が `OK` を api.anthropic.com から取得。世界初「Android ネイティブで最新 Claude Code (2.1.116) 動作」実機確認。次は Shelly CI への取り込み (musl build step + LibExtractor + HomeInitializer BASHRC_VERSION 43) で v0.1.1 目玉機能化。
 - **2026-05-13**: v119 実機で bare `claude` native route が TUI まで到達する一方、`/login` 後の trust/onboarding prompt で Bun SEA が exit 139。v120 で `~/.claude.json` HOME trust seed と `shelly-doctor` 診断を追加。`SHELLY_AUTO_UPDATE_CLIS=0` は v101 の foreground TUI 汚染対策として維持し、auto-update 再有効化は P2 に defer。
 - **2026-05-20**: Claude Code 2.1.143+ Bash tool 追従で、内部 subprocess 実装追跡だけでは更新時に再発しやすいことを確認。`sdk-tools.d.ts` snapshot + schema diff + behavior smoke + breaking version gate を P1 として登録。
+- **2026-05-21**: Claude Code 2.1.145 Bash tool exit 1 調査で、`shellyPatchNestedEnvString` が現行 harness に発火しない dead path になっていることを確認。v185 は `shelly_shell` self-healing launcher 復帰で復旧し、matcher 撤去は P2 に defer。
 
 ---
 
