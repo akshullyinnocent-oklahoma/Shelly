@@ -1114,11 +1114,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 184: Keep LD_LIBRARY_PATH only for the linker64 -> libbash.so PTY exec,
     //      then rely on .bashrc to immediately unset it before any interactive
     //      system command or restored shell fragment can run.
-    // 185: Point Claude's bash-named shell symlink back at the self-healing
-    //      shelly_shell launcher. Claude Code 2.1.145 can scrub LD_PRELOAD
-    //      from its nested Bash harness before executing $HOME/bin/bash, so a
-    //      direct libbash.so symlink returns EACCES under SELinux.
-    private const val BASHRC_VERSION = 185
+    private const val BASHRC_VERSION = 184
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1979,17 +1975,17 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
 
             // Tool functions
             sb.appendLine("# v51: PATH-visible Android-compatible shell/env for AI CLIs")
-            sb.appendLine("__shelly_bash_target=\"\$SHELLY_LIB_DIR/shelly_shell\"")
+            sb.appendLine("__shelly_bash_target=\"\$SHELLY_LIB_DIR/libbash.so\"")
             sb.appendLine("if [ ! -e \"\$HOME/bin/bash\" ] || [ \"\$(__shelly_readlink \"\$HOME/bin/bash\" 2>/dev/null)\" != \"\$__shelly_bash_target\" ]; then")
             sb.appendLine("  __shelly_rm -f \"\$HOME/bin/bash\" 2>/dev/null")
             sb.appendLine("  __shelly_ln -s \"\$__shelly_bash_target\" \"\$HOME/bin/bash\" 2>/dev/null || true")
             sb.appendLine("fi")
             sb.appendLine("unset __shelly_bash_target")
-            // v52/v185: re-point $SHELL at $HOME/bin/bash so tools that validate
+            // v52/v163: re-point $SHELL at $HOME/bin/bash so tools that validate
             // basename($SHELL) against {sh,bash,zsh,...} (e.g. Claude Code
-            // CLI's Bash tool) accept it. The symlink target is shelly_shell;
-            // the launcher repairs scrubbed loader env and routes libbash.so
-            // through linker64 itself.
+            // CLI's Bash tool) accept it. The symlink target is libbash.so;
+            // bionic child execs are redirected through linker64 by
+            // libexec_wrapper.so.
             sb.appendLine("export SHELL=\"\$HOME/bin/bash\"")
             sb.appendLine("export BASH=\"\$SHELL\"")
             sb.appendLine("if [ ! -e \"\$HOME/bin/sh\" ] || [ \"\$(__shelly_readlink \"\$HOME/bin/sh\" 2>/dev/null)\" != \"/system/bin/sh\" ]; then")
