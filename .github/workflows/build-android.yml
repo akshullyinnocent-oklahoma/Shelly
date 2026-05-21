@@ -896,8 +896,8 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          rm -rf ../modules/terminal-emulator/android/.cxx ../modules/terminal-emulator/android/build
-          ./gradlew assembleRelease -x lintVitalAnalyzeRelease --build-cache
+          rm -rf app/build ../modules/terminal-emulator/android/.cxx ../modules/terminal-emulator/android/build
+          ./gradlew :terminal-emulator:externalNativeBuildRelease assembleRelease -x lintVitalAnalyzeRelease --no-build-cache
         env:
           GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"'
 
@@ -914,6 +914,9 @@ jobs:
           echo "libexec_wrapper.so execve size=${execve_size}"
           strings /tmp/libexec_wrapper.so | grep -F 'shelly-exec-wrapper:v182:raw-syscall' \
             || { echo "FATAL: APK does not contain the v182 exec wrapper marker"; exit 1; }
+          unzip -p "${apk}" lib/arm64-v8a/libshelly-pty.so > /tmp/libshelly-pty.so
+          strings /tmp/libshelly-pty.so | grep -F 'shelly-pty:v184:scoped-loader-env' \
+            || { echo "FATAL: APK does not contain the v184 shelly-pty marker"; exit 1; }
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

@@ -1111,7 +1111,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 182: Keep libexec_wrapper.so on the existing raw-syscall path while
     //      retaining the PTY preload removal from v180. The wrapper marker is
     //      now only an APK freshness guard, not a behavior change.
-    private const val BASHRC_VERSION = 182
+    // 184: Keep LD_LIBRARY_PATH only for the linker64 -> libbash.so PTY exec,
+    //      then rely on .bashrc to immediately unset it before any interactive
+    //      system command or restored shell fragment can run.
+    private const val BASHRC_VERSION = 184
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
