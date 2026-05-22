@@ -219,7 +219,8 @@ export function LlamaCppSectionWrapper({ onClose }: Props) {
         // Any successful command may have mutated $HOME/models, refresh.
         refreshInstalled();
       }
-      return { success: ok, output: (r.stdout ?? '') + (r.stderr ?? '') };
+      const output = ((r.stdout ?? '') + (r.stderr ?? '')).trim();
+      return { success: ok, output: output || (ok ? '' : `exit code ${r.exitCode}`) };
     },
     [refreshInstalled],
   );

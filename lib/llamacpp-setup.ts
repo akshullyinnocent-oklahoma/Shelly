@@ -426,7 +426,7 @@ export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string)
     `  exit 1`,
     `fi`,
     `mkdir -p ${MODELS_DIR}`,
-    `pkill -f '[l]lama-server' 2>/dev/null || true`,
+    `pkill -x llama-server 2>/dev/null || true`,
     `sleep 1`,
     `nohup ${startCmd} > "${logFile}" 2>&1 &`,
     `echo $! > "${pidFile}"`,
@@ -460,7 +460,7 @@ export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string)
  * llama-serverの停止コマンドを生成する。
  */
 export function buildStopCommand(): string {
-  return `pkill -f '[l]lama-server' && echo "llama-server stopped" || echo "llama-server not running"`;
+  return `pkill -x llama-server && echo "llama-server stopped" || echo "llama-server not running"`;
 }
 
 /**
@@ -472,7 +472,7 @@ export function buildStatusCommand(): string {
     `  echo "running"`,
     `  exit 0`,
     `fi`,
-    `if pgrep -f '[l]lama-server' >/dev/null 2>&1; then`,
+    `if pgrep -x llama-server >/dev/null 2>&1; then`,
     `  echo "starting_or_unreachable"`,
     `  exit 1`,
     `fi`,
@@ -554,7 +554,7 @@ export function buildStartAllScript(model: LlamaCppModel): string {
     `fi`,
     ``,
     `# 1. 既存プロセスを停止`,
-    `pkill -f '[l]lama-server' 2>/dev/null || true`,
+    `pkill -x llama-server 2>/dev/null || true`,
     `sleep 1`,
     ``,
     `# 2. llama-serverをバックグラウンドで起動`,
