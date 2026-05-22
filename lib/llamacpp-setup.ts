@@ -182,14 +182,14 @@ const HEALTH_CHECK_CMD = [
   `wget -q -T 2 -O - http://127.0.0.1:8080/v1/models >/dev/null 2>&1`,
 ].join(' || ');
 
-const INSTALL_LLAMA_SERVER_CMD = `cat > /tmp/shelly-install-llama-server.js <<'NODE'
+const INSTALL_LLAMA_SERVER_CMD = `mkdir -p "$HOME/.cache/shelly" && cat > "$HOME/.cache/shelly/shelly-install-llama-server.js" <<'NODE'
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const { spawnSync } = require('child_process');
 
 const home = process.env.HOME;
-const tmpDir = '/tmp/shelly-llama-server-install';
+const tmpDir = home + '/.cache/shelly/llama-server-install';
 const outDir = home + '/.local/bin';
 const installDir = home + '/.local/llama.cpp';
 const tmpInstallDir = home + '/.local/llama.cpp.tmp';
@@ -329,7 +329,7 @@ function collectSoDirs(dir) {
   process.exit(1);
 });
 NODE
-node /tmp/shelly-install-llama-server.js`;
+node "$HOME/.cache/shelly/shelly-install-llama-server.js"`;
 
 /**
  * llama.cppのセットアップステップ一覧を生成する。
