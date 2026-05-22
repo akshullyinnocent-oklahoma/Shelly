@@ -196,6 +196,14 @@ const installDir = home + '/.local/llama.cpp';
 const tmpInstallDir = home + '/.local/llama.cpp.tmp';
 const releaseApi = 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest';
 
+function writeWrapper(finalBinary) {
+  const binaryDir = finalBinary.slice(0, finalBinary.lastIndexOf('/'));
+  const libPath = [...collectSoDirs(installDir), binaryDir, installDir, installDir + '/lib'].join(':');
+  const wrapper = '#!/bin/sh\\nexport LD_LIBRARY_PATH="' + libPath + ':\${LD_LIBRARY_PATH:-}"\\nif [ -x /system/bin/linker64 ]; then\\n  exec /system/bin/linker64 "' + finalBinary + '" "$@"\\nfi\\nexec "' + finalBinary + '" "$@"\\n';
+  fs.writeFileSync(outDir + '/llama-server', wrapper, { mode: 0o755 });
+  fs.chmodSync(outDir + '/llama-server', 0o755);
+}
+
 function requestText(urlText, redirects = 5) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlText);
@@ -255,6 +263,7 @@ function download(urlText, outFile, redirects = 5) {
 
 function run(cmd, args) {
   const r = spawnSync(cmd, args, { stdio: 'inherit' });
+  if (r.error) throw r.error;
   if (r.status !== 0) throw new Error(cmd + ' failed with exit ' + r.status);
 }
 
@@ -291,6 +300,14 @@ function collectSoDirs(dir) {
   fs.mkdirSync(tmpDir, { recursive: true });
   fs.mkdirSync(outDir, { recursive: true });
 
+  const existingBinary = fs.existsSync(installDir) ? findFile(installDir, 'llama-server') : null;
+  if (existingBinary) {
+    fs.chmodSync(existingBinary, 0o755);
+    writeWrapper(existingBinary);
+    console.log('Repaired: ' + outDir + '/llama-server');
+    return;
+  }
+
   const release = JSON.parse(await requestText(releaseApi));
   const assets = Array.isArray(release.assets) ? release.assets : [];
   const asset = assets.find((a) => {
@@ -323,11 +340,7 @@ function collectSoDirs(dir) {
   fs.renameSync(tmpInstallDir, installDir);
 
   const finalBinary = findFile(installDir, 'llama-server');
-  const binaryDir = finalBinary.slice(0, finalBinary.lastIndexOf('/'));
-  const libPath = [...collectSoDirs(installDir), binaryDir, installDir, installDir + '/lib'].join(':');
-  const wrapper = '#!/bin/sh\\nexport LD_LIBRARY_PATH="' + libPath + ':\${LD_LIBRARY_PATH:-}"\\nif [ -x /system/bin/linker64 ]; then\\n  exec /system/bin/linker64 "' + finalBinary + '" "$@"\\nfi\\nexec "' + finalBinary + '" "$@"\\n';
-  fs.writeFileSync(outDir + '/llama-server', wrapper, { mode: 0o755 });
-  fs.chmodSync(outDir + '/llama-server', 0o755);
+  writeWrapper(finalBinary);
   console.log('Installed: ' + outDir + '/llama-server');
 })().catch((err) => {
   console.error(err && err.message ? err.message : String(err));
