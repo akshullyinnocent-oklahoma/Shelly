@@ -278,7 +278,7 @@ function collectSoDirs(dir) {
     for (const entry of fs.readdirSync(cur, { withFileTypes: true })) {
       const path = cur + '/' + entry.name;
       if (entry.isDirectory()) stack.push(path);
-      else if (entry.isFile() && /\\.so(\\.|$)/.test(entry.name)) dirs.add(cur);
+      else if (entry.isFile() && entry.name.includes('.so')) dirs.add(cur);
     }
   }
   return Array.from(dirs);
@@ -292,9 +292,13 @@ function collectSoDirs(dir) {
 
   const release = JSON.parse(await requestText(releaseApi));
   const assets = Array.isArray(release.assets) ? release.assets : [];
-  const asset = assets.find((a) => /bin-android-arm64\\.(tar\\.gz|tgz|zip)$/i.test(a.name || ''));
+  const asset = assets.find((a) => {
+    const name = (a.name || '').toLowerCase();
+    return name.includes('bin-android-arm64') &&
+      (name.endsWith('.tar.gz') || name.endsWith('.tgz') || name.endsWith('.zip'));
+  });
   if (!asset || !asset.browser_download_url) {
-    throw new Error('android arm64 llama.cpp asset not found in latest release');
+    throw new Error('android arm64 llama.cpp asset not found. assets: ' + assets.map((a) => a.name).join(', '));
   }
 
   const archive = tmpDir + '/' + asset.name;
@@ -303,7 +307,7 @@ function collectSoDirs(dir) {
 
   const extractDir = tmpDir + '/extract';
   fs.mkdirSync(extractDir, { recursive: true });
-  if (/\\.zip$/i.test(asset.name)) run('unzip', ['-o', archive, '-d', extractDir]);
+  if (asset.name.toLowerCase().endsWith('.zip')) run('unzip', ['-o', archive, '-d', extractDir]);
   else run('tar', ['-xzf', archive, '-C', extractDir]);
 
   const binary = findFile(extractDir, 'llama-server');
