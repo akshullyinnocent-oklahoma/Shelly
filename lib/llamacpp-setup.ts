@@ -172,10 +172,24 @@ const MODELS_DIR = '$HOME/models';
 // Resolved inside generated shell scripts. Native exec does not always source
 // interactive shell rc files, so do not rely on $HOME/.local/bin being on PATH.
 const SERVER_BIN =
-  `/system/bin/sh -c 'bin="$1"; shift; if head -n 1 "$bin" 2>/dev/null | grep -q "^#!/"; then exec /system/bin/sh "$bin" "$@"; else exec "$bin" "$@"; fi' sh "$LLAMA_SERVER_BIN"`;
+  `/system/bin/env -u LD_PRELOAD HOME="$HOME" ANDROID_ROOT="\${ANDROID_ROOT:-/system}" ANDROID_DATA="\${ANDROID_DATA:-/data}" LD_LIBRARY_PATH="\${LLAMA_LIB_PATH}\${SHELLY_LD_LIBRARY_PATH:+:$SHELLY_LD_LIBRARY_PATH}\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" /system/bin/linker64 "$REAL_LLAMA_SERVER_BIN"`;
 
 const LLAMA_SERVER_BIN_INIT =
   'LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-$(command -v llama-server 2>/dev/null || printf \'%s\' "$HOME/.local/bin/llama-server")}"';
+
+const REAL_LLAMA_SERVER_BIN_INIT = [
+  `REAL_LLAMA_SERVER_BIN="$(find "$HOME/.local/llama.cpp" -type f -name llama-server 2>/dev/null | head -n 1)"`,
+  `if [ -z "$REAL_LLAMA_SERVER_BIN" ]; then`,
+  `  echo "llama-server binary not found under $HOME/.local/llama.cpp"`,
+  `  echo "Run llama.cpp setup first."`,
+  `  exit 1`,
+  `fi`,
+  `if [ ! -x "$REAL_LLAMA_SERVER_BIN" ]; then`,
+  `  echo "llama-server binary is not executable: $REAL_LLAMA_SERVER_BIN"`,
+  `  exit 1`,
+  `fi`,
+  `LLAMA_LIB_PATH="$(find "$HOME/.local/llama.cpp" -type f \\( -name '*.so' -o -name '*.so.*' \\) -exec dirname {} \\; 2>/dev/null | sort -u | tr '\\n' ':')"`,
+].join('\n');
 
 const HEALTH_CHECK_CMD = [
   `node -e 'const http=require("http");const req=http.get("http://127.0.0.1:8080/v1/models",res=>{process.exit(res.statusCode>=200&&res.statusCode<300?0:1)});req.on("error",()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1);});' >/dev/null 2>&1`,
@@ -397,7 +411,6 @@ export function buildServerStartCommand(config: LlamaCppServerConfig): string {
     `--threads ${config.threads}`,
     config.gpuLayers > 0 ? `--n-gpu-layers ${config.gpuLayers}` : '',
     '--host 127.0.0.1',
-    '--log-disable',
   ]
     .filter(Boolean)
     .join(' \\\n  ');
@@ -430,16 +443,21 @@ export function buildRecommendedStartCommand(
 export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string): string {
   const logFile = `${MODELS_DIR}/llama-server.log`;
   const pidFile = `${MODELS_DIR}/llama-server.pid`;
-  const startCmd = buildRecommendedStartCommand(model, modelPath);
+  const resolvedModelPath = modelPath ?? `${MODELS_DIR}/${model.filename}`;
+  const startCmd = buildRecommendedStartCommand(model, resolvedModelPath);
 
   return [
     `# llama-server バックグラウンド起動スクリプト`,
     LLAMA_SERVER_BIN_INIT,
-    `if [ ! -x "$LLAMA_SERVER_BIN" ]; then`,
-    `  echo "llama-server not found or not executable: $LLAMA_SERVER_BIN"`,
+    REAL_LLAMA_SERVER_BIN_INIT,
+    `mkdir -p ${MODELS_DIR}`,
+    `MODEL_PATH="${resolvedModelPath}"`,
+    `if [ ! -s "$MODEL_PATH" ]; then`,
+    `  echo "model not found or empty: $MODEL_PATH"`,
     `  exit 1`,
     `fi`,
-    `mkdir -p ${MODELS_DIR}`,
+    `echo "llama-server binary: $REAL_LLAMA_SERVER_BIN"`,
+    `echo "model: $MODEL_PATH"`,
     `pkill -x llama-server 2>/dev/null || true`,
     `sleep 1`,
     `nohup ${startCmd} > "${logFile}" 2>&1 &`,
@@ -555,17 +573,22 @@ export function estimateTotalSetupTime(steps: LlamaCppSetupStep[]): number {
 export function buildStartAllScript(model: LlamaCppModel): string {
   const logFile = `${MODELS_DIR}/llama-server.log`;
   const pidFile = `${MODELS_DIR}/llama-server.pid`;
-  const startCmd = buildRecommendedStartCommand(model);
+  const resolvedModelPath = `${MODELS_DIR}/${model.filename}`;
+  const startCmd = buildRecommendedStartCommand(model, resolvedModelPath);
 
   return [
     `#!/bin/bash`,
     `# Shelly llama-server 起動スクリプト`,
     ``,
     LLAMA_SERVER_BIN_INIT,
-    `if [ ! -x "$LLAMA_SERVER_BIN" ]; then`,
-    `  echo "llama-server not found or not executable: $LLAMA_SERVER_BIN"`,
+    REAL_LLAMA_SERVER_BIN_INIT,
+    `MODEL_PATH="${resolvedModelPath}"`,
+    `if [ ! -s "$MODEL_PATH" ]; then`,
+    `  echo "model not found or empty: $MODEL_PATH"`,
     `  exit 1`,
     `fi`,
+    `echo "llama-server binary: $REAL_LLAMA_SERVER_BIN"`,
+    `echo "model: $MODEL_PATH"`,
     ``,
     `# 1. 既存プロセスを停止`,
     `pkill -x llama-server 2>/dev/null || true`,
