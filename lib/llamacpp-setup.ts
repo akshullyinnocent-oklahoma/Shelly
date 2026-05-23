@@ -172,7 +172,7 @@ const MODELS_DIR = '$HOME/models';
 // Resolved inside generated shell scripts. Native exec does not always source
 // interactive shell rc files, so do not rely on $HOME/.local/bin being on PATH.
 const SERVER_BIN =
-  `/system/bin/env -u LD_PRELOAD HOME="$HOME" ANDROID_ROOT="\${ANDROID_ROOT:-/system}" ANDROID_DATA="\${ANDROID_DATA:-/data}" LD_LIBRARY_PATH="\${LLAMA_LIB_PATH}\${SHELLY_LD_LIBRARY_PATH:+:$SHELLY_LD_LIBRARY_PATH}\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" /system/bin/linker64 "$REAL_LLAMA_SERVER_BIN"`;
+  `/system/bin/sh -c 'cd "$1" || exit 1; shift; exec /system/bin/env -u LD_PRELOAD HOME="$HOME" ANDROID_ROOT="\${ANDROID_ROOT:-/system}" ANDROID_DATA="\${ANDROID_DATA:-/data}" LD_LIBRARY_PATH="\${LLAMA_LIB_PATH}\${SHELLY_LD_LIBRARY_PATH:+:$SHELLY_LD_LIBRARY_PATH}\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" /system/bin/linker64 "$@"' sh "$REAL_LLAMA_SERVER_DIR" "$REAL_LLAMA_SERVER_BIN"`;
 
 const LLAMA_SERVER_BIN_INIT =
   'LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-$(command -v llama-server 2>/dev/null || printf \'%s\' "$HOME/.local/bin/llama-server")}"';
@@ -188,6 +188,7 @@ const REAL_LLAMA_SERVER_BIN_INIT = [
   `  echo "llama-server binary is not executable: $REAL_LLAMA_SERVER_BIN"`,
   `  exit 1`,
   `fi`,
+  `REAL_LLAMA_SERVER_DIR="\${REAL_LLAMA_SERVER_BIN%/*}"`,
   `LLAMA_LIB_PATH="$(find "$HOME/.local/llama.cpp" -type f \\( -name '*.so' -o -name '*.so.*' \\) -exec dirname {} \\; 2>/dev/null | sort -u | tr '\\n' ':')"`,
 ].join('\n');
 
@@ -213,7 +214,7 @@ const releaseApi = 'https://api.github.com/repos/ggml-org/llama.cpp/releases/lat
 function writeWrapper(finalBinary) {
   const binaryDir = finalBinary.slice(0, finalBinary.lastIndexOf('/'));
   const libPath = [...collectSoDirs(installDir), binaryDir, installDir, installDir + '/lib'].join(':');
-  const wrapper = '#!/bin/sh\\nexport LD_LIBRARY_PATH="' + libPath + ':\${LD_LIBRARY_PATH:-}"\\nif [ -x /system/bin/linker64 ]; then\\n  exec /system/bin/linker64 "' + finalBinary + '" "$@"\\nfi\\nexec "' + finalBinary + '" "$@"\\n';
+  const wrapper = '#!/bin/sh\\ncd "' + binaryDir + '" || exit 1\\nexport LD_LIBRARY_PATH="' + libPath + ':\${LD_LIBRARY_PATH:-}"\\nunset LD_PRELOAD\\nif [ -x /system/bin/linker64 ]; then\\n  exec /system/bin/linker64 "' + finalBinary + '" "$@"\\nfi\\nexec "' + finalBinary + '" "$@"\\n';
   fs.writeFileSync(outDir + '/llama-server', wrapper, { mode: 0o755 });
   fs.chmodSync(outDir + '/llama-server', 0o755);
 }
@@ -457,6 +458,7 @@ export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string)
     `  exit 1`,
     `fi`,
     `echo "llama-server binary: $REAL_LLAMA_SERVER_BIN"`,
+    `echo "llama-server dir: $REAL_LLAMA_SERVER_DIR"`,
     `echo "model: $MODEL_PATH"`,
     `pkill -x llama-server 2>/dev/null || true`,
     `sleep 1`,
@@ -588,6 +590,7 @@ export function buildStartAllScript(model: LlamaCppModel): string {
     `  exit 1`,
     `fi`,
     `echo "llama-server binary: $REAL_LLAMA_SERVER_BIN"`,
+    `echo "llama-server dir: $REAL_LLAMA_SERVER_DIR"`,
     `echo "model: $MODEL_PATH"`,
     ``,
     `# 1. 既存プロセスを停止`,
