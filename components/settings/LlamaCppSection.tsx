@@ -157,14 +157,23 @@ export function LlamaCppSection({
       return;
     }
     const script = buildDaemonStartScript(model, installedModelPaths?.[model.id]);
-    const result = await onRunCommand(script, `${model.name} start`);
+    let result: { success: boolean; output?: string };
+    try {
+      result = await onRunCommand(script, `${model.name} start`);
+    } catch (error) {
+      result = {
+        success: false,
+        output: error instanceof Error ? error.message : String(error),
+      };
+    }
     if (result.success) {
       setServerStatus('running');
       onSelectModel(model);
       onUpdateLocalLlmUrl('http://127.0.0.1:8080');
     } else {
       setServerStatus(resolveServerStatus(result));
-      Alert.alert('Error', `Failed to start.\n\n${(result.output ?? '').slice(-1200)}`);
+      const detail = (result.output ?? '').trim() || 'No startup output was returned. Run llama.cpp Setup once, then try Start again.';
+      Alert.alert('Error', `Failed to start.\n\n${detail.slice(-1200)}`);
     }
   }, [installedModelPaths, isConnected, onRunCommand, onSelectModel, onUpdateLocalLlmUrl]);
 
