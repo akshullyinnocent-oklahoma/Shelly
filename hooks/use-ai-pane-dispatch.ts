@@ -80,6 +80,17 @@ function toOpenAIHistory(
   return result;
 }
 
+function compactForLocalLlm(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(-maxChars).trimStart();
+}
+
+function compactTerminalContextForLocalLlm(context: string | null): string | null {
+  if (!context) return null;
+  const lines = context.split('\n').slice(-12).join('\n');
+  return compactForLocalLlm(lines, 1200);
+}
+
 // ─── Throttled update ─────────────────────────────────────────────────────────
 
 type UpdateFn = (paneId: string, msgId: string, updates: Partial<ChatMessage>) => void;
@@ -392,13 +403,20 @@ export function useAIPaneDispatch(paneId: string) {
       const signal = abortRef.current.signal;
 
       try {
-        const systemPrompt = buildAIPaneSystemPrompt(terminalCtx, agent, stagedFile);
+        const systemPrompt = buildAIPaneSystemPrompt(
+          agent === 'local' ? compactTerminalContextForLocalLlm(terminalCtx) : terminalCtx,
+          agent,
+          agent === 'local' ? null : stagedFile,
+        );
         const conv = store.getOrCreate(paneId);
         // Exclude the streaming placeholder we just added
         const history = toOpenAIHistory(
           conv.messages.filter((m) => m.id !== assistantId),
-          8,
-        );
+          agent === 'local' ? 2 : 8,
+        ).map((m) => ({
+          role: m.role,
+          content: agent === 'local' ? compactForLocalLlm(m.content, 900) : m.content,
+        }));
 
         if (agent === 'local') {
           // ── Local LLM streaming (RN-aware XHR client from lib/local-llm) ──
@@ -439,7 +457,7 @@ export function useAIPaneDispatch(paneId: string) {
             120000,
             signal,
             false,
-            768,
+            384,
           );
 
           if (signal.aborted) {
