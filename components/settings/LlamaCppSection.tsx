@@ -145,7 +145,8 @@ export function LlamaCppSection({
     if (result.success) {
       Alert.alert('Done', `${model.name}  download complete.`);
     } else {
-      Alert.alert('Error', 'Download failed.');
+      const details = (result.output ?? '').trim().slice(-800);
+      Alert.alert('Error', `Download failed.${details ? `\n\n${details}` : ''}`);
     }
   }, [isConnected, onRunCommand]);
 

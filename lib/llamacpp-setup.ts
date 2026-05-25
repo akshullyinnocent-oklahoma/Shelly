@@ -199,6 +199,10 @@ const HEALTH_CHECK_CMD = [
   `wget -q -T 2 -O - http://127.0.0.1:8080/v1/models >/dev/null 2>&1`,
 ].join(' || ');
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 const INSTALL_LLAMA_SERVER_CMD = `mkdir -p "$HOME/.cache/shelly" && cat > "$HOME/.cache/shelly/shelly-install-llama-server.js" <<'NODE'
 const fs = require('fs');
 const http = require('http');
@@ -393,10 +397,23 @@ export function buildSetupSteps(): LlamaCppSetupStep[] {
  */
 export function buildDownloadCommand(model: LlamaCppModel): string {
   const dest = `${MODELS_DIR}/${model.filename}`;
+  const url = shellQuote(model.downloadUrl);
+  const name = shellQuote(model.name);
   return [
     `echo "Downloading ${model.name} (${model.sizeGb}GB)..."`,
     `mkdir -p ${MODELS_DIR}`,
-    `wget -c --show-progress -O "${dest}" "${model.downloadUrl}"`,
+    `df -h ${MODELS_DIR} 2>/dev/null || true`,
+    `MODEL_URL=${url}`,
+    `MODEL_NAME=${name}`,
+    `MODEL_DEST="${dest}"`,
+    `if command -v curl >/dev/null 2>&1; then`,
+    `  curl -L --fail --retry 3 --retry-delay 2 -C - -o "$MODEL_DEST" "$MODEL_URL"`,
+    `elif command -v wget >/dev/null 2>&1; then`,
+    `  wget -c -O "$MODEL_DEST" "$MODEL_URL"`,
+    `else`,
+    `  node -e 'const fs=require("fs"),http=require("http"),https=require("https");const url=process.env.MODEL_URL,dest=process.env.MODEL_DEST;function go(u,n){const x=new URL(u),c=x.protocol==="https:"?https:http,r=c.get(x,{headers:{"User-Agent":"Shelly-model-downloader/1"}},res=>{if([301,302,303,307,308].includes(res.statusCode)&&res.headers.location){res.resume();if(n<=0)throw Error("too many redirects");return go(new URL(res.headers.location,x).toString(),n-1)}if(!res.statusCode||res.statusCode>=400){res.resume();throw Error("HTTP "+res.statusCode)}res.pipe(fs.createWriteStream(dest)).on("finish",()=>{})});r.on("error",e=>{console.error(e.message);process.exit(1)});r.setTimeout(30000,()=>r.destroy(Error("download timed out")))}go(url,5);'`,
+    `fi`,
+    `test -s "$MODEL_DEST"`,
     `echo "Download complete: ${dest}"`,
   ].join(' && ');
 }
@@ -430,11 +447,11 @@ export function buildRecommendedStartCommand(
   const config: LlamaCppServerConfig = {
     port: 8080,
     modelPath,
-    // Z Fold6 local use prioritizes app stability. Qwen3-8B stays the
-    // selected quality model, but large context windows and too many CPU
-    // threads can push Android into low-memory kills while Shelly is active.
+    // Z Fold6 local use prioritizes system responsiveness. Qwen3-8B stays the
+    // selected quality model, but more CPU threads can make Android thermally
+    // throttle and lag while Shelly and the AI pane are active.
     contextSize: 1024,
-    threads: 4,
+    threads: 2,
     gpuLayers: 0, // Adreno GPU offloadは現状不安定なためCPU only
   };
   return buildServerStartCommand(config);
@@ -464,7 +481,7 @@ export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string)
     `echo "model: $MODEL_PATH"`,
     `pkill -x llama-server 2>/dev/null || true`,
     `sleep 1`,
-    `nohup ${startCmd} > "${logFile}" 2>&1 &`,
+    `nohup /system/bin/nice -n 10 ${startCmd} > "${logFile}" 2>&1 &`,
     `echo $! > "${pidFile}"`,
     `echo "llama-server started (PID: $(cat ${pidFile}))"`,
     `echo "API: http://127.0.0.1:8080/v1/chat/completions"`,
@@ -601,7 +618,7 @@ export function buildStartAllScript(model: LlamaCppModel): string {
     ``,
     `# 2. llama-serverをバックグラウンドで起動`,
     `echo "llama-serverを起動中..."`,
-    `nohup ${startCmd} > "${logFile}" 2>&1 &`,
+    `nohup /system/bin/nice -n 10 ${startCmd} > "${logFile}" 2>&1 &`,
     `echo $! > "${pidFile}"`,
     `echo "llama-server started (PID: $(cat ${pidFile}))"`,
     ``,
