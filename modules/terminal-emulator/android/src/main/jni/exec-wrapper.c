@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #define LINKER64 "/system/bin/linker64"
+#define CODEX_FS_HELPER_ARG1 "--codex-run-as-fs-helper"
 #define MAX_ARGC 4096
 #define MAX_ENVP 4096
 #define PATH_BUF_SIZE 4096
@@ -19,7 +20,7 @@
  * linker --gc-sections; `used` alone does not bind the linker. */
 __attribute__((used, retain))
 static const char shelly_exec_wrapper_build_marker[] =
-    "shelly-exec-wrapper:v183:execve-hardening";
+    "shelly-exec-wrapper:v201:codex-fs-helper";
 
 #ifndef AT_FDCWD
 #define AT_FDCWD (-100)
@@ -207,6 +208,12 @@ static const char *env_value(char *const envp[], const char *name_eq) {
     const char *v = env_value_direct(envp, name_eq);
     if (v) return v;
     return envp ? NULL : env_value_direct(environ, name_eq);
+}
+
+static const char *env_value_parent_fallback(char *const envp[], const char *name_eq) {
+    const char *v = env_value_direct(envp, name_eq);
+    if (v) return v;
+    return env_value_direct(environ, name_eq);
 }
 
 static const char *trace_env_value(char *const envp[], const char *name_eq) {
@@ -483,6 +490,58 @@ static int build_linker_argv(const char *pathname, char *const argv[], char **ou
     return 0;
 }
 
+static int is_codex_fs_helper_linker_exec(const char *pathname, char *const argv[]) {
+    return streq(pathname, LINKER64) &&
+           argv &&
+           argv[1] &&
+           streq(argv[1], CODEX_FS_HELPER_ARG1);
+}
+
+static int build_codex_fs_helper_argv(char *const argv[], char *const envp[], char **out) {
+    const char *codex_self = env_value_parent_fallback(envp, "SHELLY_CODEX_EXEC_PATH=");
+    int argc = 0;
+    int j = 0;
+
+    if (!codex_self || codex_self[0] != '/' || !out) return -1;
+    if (argv) {
+        while (argc < MAX_ARGC && argv[argc]) argc++;
+        if (argc >= MAX_ARGC) return -1;
+    }
+
+    out[j++] = (char *)LINKER64;
+    out[j++] = (char *)codex_self;
+    for (int i = 1; i < argc && j < MAX_ARGC + 1; i++) {
+        out[j++] = argv[i];
+    }
+    out[j] = NULL;
+    return 0;
+}
+
+static int add_codex_helper_envp(char *const envp[], char **out, char *ld_buf, size_t ld_buf_size) {
+    char *const *source = envp ? envp : environ;
+    const char *lib_dir = env_value_parent_fallback(envp, "SHELLY_LIB_DIR=");
+    size_t nbuf = 0;
+    int n = 0;
+
+    if (!lib_dir || !lib_dir[0]) return -1;
+    if (append_str(ld_buf, ld_buf_size, &nbuf, "LD_LIBRARY_PATH=") != 0) return -1;
+    if (append_str(ld_buf, ld_buf_size, &nbuf, lib_dir) != 0) return -1;
+
+    if (source) {
+        for (int i = 0; i < MAX_ENVP && source[i]; i++) {
+            if (starts_with(source[i], "LD_LIBRARY_PATH=") ||
+                starts_with(source[i], "LD_PRELOAD=")) {
+                continue;
+            }
+            if (n >= MAX_ENVP - 2) return -1;
+            out[n++] = source[i];
+        }
+    }
+    out[n++] = ld_buf;
+    out[n] = NULL;
+    return 0;
+}
+
 int execve(const char *pathname, char *const argv[], char *const envp[]) {
     char rewrite_buf[PATH_BUF_SIZE];
     const char *rewritten = rewrite_path(pathname, envp, rewrite_buf, sizeof(rewrite_buf));
@@ -493,6 +552,18 @@ int execve(const char *pathname, char *const argv[], char *const envp[]) {
     }
     linker_exec = should_linker_exec(rewritten);
     trace_exec_event("execve", pathname, rewritten, argv, envp, linker_exec);
+    if (is_codex_fs_helper_linker_exec(rewritten, argv)) {
+        char *codex_argv[MAX_ARGC + 2];
+        if (build_codex_fs_helper_argv(argv, envp, codex_argv) == 0) {
+            char *codex_env[MAX_ENVP];
+            char ld_buf[PATH_BUF_SIZE + 32];
+            trace_exec_event("codex-fs-helper", pathname, rewritten, codex_argv, envp, 0);
+            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf)) == 0) {
+                return raw_execve_call(LINKER64, codex_argv, codex_env);
+            }
+            return raw_execve_call(LINKER64, codex_argv, envp);
+        }
+    }
     if (!linker_exec) {
         char *scrubbed_env[MAX_ENVP];
         if (should_scrub_system_env(rewritten) &&
