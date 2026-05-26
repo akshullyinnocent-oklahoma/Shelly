@@ -85,11 +85,9 @@ jobs:
 
       - name: Set up QEMU (for Alpine aarch64 musl build)
         if: steps.android-payload-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-user-static binfmt-support
-          sudo update-binfmts --enable qemu-aarch64 || true
-          docker run --rm --platform linux/arm64 alpine:3.19 uname -m
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Build patched musl libc for claude-code 2.1.113+ (bug #117 Path C-bis)
         if: steps.android-payload-cache.outputs.cache-hit != 'true'
