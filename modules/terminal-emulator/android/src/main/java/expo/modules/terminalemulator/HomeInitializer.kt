@@ -1154,7 +1154,11 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 208: Keep the null-env execvp fallback crash-safe, but restore a minimal
     //      Shelly LD_PRELOAD/loader environment so Codex TUI shell commands can
     //      execute app-data bash through libexec_wrapper.so.
-    private const val BASHRC_VERSION = 208
+    // 209: Preserve the wrapper only for Codex child shell paths. v207 fixed
+    //      fs-helper recursion by scrubbing LD_PRELOAD, but Codex TUI then
+    //      spawned /system/bin/sh without the wrapper and direct `bash`
+    //      execs hit Android app-data Permission denied.
+    private const val BASHRC_VERSION = 209
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }

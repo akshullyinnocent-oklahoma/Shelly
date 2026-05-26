@@ -31,7 +31,7 @@
  * linker --gc-sections; `used` alone does not bind the linker. */
 __attribute__((used, retain))
 static const char shelly_exec_wrapper_build_marker[] =
-    "shelly-exec-wrapper:v208:restore-wrapper-for-null-env-shell";
+    "shelly-exec-wrapper:v209:keep-wrapper-for-codex-shell";
 
 __attribute__((used, retain))
 static const char shelly_codex_proc_exe_open_gate_marker[] =
@@ -474,7 +474,7 @@ static int trusted_shell_path(const char *path) {
             starts_with(path, "/system/bin/"));
 }
 
-static int should_restore_wrapper_for_null_env(const char *path) {
+static int should_keep_wrapper_for_shell_path(const char *path) {
     const char *base = base_name(path);
     return trusted_shell_path(path) &&
            (streq(path, DEFAULT_BASH) ||
@@ -657,16 +657,29 @@ static const char *codex_proc_exe_open_target(const char *path, int flags) {
     return trusted_codex_path(codex_self) ? codex_self : NULL;
 }
 
-static int scrub_codex_child_envp(char *const envp[], char **out) {
+static int scrub_codex_child_envp(char *const envp[], char **out, int keep_wrapper) {
     char *const *source = envp;
     int n = 0;
+    int has_ld_preload = 0;
+    int has_ld_library_path = 0;
     if (!source) {
         out[0] = NULL;
         return 0;
     }
     for (int i = 0; i < MAX_ENVP && source[i]; i++) {
-        if (starts_with(source[i], "LD_PRELOAD=") ||
-            starts_with(source[i], "SHELLY_CODEX_EXEC_PATH=") ||
+        if (starts_with(source[i], "LD_PRELOAD=")) {
+            if (!keep_wrapper) continue;
+            if (n >= MAX_ENVP - 1) {
+                return -1;
+            }
+            out[n++] = default_ld_preload_env;
+            has_ld_preload = 1;
+            continue;
+        }
+        if (starts_with(source[i], "LD_LIBRARY_PATH=") && source[i][16]) {
+            has_ld_library_path = 1;
+        }
+        if (starts_with(source[i], "SHELLY_CODEX_EXEC_PATH=") ||
             starts_with(source[i], "SHELLY_CODEX_PROC_EXE_SHIM=") ||
             starts_with(source[i], "SHELLY_CODEX_PROC_EXE_OPEN_SHIM=")) {
             continue;
@@ -675,6 +688,18 @@ static int scrub_codex_child_envp(char *const envp[], char **out) {
             return -1;
         }
         out[n++] = source[i];
+    }
+    if (keep_wrapper && !has_ld_library_path) {
+        if (n >= MAX_ENVP - 1) {
+            return -1;
+        }
+        out[n++] = default_ld_library_path_env;
+    }
+    if (keep_wrapper && !has_ld_preload) {
+        if (n >= MAX_ENVP - 1) {
+            return -1;
+        }
+        out[n++] = default_ld_preload_env;
     }
     out[n] = NULL;
     return 0;
@@ -808,11 +833,13 @@ static int shelly_execve_internal(const char *pathname, char *const argv[], char
     const char *rewritten = rewrite_path(pathname, envp, rewrite_buf, sizeof(rewrite_buf));
     char *codex_child_env[MAX_ENVP];
     int linker_exec;
+    int keep_wrapper_for_shell;
     if (!rewritten) {
         if (envp) trace_exec_event("rewrite-null", pathname, NULL, argv, envp, 0);
         return -1;
     }
     linker_exec = should_linker_exec(rewritten);
+    keep_wrapper_for_shell = should_keep_wrapper_for_shell_path(rewritten);
     if (envp) trace_exec_event("execve", pathname, rewritten, argv, envp, linker_exec);
     if (is_codex_fs_helper_linker_exec(rewritten, argv, envp)) {
         char *codex_argv[MAX_ARGC + 2];
@@ -839,13 +866,16 @@ static int shelly_execve_internal(const char *pathname, char *const argv[], char
         }
     }
     if (codex_mode_enabled(envp) &&
-        scrub_codex_child_envp(envp, codex_child_env) == 0) {
+        scrub_codex_child_envp(envp, codex_child_env, keep_wrapper_for_shell) == 0) {
         envp = codex_child_env;
     }
     if (!linker_exec) {
         char *scrubbed_env[MAX_ENVP];
-        if (!envp && should_restore_wrapper_for_null_env(rewritten)) {
+        if (!envp && keep_wrapper_for_shell) {
             return raw_execve_call(rewritten, argv, minimal_wrapper_envp);
+        }
+        if (keep_wrapper_for_shell && should_scrub_system_env(rewritten)) {
+            return raw_execve_call(rewritten, argv, envp);
         }
         if (should_scrub_system_env(rewritten) &&
             scrub_system_envp(envp, scrubbed_env) == 0) {
@@ -863,7 +893,7 @@ static int shelly_execve_internal(const char *pathname, char *const argv[], char
         char *app_env[MAX_ENVP];
         char ld_buf[PATH_BUF_SIZE + 32];
         if (add_app_loader_envp(envp, app_env, ld_buf, sizeof(ld_buf),
-                                !envp && should_restore_wrapper_for_null_env(rewritten)) == 0) {
+                                !envp && keep_wrapper_for_shell) == 0) {
             return raw_execve_call(LINKER64, new_argv, app_env);
         }
     }
@@ -914,6 +944,7 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
     const char *spawn_path = path;
     const char *rewritten;
     int linker_exec;
+    int keep_wrapper_for_shell;
 
     if (search_path && resolve_path_search(path, envp, resolved_buf, sizeof(resolved_buf),
                                            file_actions != NULL) == 0) {
@@ -922,7 +953,7 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
     } else if (file_actions && path && path[0] != '/') {
         char *codex_child_env[MAX_ENVP];
         if (codex_mode_enabled(envp) &&
-            scrub_codex_child_envp(envp, codex_child_env) == 0) {
+            scrub_codex_child_envp(envp, codex_child_env, 0) == 0) {
             envp = codex_child_env;
         }
         return call_real_posix_spawn(search_path, pid, path, file_actions, attrp, argv, envp);
@@ -935,6 +966,7 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
         return SHELLY_ENOENT;
     }
     linker_exec = should_linker_exec(rewritten);
+    keep_wrapper_for_shell = should_keep_wrapper_for_shell_path(rewritten);
     trace_exec_event(search_path ? "posix_spawnp" : "posix_spawn",
                      spawn_path, rewritten, argv, envp, linker_exec);
 
@@ -963,15 +995,18 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
 
     if (codex_mode_enabled(envp)) {
         char *codex_child_env[MAX_ENVP];
-        if (scrub_codex_child_envp(envp, codex_child_env) == 0) {
+        if (scrub_codex_child_envp(envp, codex_child_env, keep_wrapper_for_shell) == 0) {
             envp = codex_child_env;
         }
     }
 
     if (!linker_exec) {
         char *scrubbed_env[MAX_ENVP];
-        if (!envp && should_restore_wrapper_for_null_env(rewritten)) {
+        if (!envp && keep_wrapper_for_shell) {
             return call_real_posix_spawn(search_path, pid, rewritten, file_actions, attrp, argv, minimal_wrapper_envp);
+        }
+        if (keep_wrapper_for_shell && should_scrub_system_env(rewritten)) {
+            return call_real_posix_spawn(search_path, pid, rewritten, file_actions, attrp, argv, envp);
         }
         if (should_scrub_system_env(rewritten) &&
             scrub_system_envp(envp, scrubbed_env) == 0) {
@@ -988,7 +1023,7 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
         char *app_env[MAX_ENVP];
         char ld_buf[PATH_BUF_SIZE + 32];
         if (add_app_loader_envp(envp, app_env, ld_buf, sizeof(ld_buf),
-                                !envp && should_restore_wrapper_for_null_env(rewritten)) == 0) {
+                                !envp && keep_wrapper_for_shell) == 0) {
             return call_real_posix_spawn(0, pid, LINKER64, file_actions, attrp, new_argv, app_env);
         }
     }
