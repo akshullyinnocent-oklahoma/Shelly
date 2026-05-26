@@ -8,7 +8,6 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#include <errno.h>
 #include <spawn.h>
 #include <stddef.h>
 #include <stdarg.h>
@@ -20,16 +19,23 @@
 #define MAX_ARGC 4096
 #define MAX_ENVP 4096
 #define PATH_BUF_SIZE 4096
+#define SHELLY_ENOENT 2
+#define SHELLY_ENOSYS 38
 
 /* used+retain keeps this CI freshness marker past compiler dead-strip and
  * linker --gc-sections; `used` alone does not bind the linker. */
 __attribute__((used, retain))
 static const char shelly_exec_wrapper_build_marker[] =
-    "shelly-exec-wrapper:v205:codex-resolve-real-impls";
+    "shelly-exec-wrapper:v206:bypass-libc-plt";
 
 __attribute__((used, retain))
 static const char shelly_codex_proc_exe_open_gate_marker[] =
     "SHELLY_CODEX_PROC_EXE_OPEN_SHIM";
+
+static const char *const trace_env_keys[] = {
+    "PATH=", "SHELL=", "BASH=", "HOME=", "TMPDIR=", "CLAUDE_CODE_TMPDIR=",
+    "SHELLY_LIB_DIR=", "LD_LIBRARY_PATH=", "LD_PRELOAD=", NULL
+};
 
 #ifndef AT_FDCWD
 #define AT_FDCWD (-100)
@@ -74,6 +80,9 @@ static const char shelly_codex_proc_exe_open_gate_marker[] =
 #ifndef __NR_execve
 #define __NR_execve 221
 #endif
+#ifndef __NR_getpid
+#define __NR_getpid 172
+#endif
 
 extern char **environ;
 
@@ -106,6 +115,15 @@ static long raw_syscall4(long nr, long a0, long a1, long a2, long a3) {
 static int finish_syscall(long ret) {
     if (ret < 0) return -1;
     return (int)ret;
+}
+
+static ssize_t finish_syscall_ssize(long ret) {
+    if (ret < 0) return -1;
+    return (ssize_t)ret;
+}
+
+static int raw_getpid_call(void) {
+    return finish_syscall(raw_syscall1(__NR_getpid, 0));
 }
 
 static int raw_execve_call(const char *path, char *const argv[], char *const envp[]) {
@@ -365,15 +383,11 @@ static void trace_exec_event(const char *stage, const char *pathname, const char
         trace_write_line(envp, line, n);
     }
 
-    const char *keys[] = {
-        "PATH=", "SHELL=", "BASH=", "HOME=", "TMPDIR=", "CLAUDE_CODE_TMPDIR=",
-        "SHELLY_LIB_DIR=", "LD_LIBRARY_PATH=", "LD_PRELOAD=", NULL
-    };
-    for (int i = 0; keys[i]; i++) {
-        const char *value = env_value_direct(envp, keys[i]);
+    for (int i = 0; trace_env_keys[i]; i++) {
+        const char *value = env_value_direct(envp, trace_env_keys[i]);
         n = 0;
         append_str(line, sizeof(line), &n, envp ? "native exec targetEnv." : "native exec targetEnvNull.");
-        append_str(line, sizeof(line), &n, keys[i]);
+        append_str(line, sizeof(line), &n, trace_env_keys[i]);
         if (n > 0 && line[n - 1] == '=') {
             n--;
             line[n] = '\0';
@@ -539,7 +553,6 @@ static int trusted_codex_path(const char *path) {
 
 static int proc_exe_path_matches_pid(const char *path) {
     unsigned int pid = 0;
-    unsigned int self = (unsigned int)getpid();
     const char *p;
     if (!starts_with(path, "/proc/")) return 0;
     p = path + 6;
@@ -548,7 +561,8 @@ static int proc_exe_path_matches_pid(const char *path) {
         pid = pid * 10U + (unsigned int)(*p - '0');
         p++;
     }
-    return pid == self && streq(p, "/exe");
+    if (!streq(p, "/exe")) return 0;
+    return pid == (unsigned int)raw_getpid_call();
 }
 
 static int proc_exe_path(const char *path) {
@@ -565,12 +579,10 @@ static ssize_t readlink_codex_self(const char *path, char *buf, size_t bufsiz) {
     codex_self = env_value_direct(environ, "SHELLY_CODEX_EXEC_PATH=");
     if (!trusted_codex_path(codex_self)) return -2;
     if (bufsiz == 0) {
-        errno = EINVAL;
-        return -1;
+        return -2;
     }
     if (!buf && bufsiz > 0) {
-        errno = EFAULT;
-        return -1;
+        return -2;
     }
     len = str_len(codex_self);
     if (bufsiz > 0) {
@@ -722,7 +734,8 @@ static int add_codex_helper_envp(char *const envp[], char **out, char *ld_buf, s
     return 0;
 }
 
-int execve(const char *pathname, char *const argv[], char *const envp[]) {
+__attribute__((noinline, used))
+static int shelly_execve_internal(const char *pathname, char *const argv[], char *const envp[]) {
     char rewrite_buf[PATH_BUF_SIZE];
     const char *rewritten = rewrite_path(pathname, envp, rewrite_buf, sizeof(rewrite_buf));
     char *codex_child_env[MAX_ENVP];
@@ -785,30 +798,22 @@ int execve(const char *pathname, char *const argv[], char *const envp[]) {
     return raw_execve_call(LINKER64, new_argv, envp);
 }
 
+int execve(const char *pathname, char *const argv[], char *const envp[]) {
+    return shelly_execve_internal(pathname, argv, envp);
+}
+
 typedef int (*posix_spawn_impl_t)(pid_t *, const char *,
                                   const posix_spawn_file_actions_t *,
                                   const posix_spawnattr_t *,
                                   char *const[], char *const[]);
-typedef int (*open_impl_t)(const char *, int, ...);
-typedef int (*openat_impl_t)(int, const char *, int, ...);
-typedef ssize_t (*readlink_impl_t)(const char *, char *, size_t);
-typedef ssize_t (*readlinkat_impl_t)(int, const char *, char *, size_t);
 
 static posix_spawn_impl_t g_posix_spawn_fn;
 static posix_spawn_impl_t g_posix_spawnp_fn;
-static open_impl_t g_open_fn;
-static openat_impl_t g_openat_fn;
-static readlink_impl_t g_readlink_fn;
-static readlinkat_impl_t g_readlinkat_fn;
 
 __attribute__((constructor))
 static void shelly_resolve_real_impls(void) {
     g_posix_spawn_fn = (posix_spawn_impl_t)dlsym(RTLD_NEXT, "posix_spawn");
     g_posix_spawnp_fn = (posix_spawn_impl_t)dlsym(RTLD_NEXT, "posix_spawnp");
-    g_open_fn = (open_impl_t)dlsym(RTLD_NEXT, "open");
-    g_openat_fn = (openat_impl_t)dlsym(RTLD_NEXT, "openat");
-    g_readlink_fn = (readlink_impl_t)dlsym(RTLD_NEXT, "readlink");
-    g_readlinkat_fn = (readlinkat_impl_t)dlsym(RTLD_NEXT, "readlinkat");
 }
 
 static posix_spawn_impl_t real_posix_spawn_impl(void) {
@@ -819,28 +824,12 @@ static posix_spawn_impl_t real_posix_spawnp_impl(void) {
     return g_posix_spawnp_fn;
 }
 
-static open_impl_t real_open_impl(void) {
-    return g_open_fn;
-}
-
-static openat_impl_t real_openat_impl(void) {
-    return g_openat_fn;
-}
-
-static readlink_impl_t real_readlink_impl(void) {
-    return g_readlink_fn;
-}
-
-static readlinkat_impl_t real_readlinkat_impl(void) {
-    return g_readlinkat_fn;
-}
-
 static int call_real_posix_spawn(int search_path, pid_t *pid, const char *path,
                                  const posix_spawn_file_actions_t *file_actions,
                                  const posix_spawnattr_t *attrp,
                                  char *const argv[], char *const envp[]) {
     posix_spawn_impl_t fn = search_path ? real_posix_spawnp_impl() : real_posix_spawn_impl();
-    if (!fn) return ENOSYS;
+    if (!fn) return SHELLY_ENOSYS;
     return fn(pid, path, file_actions, attrp, argv, envp);
 }
 
@@ -871,7 +860,7 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
     if (!rewritten) {
         trace_exec_event(search_path ? "posix_spawnp-rewrite-null" : "posix_spawn-rewrite-null",
                          spawn_path, NULL, argv, envp, 0);
-        return ENOENT;
+        return SHELLY_ENOENT;
     }
     linker_exec = should_linker_exec(rewritten);
     trace_exec_event(search_path ? "posix_spawnp" : "posix_spawn",
@@ -945,32 +934,27 @@ int posix_spawnp(pid_t *pid, const char *file,
 }
 
 int execvp(const char *file, char *const argv[]) {
-    return execve(file, argv, environ);
+    return shelly_execve_internal(file, argv, environ);
 }
 
 int execvpe(const char *file, char *const argv[], char *const envp[]) {
-    return execve(file, argv, envp);
+    return shelly_execve_internal(file, argv, envp);
 }
 
 int open(const char *path, int flags, ...) {
     const char *target = codex_proc_exe_open_target(path, flags);
-    open_impl_t fn = real_open_impl();
     mode_t mode = 0;
     if (flags & O_CREAT) {
         va_list ap;
         va_start(ap, flags);
         mode = (mode_t)va_arg(ap, int);
         va_end(ap);
-        if (fn) return fn(target ? target : path, flags, mode);
-        return finish_syscall(raw_syscall4(__NR_openat, AT_FDCWD, (long)(target ? target : path), flags, mode));
     }
-    if (fn) return fn(target ? target : path, flags);
-    return finish_syscall(raw_syscall4(__NR_openat, AT_FDCWD, (long)(target ? target : path), flags, 0));
+    return finish_syscall(raw_syscall4(__NR_openat, AT_FDCWD, (long)(target ? target : path), flags, mode));
 }
 
 int openat(int dirfd, const char *path, int flags, ...) {
     const char *target = codex_proc_exe_open_target(path, flags);
-    openat_impl_t fn = real_openat_impl();
     mode_t mode = 0;
     if (target) dirfd = AT_FDCWD;
     if (flags & O_CREAT) {
@@ -978,29 +962,20 @@ int openat(int dirfd, const char *path, int flags, ...) {
         va_start(ap, flags);
         mode = (mode_t)va_arg(ap, int);
         va_end(ap);
-        if (fn) return fn(dirfd, target ? target : path, flags, mode);
-        return finish_syscall(raw_syscall4(__NR_openat, dirfd, (long)(target ? target : path), flags, mode));
     }
-    if (fn) return fn(dirfd, target ? target : path, flags);
-    return finish_syscall(raw_syscall4(__NR_openat, dirfd, (long)(target ? target : path), flags, 0));
+    return finish_syscall(raw_syscall4(__NR_openat, dirfd, (long)(target ? target : path), flags, mode));
 }
 
 ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
     ssize_t codex = readlink_codex_self(path, buf, bufsiz);
-    readlink_impl_t fn;
     if (codex != -2) return codex;
-    fn = real_readlink_impl();
-    if (fn) return fn(path, buf, bufsiz);
-    return (ssize_t)finish_syscall(raw_readlinkat_call(AT_FDCWD, path, buf, bufsiz));
+    return finish_syscall_ssize(raw_readlinkat_call(AT_FDCWD, path, buf, bufsiz));
 }
 
 ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz) {
-    readlinkat_impl_t fn;
     if (path && path[0] == '/') {
         ssize_t codex = readlink_codex_self(path, buf, bufsiz);
         if (codex != -2) return codex;
     }
-    fn = real_readlinkat_impl();
-    if (fn) return fn(dirfd, path, buf, bufsiz);
-    return (ssize_t)finish_syscall(raw_readlinkat_call(dirfd, path, buf, bufsiz));
+    return finish_syscall_ssize(raw_readlinkat_call(dirfd, path, buf, bufsiz));
 }

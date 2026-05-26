@@ -1144,7 +1144,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     // 205: Resolve exec-wrapper libc interposer targets in a constructor and
     //      drop private FORTIFY __open_2/__openat_2 overrides to avoid
     //      threaded lazy dlsym/PAC crashes in Codex worker threads.
-    private const val BASHRC_VERSION = 205
+    // 206: Bypass libc PLT in exec-wrapper hot paths: use raw getpid/open/
+    //      readlink syscalls, avoid errno writes in proc-exe readlink shim,
+    //      and keep execvp/execvpe off the exported execve jump slot.
+    private const val BASHRC_VERSION = 206
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
