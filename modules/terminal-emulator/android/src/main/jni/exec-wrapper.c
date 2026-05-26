@@ -22,7 +22,7 @@
  * linker --gc-sections; `used` alone does not bind the linker. */
 __attribute__((used, retain))
 static const char shelly_exec_wrapper_build_marker[] =
-    "shelly-exec-wrapper:v202:codex-spawn-pass-through";
+    "shelly-exec-wrapper:v203:codex-current-exe";
 
 #ifndef AT_FDCWD
 #define AT_FDCWD (-100)
@@ -51,6 +51,9 @@ static const char shelly_exec_wrapper_build_marker[] =
 #endif
 #ifndef __NR_read
 #define __NR_read 63
+#endif
+#ifndef __NR_readlinkat
+#define __NR_readlinkat 78
 #endif
 #ifndef __NR_execve
 #define __NR_execve 221
@@ -103,6 +106,10 @@ static int raw_open_append(const char *path) {
 
 static long raw_read_call(int fd, void *buf, size_t count) {
     return raw_syscall3(__NR_read, fd, (long)buf, (long)count);
+}
+
+static long raw_readlinkat_call(int dirfd, const char *path, char *buf, size_t bufsiz) {
+    return raw_syscall4(__NR_readlinkat, dirfd, (long)path, (long)buf, (long)bufsiz);
 }
 
 static long raw_write_call(int fd, const void *buf, size_t count) {
@@ -508,6 +515,37 @@ static int codex_mode_enabled(char *const envp[]) {
     return env_value_parent_fallback(envp, "SHELLY_CODEX_EXEC_PATH=") != NULL;
 }
 
+static int trusted_codex_path(const char *path) {
+    return path && path[0] == '/' &&
+           (starts_with(path, "/data/user/0/dev.shelly.terminal/") ||
+            starts_with(path, "/data/data/dev.shelly.terminal/"));
+}
+
+static ssize_t readlink_codex_self(const char *path, char *buf, size_t bufsiz) {
+    const char *codex_self;
+    size_t len;
+    if (!streq(path, "/proc/self/exe")) return -2;
+    if (!trace_flag_enabled(NULL, "SHELLY_CODEX_PROC_EXE_SHIM=")) return -2;
+    codex_self = env_value_direct(environ, "SHELLY_CODEX_EXEC_PATH=");
+    if (!trusted_codex_path(codex_self)) return -2;
+    if (bufsiz == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!buf && bufsiz > 0) {
+        errno = EFAULT;
+        return -1;
+    }
+    len = str_len(codex_self);
+    if (bufsiz > 0) {
+        size_t copy_len = len < bufsiz ? len : bufsiz;
+        for (size_t i = 0; i < copy_len; i++) {
+            buf[i] = codex_self[i];
+        }
+    }
+    return (ssize_t)(len < bufsiz ? len : bufsiz);
+}
+
 static int scrub_codex_child_envp(char *const envp[], char **out) {
     char *const *source = envp ? envp : environ;
     int n = 0;
@@ -526,6 +564,15 @@ static int scrub_codex_child_envp(char *const envp[], char **out) {
     }
     out[n] = NULL;
     return 0;
+}
+
+static int is_codex_fs_helper_self_exec(const char *pathname, char *const argv[], char *const envp[]) {
+    const char *codex_self = env_value_parent_fallback(envp, "SHELLY_CODEX_EXEC_PATH=");
+    return trusted_codex_path(codex_self) &&
+           streq(pathname, codex_self) &&
+           argv &&
+           argv[1] &&
+           streq(argv[1], CODEX_FS_HELPER_ARG1);
 }
 
 static int add_app_loader_envp(char *const envp[], char **out, char *ld_buf, size_t ld_buf_size) {
@@ -645,6 +692,18 @@ int execve(const char *pathname, char *const argv[], char *const envp[]) {
             return raw_execve_call(LINKER64, codex_argv, envp);
         }
     }
+    if (is_codex_fs_helper_self_exec(rewritten, argv, envp)) {
+        char *codex_argv[MAX_ARGC + 2];
+        if (build_linker_argv(rewritten, argv, codex_argv) == 0) {
+            char *codex_env[MAX_ENVP];
+            char ld_buf[PATH_BUF_SIZE + 32];
+            trace_exec_event("codex-fs-helper-self", pathname, rewritten, codex_argv, envp, 1);
+            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf)) == 0) {
+                return raw_execve_call(LINKER64, codex_argv, codex_env);
+            }
+            return raw_execve_call(LINKER64, codex_argv, envp);
+        }
+    }
     if (codex_mode_enabled(envp) &&
         scrub_codex_child_envp(envp, codex_child_env) == 0) {
         envp = codex_child_env;
@@ -677,6 +736,8 @@ typedef int (*posix_spawn_impl_t)(pid_t *, const char *,
                                   const posix_spawn_file_actions_t *,
                                   const posix_spawnattr_t *,
                                   char *const[], char *const[]);
+typedef ssize_t (*readlink_impl_t)(const char *, char *, size_t);
+typedef ssize_t (*readlinkat_impl_t)(int, const char *, char *, size_t);
 
 static posix_spawn_impl_t real_posix_spawn_impl(void) {
     static posix_spawn_impl_t fn;
@@ -690,6 +751,22 @@ static posix_spawn_impl_t real_posix_spawnp_impl(void) {
     static posix_spawn_impl_t fn;
     if (!fn) {
         fn = (posix_spawn_impl_t)dlsym(RTLD_NEXT, "posix_spawnp");
+    }
+    return fn;
+}
+
+static readlink_impl_t real_readlink_impl(void) {
+    static readlink_impl_t fn;
+    if (!fn) {
+        fn = (readlink_impl_t)dlsym(RTLD_NEXT, "readlink");
+    }
+    return fn;
+}
+
+static readlinkat_impl_t real_readlinkat_impl(void) {
+    static readlinkat_impl_t fn;
+    if (!fn) {
+        fn = (readlinkat_impl_t)dlsym(RTLD_NEXT, "readlinkat");
     }
     return fn;
 }
@@ -739,6 +816,17 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
     if (is_codex_fs_helper_linker_exec(rewritten, argv)) {
         char *codex_argv[MAX_ARGC + 2];
         if (build_codex_fs_helper_argv(argv, envp, codex_argv) == 0) {
+            char *codex_env[MAX_ENVP];
+            char ld_buf[PATH_BUF_SIZE + 32];
+            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf)) == 0) {
+                return call_real_posix_spawn(0, pid, LINKER64, file_actions, attrp, codex_argv, codex_env);
+            }
+            return call_real_posix_spawn(0, pid, LINKER64, file_actions, attrp, codex_argv, envp);
+        }
+    }
+    if (is_codex_fs_helper_self_exec(rewritten, argv, envp)) {
+        char *codex_argv[MAX_ARGC + 2];
+        if (build_linker_argv(rewritten, argv, codex_argv) == 0) {
             char *codex_env[MAX_ENVP];
             char ld_buf[PATH_BUF_SIZE + 32];
             if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf)) == 0) {
@@ -798,4 +886,24 @@ int execvp(const char *file, char *const argv[]) {
 
 int execvpe(const char *file, char *const argv[], char *const envp[]) {
     return execve(file, argv, envp);
+}
+
+ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+    ssize_t codex = readlink_codex_self(path, buf, bufsiz);
+    readlink_impl_t fn;
+    if (codex != -2) return codex;
+    fn = real_readlink_impl();
+    if (fn) return fn(path, buf, bufsiz);
+    return (ssize_t)finish_syscall(raw_readlinkat_call(AT_FDCWD, path, buf, bufsiz));
+}
+
+ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz) {
+    readlinkat_impl_t fn;
+    if (path && path[0] == '/') {
+        ssize_t codex = readlink_codex_self(path, buf, bufsiz);
+        if (codex != -2) return codex;
+    }
+    fn = real_readlinkat_impl();
+    if (fn) return fn(dirfd, path, buf, bufsiz);
+    return (ssize_t)finish_syscall(raw_readlinkat_call(dirfd, path, buf, bufsiz));
 }
