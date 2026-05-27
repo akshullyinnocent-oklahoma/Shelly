@@ -20,6 +20,7 @@
 #define MAX_ENVP 4096
 #define PATH_BUF_SIZE 4096
 #define SHELLY_ENOENT 2
+#define SHELLY_EINTR 4
 #define SHELLY_ENOSYS 38
 #define DEFAULT_HOME "/data/user/0/dev.shelly.terminal/files/home"
 #define DEFAULT_LIB_DIR "/data/user/0/dev.shelly.terminal/files/termux-libs"
@@ -31,7 +32,7 @@
  * linker --gc-sections; `used` alone does not bind the linker. */
 __attribute__((used, retain))
 static const char shelly_exec_wrapper_build_marker[] =
-    "shelly-exec-wrapper:v211:codex-shell-no-libc-environ";
+    "shelly-exec-wrapper:v212:codex-helper-proc-env-fallback";
 
 __attribute__((used, retain))
 static const char shelly_codex_proc_exe_open_gate_marker[] =
@@ -292,41 +293,61 @@ static const char *env_value(char *const envp[], const char *name_eq) {
 }
 
 static int proc_environ_value_copy(const char *name_eq, char *out, size_t out_size) {
-    char buf[8192];
+    char buf[1024];
     size_t prefix_len = str_len(name_eq);
+    size_t pos_in_entry = 0;
+    size_t value_len = 0;
+    int matching = 1;
+    int in_value = 0;
+    int found = 0;
     long nread;
     int fd;
     if (!name_eq || !out || out_size == 0 || prefix_len == 0) return -1;
     out[0] = '\0';
     fd = raw_open_readonly("/proc/self/environ");
     if (fd < 0) return -1;
-    nread = raw_read_call(fd, buf, sizeof(buf));
-    raw_close_call(fd);
-    if (nread <= 0) return -1;
-    for (long pos = 0; pos < nread;) {
-        const char *entry = &buf[pos];
-        long end = pos;
-        while (end < nread && buf[end] != '\0') end++;
-        if (end - pos > (long)prefix_len) {
-            int match = 1;
-            for (size_t i = 0; i < prefix_len; i++) {
-                if (entry[i] != name_eq[i]) {
-                    match = 0;
-                    break;
+    for (;;) {
+        nread = raw_read_call(fd, buf, sizeof(buf));
+        if (nread == -SHELLY_EINTR) continue;
+        if (nread <= 0) break;
+        for (long i = 0; i < nread; i++) {
+            char c = buf[i];
+            if (c == '\0') {
+                if (found) {
+                    raw_close_call(fd);
+                    return 0;
                 }
+                pos_in_entry = 0;
+                value_len = 0;
+                matching = 1;
+                in_value = 0;
+                continue;
             }
-            if (match) {
-                size_t value_len = (size_t)(end - pos) - prefix_len;
-                size_t copy_len = value_len < out_size - 1 ? value_len : out_size - 1;
-                for (size_t i = 0; i < copy_len; i++) {
-                    out[i] = entry[prefix_len + i];
+            if (in_value) {
+                if (value_len + 1 < out_size) {
+                    out[value_len] = c;
+                    out[value_len + 1] = '\0';
                 }
-                out[copy_len] = '\0';
-                return 0;
+                value_len++;
+                pos_in_entry++;
+                continue;
+            }
+            if (matching && pos_in_entry < prefix_len && c == name_eq[pos_in_entry]) {
+                pos_in_entry++;
+                if (pos_in_entry == prefix_len) {
+                    found = 1;
+                    in_value = 1;
+                    value_len = 0;
+                    out[0] = '\0';
+                }
+            } else {
+                matching = 0;
+                pos_in_entry++;
             }
         }
-        pos = end + 1;
     }
+    raw_close_call(fd);
+    if (found) return 0;
     return -1;
 }
 
@@ -636,9 +657,29 @@ static int codex_mode_enabled(char *const envp[]) {
 }
 
 static int trusted_codex_path(const char *path) {
+    /* regression-guard: these app-data paths are intentionally scoped to the
+     * primary user profile. Work-profile package data needs a separate trust
+     * decision before broadening this prefix list. */
     return path && path[0] == '/' &&
            (starts_with(path, "/data/user/0/dev.shelly.terminal/") ||
             starts_with(path, "/data/data/dev.shelly.terminal/"));
+}
+
+static const char *codex_exec_path_value(char *const envp[], char *buf, size_t buf_size) {
+    const char *path = env_value_direct(envp, "SHELLY_CODEX_EXEC_PATH=");
+    if (trusted_codex_path(path)) return path;
+    if (proc_environ_value_copy("SHELLY_CODEX_EXEC_PATH=", buf, buf_size) == 0 &&
+        trusted_codex_path(buf)) {
+        return buf;
+    }
+    return NULL;
+}
+
+static const char *shelly_lib_dir_value(char *const envp[], char *buf, size_t buf_size) {
+    const char *lib_dir = env_value_direct(envp, "SHELLY_LIB_DIR=");
+    if (lib_dir && lib_dir[0]) return lib_dir;
+    if (proc_environ_value_copy("SHELLY_LIB_DIR=", buf, buf_size) == 0 && buf[0]) return buf;
+    return DEFAULT_LIB_DIR;
 }
 
 static int proc_exe_path_matches_pid(const char *path) {
@@ -663,14 +704,12 @@ static int proc_exe_path(const char *path) {
 
 static ssize_t readlink_codex_self(const char *path, char *buf, size_t bufsiz) {
     char codex_self_buf[PATH_BUF_SIZE];
-    const char *codex_self = codex_self_buf;
+    const char *codex_self;
     size_t len;
     if (!proc_exe_path(path)) return -2;
     if (!trace_flag_enabled(NULL, "SHELLY_CODEX_PROC_EXE_SHIM=")) return -2;
-    if (proc_environ_value_copy("SHELLY_CODEX_EXEC_PATH=", codex_self_buf, sizeof(codex_self_buf)) != 0) {
-        return -2;
-    }
-    if (!trusted_codex_path(codex_self)) return -2;
+    codex_self = codex_exec_path_value(NULL, codex_self_buf, sizeof(codex_self_buf));
+    if (!codex_self) return -2;
     if (bufsiz == 0) {
         return -2;
     }
@@ -696,10 +735,7 @@ static const char *codex_proc_exe_open_target(const char *path, int flags, char 
     if (!proc_exe_path(path)) return NULL;
     if (!read_only_open_flags(flags)) return NULL;
     if (!trace_flag_enabled(NULL, "SHELLY_CODEX_PROC_EXE_OPEN_SHIM=")) return NULL;
-    if (proc_environ_value_copy("SHELLY_CODEX_EXEC_PATH=", target_buf, target_buf_size) != 0) {
-        return NULL;
-    }
-    return trusted_codex_path(target_buf) ? target_buf : NULL;
+    return codex_exec_path_value(NULL, target_buf, target_buf_size);
 }
 
 static int scrub_codex_child_envp(char *const envp[], char **out, int keep_wrapper) {
@@ -750,15 +786,18 @@ static int scrub_codex_child_envp(char *const envp[], char **out, int keep_wrapp
     return 0;
 }
 
-static int is_codex_fs_helper_self_exec(const char *pathname, char *const argv[], char *const envp[]) {
-    const char *codex_self;
-    if (!envp) return 0;
-    codex_self = env_value_direct(envp, "SHELLY_CODEX_EXEC_PATH=");
+static int codex_fs_helper_marker_index(char *const argv[]) {
+    if (!argv) return -1;
+    for (int i = 1; i < MAX_ARGC && argv[i]; i++) {
+        if (streq(argv[i], CODEX_FS_HELPER_ARG1)) return i;
+    }
+    return -1;
+}
+
+static int is_codex_fs_helper_self_exec(const char *pathname, char *const argv[], const char *codex_self) {
     return trusted_codex_path(codex_self) &&
            streq(pathname, codex_self) &&
-           argv &&
-           argv[1] &&
-           streq(argv[1], CODEX_FS_HELPER_ARG1);
+           codex_fs_helper_marker_index(argv) >= 1;
 }
 
 static int add_app_loader_envp(char *const envp[], char **out, char *ld_buf, size_t ld_buf_size,
@@ -809,28 +848,25 @@ static int build_linker_argv(const char *pathname, char *const argv[], char **ou
     return 0;
 }
 
-static int is_codex_fs_helper_linker_exec(const char *pathname, char *const argv[], char *const envp[]) {
-    const char *codex_self;
-    if (!envp) return 0;
-    codex_self = env_value_direct(envp, "SHELLY_CODEX_EXEC_PATH=");
-    if (!streq(pathname, LINKER64) || !trusted_codex_path(codex_self) || !argv) return 0;
-    if (argv[1] && streq(argv[1], CODEX_FS_HELPER_ARG1)) return 1;
-    return argv[1] && streq(argv[1], codex_self) &&
-           argv[2] &&
-           streq(argv[2], CODEX_FS_HELPER_ARG1);
+static int is_codex_fs_helper_linker_exec(const char *pathname, char *const argv[], const char *codex_self) {
+    return streq(pathname, LINKER64) &&
+           trusted_codex_path(codex_self) &&
+           codex_fs_helper_marker_index(argv) >= 1;
 }
 
-static int build_codex_fs_helper_argv(char *const argv[], char *const envp[], char **out) {
-    const char *codex_self = env_value_direct(envp, "SHELLY_CODEX_EXEC_PATH=");
+static int build_codex_fs_helper_argv(char *const argv[], const char *codex_self, char **out) {
     int argc = 0;
     int first_arg = 1;
+    int marker_index;
     int j = 0;
 
     if (!trusted_codex_path(codex_self) || !out) return -1;
+    marker_index = codex_fs_helper_marker_index(argv);
+    if (marker_index < 1) return -1;
     if (argv) {
         while (argc < MAX_ARGC && argv[argc]) argc++;
         if (argc >= MAX_ARGC) return -1;
-        if (argc > 2 && streq(argv[1], codex_self) && streq(argv[2], CODEX_FS_HELPER_ARG1)) {
+        if (argc > 1 && streq(argv[1], codex_self)) {
             first_arg = 2;
         }
     }
@@ -844,15 +880,20 @@ static int build_codex_fs_helper_argv(char *const argv[], char *const envp[], ch
     return 0;
 }
 
-static int add_codex_helper_envp(char *const envp[], char **out, char *ld_buf, size_t ld_buf_size) {
+static int add_codex_helper_envp(char *const envp[], char **out, char *ld_buf, size_t ld_buf_size,
+                                 char *codex_buf, size_t codex_buf_size, const char *codex_self) {
     char *const *source = envp;
-    const char *lib_dir = env_value_direct(envp, "SHELLY_LIB_DIR=");
+    char lib_dir_buf[PATH_BUF_SIZE];
+    const char *lib_dir = shelly_lib_dir_value(envp, lib_dir_buf, sizeof(lib_dir_buf));
     size_t nbuf = 0;
+    size_t cbuf = 0;
     int n = 0;
 
-    if (!lib_dir || !lib_dir[0]) return -1;
+    if (!lib_dir || !lib_dir[0] || !trusted_codex_path(codex_self)) return -1;
     if (append_str(ld_buf, ld_buf_size, &nbuf, "LD_LIBRARY_PATH=") != 0) return -1;
     if (append_str(ld_buf, ld_buf_size, &nbuf, lib_dir) != 0) return -1;
+    if (append_str(codex_buf, codex_buf_size, &cbuf, "SHELLY_CODEX_EXEC_PATH=") != 0) return -1;
+    if (append_str(codex_buf, codex_buf_size, &cbuf, codex_self) != 0) return -1;
 
     if (source) {
         for (int i = 0; i < MAX_ENVP && source[i]; i++) {
@@ -863,11 +904,16 @@ static int add_codex_helper_envp(char *const envp[], char **out, char *ld_buf, s
                 starts_with(source[i], "SHELLY_CODEX_PROC_EXE_OPEN_SHIM=")) {
                 continue;
             }
-            if (n >= MAX_ENVP - 2) return -1;
+            if (n >= MAX_ENVP - 3) return -1;
             out[n++] = source[i];
         }
     }
+    if (n >= MAX_ENVP - 2) return -1;
     out[n++] = ld_buf;
+    if (n >= MAX_ENVP - 1) return -1;
+    /* regression-guard: keep the fs helper aware of the real Codex ELF even
+     * when the spawn env was scrubbed. Do not re-add LD_PRELOAD here. */
+    out[n++] = codex_buf;
     out[n] = NULL;
     return 0;
 }
@@ -876,6 +922,8 @@ __attribute__((noinline, used))
 static int shelly_execve_internal(const char *pathname, char *const argv[], char *const envp[]) {
     char rewrite_buf[PATH_BUF_SIZE];
     const char *rewritten = rewrite_path(pathname, envp, rewrite_buf, sizeof(rewrite_buf));
+    char codex_self_buf[PATH_BUF_SIZE];
+    const char *codex_self = codex_exec_path_value(envp, codex_self_buf, sizeof(codex_self_buf));
     char *codex_child_env[MAX_ENVP];
     int linker_exec;
     int keep_wrapper_for_shell;
@@ -886,25 +934,29 @@ static int shelly_execve_internal(const char *pathname, char *const argv[], char
     linker_exec = should_linker_exec(rewritten);
     keep_wrapper_for_shell = should_keep_wrapper_for_shell_path(rewritten);
     if (envp) trace_exec_event("execve", pathname, rewritten, argv, envp, linker_exec);
-    if (is_codex_fs_helper_linker_exec(rewritten, argv, envp)) {
+    if (is_codex_fs_helper_linker_exec(rewritten, argv, codex_self)) {
         char *codex_argv[MAX_ARGC + 2];
-        if (build_codex_fs_helper_argv(argv, envp, codex_argv) == 0) {
+        if (build_codex_fs_helper_argv(argv, codex_self, codex_argv) == 0) {
             char *codex_env[MAX_ENVP];
             char ld_buf[PATH_BUF_SIZE + 32];
+            char codex_path_buf[PATH_BUF_SIZE + 32];
             trace_exec_event("codex-fs-helper", pathname, rewritten, codex_argv, envp, 0);
-            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf)) == 0) {
+            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf),
+                                      codex_path_buf, sizeof(codex_path_buf), codex_self) == 0) {
                 return raw_execve_call(LINKER64, codex_argv, codex_env);
             }
             return raw_execve_call(LINKER64, codex_argv, envp);
         }
     }
-    if (is_codex_fs_helper_self_exec(rewritten, argv, envp)) {
+    if (is_codex_fs_helper_self_exec(rewritten, argv, codex_self)) {
         char *codex_argv[MAX_ARGC + 2];
         if (build_linker_argv(rewritten, argv, codex_argv) == 0) {
             char *codex_env[MAX_ENVP];
             char ld_buf[PATH_BUF_SIZE + 32];
+            char codex_path_buf[PATH_BUF_SIZE + 32];
             trace_exec_event("codex-fs-helper-self", pathname, rewritten, codex_argv, envp, 1);
-            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf)) == 0) {
+            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf),
+                                      codex_path_buf, sizeof(codex_path_buf), codex_self) == 0) {
                 return raw_execve_call(LINKER64, codex_argv, codex_env);
             }
             return raw_execve_call(LINKER64, codex_argv, envp);
@@ -988,6 +1040,8 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
     char rewrite_buf[PATH_BUF_SIZE];
     const char *spawn_path = path;
     const char *rewritten;
+    char codex_self_buf[PATH_BUF_SIZE];
+    const char *codex_self;
     int linker_exec;
     int keep_wrapper_for_shell;
 
@@ -1015,23 +1069,28 @@ static int shelly_posix_spawn_common(int search_path, pid_t *pid, const char *pa
     trace_exec_event(search_path ? "posix_spawnp" : "posix_spawn",
                      spawn_path, rewritten, argv, envp, linker_exec);
 
-    if (is_codex_fs_helper_linker_exec(rewritten, argv, envp)) {
+    codex_self = codex_exec_path_value(envp, codex_self_buf, sizeof(codex_self_buf));
+    if (is_codex_fs_helper_linker_exec(rewritten, argv, codex_self)) {
         char *codex_argv[MAX_ARGC + 2];
-        if (build_codex_fs_helper_argv(argv, envp, codex_argv) == 0) {
+        if (build_codex_fs_helper_argv(argv, codex_self, codex_argv) == 0) {
             char *codex_env[MAX_ENVP];
             char ld_buf[PATH_BUF_SIZE + 32];
-            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf)) == 0) {
+            char codex_path_buf[PATH_BUF_SIZE + 32];
+            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf),
+                                      codex_path_buf, sizeof(codex_path_buf), codex_self) == 0) {
                 return call_real_posix_spawn(0, pid, LINKER64, file_actions, attrp, codex_argv, codex_env);
             }
             return call_real_posix_spawn(0, pid, LINKER64, file_actions, attrp, codex_argv, envp);
         }
     }
-    if (is_codex_fs_helper_self_exec(rewritten, argv, envp)) {
+    if (is_codex_fs_helper_self_exec(rewritten, argv, codex_self)) {
         char *codex_argv[MAX_ARGC + 2];
         if (build_linker_argv(rewritten, argv, codex_argv) == 0) {
             char *codex_env[MAX_ENVP];
             char ld_buf[PATH_BUF_SIZE + 32];
-            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf)) == 0) {
+            char codex_path_buf[PATH_BUF_SIZE + 32];
+            if (add_codex_helper_envp(envp, codex_env, ld_buf, sizeof(ld_buf),
+                                      codex_path_buf, sizeof(codex_path_buf), codex_self) == 0) {
                 return call_real_posix_spawn(0, pid, LINKER64, file_actions, attrp, codex_argv, codex_env);
             }
             return call_real_posix_spawn(0, pid, LINKER64, file_actions, attrp, codex_argv, envp);
