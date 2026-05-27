@@ -77,6 +77,21 @@ export const MODEL_CATALOG: LlamaCppModel[] = [
     badge: '推奨',
   },
   {
+    id: 'qwen3.5-9b-q4',
+    name: 'Qwen3.5-9B Q4_K_M',
+    description: '高品質。4Bより重いが、推論品質を優先したい時の上位モデル。',
+    sizeGb: 5.3,
+    ramRequiredGb: 8.4,
+    language: 'ja',
+    useCase: 'balanced',
+    quantization: 'Q4_K_M',
+    huggingFaceRepo: 'unsloth/Qwen3.5-9B-GGUF',
+    filename: 'Qwen3.5-9B-Q4_K_M.gguf',
+    downloadUrl:
+      'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf',
+    badge: '高品質',
+  },
+  {
     id: 'gemma3-4b-q4',
     name: 'Gemma 3 4B',
     description: '日本語インストラクション追従が3-4Bクラス最強。意図分類・出力解釈・チャット全てに最適。',
@@ -179,7 +194,7 @@ const REAL_LLAMA_SERVER_BIN_INIT = [
 ].join('\n');
 
 const HEALTH_CHECK_CMD = [
-  `node -e 'const http=require("http");const req=http.get("http://127.0.0.1:8080/v1/models",res=>{process.exit(res.statusCode>=200&&res.statusCode<300?0:1)});req.on("error",()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1);});' >/dev/null 2>&1`,
+  `mkdir -p "$HOME/.shelly-ssl" && : > "$HOME/.shelly-ssl/openssl.cnf" && OPENSSL_CONF="$HOME/.shelly-ssl/openssl.cnf" node -e 'const http=require("http");const req=http.get("http://127.0.0.1:8080/v1/models",res=>{process.exit(res.statusCode>=200&&res.statusCode<300?0:1)});req.on("error",()=>process.exit(1));req.setTimeout(2000,()=>{req.destroy();process.exit(1);});' >/dev/null 2>&1`,
   `curl -fsS --max-time 2 http://127.0.0.1:8080/v1/models >/dev/null 2>&1`,
   `wget -q -T 2 -O - http://127.0.0.1:8080/v1/models >/dev/null 2>&1`,
 ].join(' || ');
@@ -188,7 +203,7 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-const INSTALL_LLAMA_SERVER_CMD = `mkdir -p "$HOME/.cache/shelly" && cat > "$HOME/.cache/shelly/shelly-install-llama-server.js" <<'NODE'
+const INSTALL_LLAMA_SERVER_CMD = `mkdir -p "$HOME/.cache/shelly" "$HOME/.shelly-ssl" && : > "$HOME/.shelly-ssl/openssl.cnf" && cat > "$HOME/.cache/shelly/shelly-install-llama-server.js" <<'NODE'
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -352,7 +367,7 @@ function collectSoDirs(dir) {
   process.exit(1);
 });
 NODE
-node "$HOME/.cache/shelly/shelly-install-llama-server.js"`;
+OPENSSL_CONF="$HOME/.shelly-ssl/openssl.cnf" node "$HOME/.cache/shelly/shelly-install-llama-server.js"`;
 
 /**
  * llama.cppのセットアップステップ一覧を生成する。
@@ -396,7 +411,7 @@ export function buildDownloadCommand(model: LlamaCppModel): string {
     `elif command -v wget >/dev/null 2>&1; then`,
     `  wget -c -O "$MODEL_DEST" "$MODEL_URL"`,
     `else`,
-    `  node -e 'const fs=require("fs"),http=require("http"),https=require("https");const url=process.env.MODEL_URL,dest=process.env.MODEL_DEST;function go(u,n){const x=new URL(u),c=x.protocol==="https:"?https:http,r=c.get(x,{headers:{"User-Agent":"Shelly-model-downloader/1"}},res=>{if([301,302,303,307,308].includes(res.statusCode)&&res.headers.location){res.resume();if(n<=0)throw Error("too many redirects");return go(new URL(res.headers.location,x).toString(),n-1)}if(!res.statusCode||res.statusCode>=400){res.resume();throw Error("HTTP "+res.statusCode)}res.pipe(fs.createWriteStream(dest)).on("finish",()=>{})});r.on("error",e=>{console.error(e.message);process.exit(1)});r.setTimeout(30000,()=>r.destroy(Error("download timed out")))}go(url,5);'`,
+    `  mkdir -p "$HOME/.shelly-ssl" && : > "$HOME/.shelly-ssl/openssl.cnf" && OPENSSL_CONF="$HOME/.shelly-ssl/openssl.cnf" node -e 'const fs=require("fs"),http=require("http"),https=require("https");const url=process.env.MODEL_URL,dest=process.env.MODEL_DEST;function go(u,n){const x=new URL(u),c=x.protocol==="https:"?https:http,r=c.get(x,{headers:{"User-Agent":"Shelly-model-downloader/1"}},res=>{if([301,302,303,307,308].includes(res.statusCode)&&res.headers.location){res.resume();if(n<=0)throw Error("too many redirects");return go(new URL(res.headers.location,x).toString(),n-1)}if(!res.statusCode||res.statusCode>=400){res.resume();throw Error("HTTP "+res.statusCode)}res.pipe(fs.createWriteStream(dest)).on("finish",()=>{})});r.on("error",e=>{console.error(e.message);process.exit(1)});r.setTimeout(30000,()=>r.destroy(Error("download timed out")))}go(url,5);'`,
     `fi`,
     `test -s "$MODEL_DEST"`,
     `echo "Download complete: ${dest}"`,

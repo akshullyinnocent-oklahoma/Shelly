@@ -761,7 +761,7 @@ const ja: Record<string, string> = {
   'settings.llm_url_updated': 'ローカルLLM URLを更新しました:\n{{url}}',
   'settings.model_error': 'モデル名を入力してください',
   'settings.model_updated': 'モデルを更新しました: {{model}}',
-  'settings.llm_model_hint': '推奨: ハイスペック端末は Qwen3.5-4B Q4_K_M。重い場合は Qwen 2.5 3B または 1.5B を選択してください',
+  'settings.llm_model_hint': '推奨: ハイスペック端末は Qwen3.5-4B Q4_K_M。品質優先なら Qwen3.5-9B、重い場合は Qwen 2.5 3B または 1.5B を選択してください',
   'settings.llm_success_title': 'llama-server接続成功',
   'settings.llm_success_msg': 'llama-serverに接続しました。',
   'settings.llm_fail_title': 'llama-server接続失敗',

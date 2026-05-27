@@ -1165,7 +1165,10 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      sandbox checks do not reject files inside the current project.
     // 212: Make the patch canary request an explicit apply_patch diff and
     //      fail if Codex falls back to shell editing.
-    private const val BASHRC_VERSION = 212
+    // 213: Export OPENSSL_CONF to a known-empty Shelly config. Bundled node's
+    //      OpenSSL default points at Termux's /data/data/com.termux path on
+    //      some builds, causing local LLM setup to abort before JS runs.
+    private const val BASHRC_VERSION = 213
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1347,6 +1350,12 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             }
         } catch (e: Exception) {
             android.util.Log.e("HomeInitializer", "ca-certificates.crt extract failed: ${e.message}")
+        }
+        val opensslConf = File(sslDir, "openssl.cnf")
+        try {
+            if (!opensslConf.exists()) opensslConf.writeText("")
+        } catch (e: Exception) {
+            android.util.Log.e("HomeInitializer", "openssl.cnf seed failed: ${e.message}")
         }
 
         // Regenerate .bashrc if version changed
@@ -1648,6 +1657,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("export CURL_CA_BUNDLE=\"\$HOME/.shelly-ssl/ca-certificates.crt\"")
             sb.appendLine("export NODE_EXTRA_CA_CERTS=\"\$HOME/.shelly-ssl/ca-certificates.crt\"")
             sb.appendLine("export REQUESTS_CA_BUNDLE=\"\$HOME/.shelly-ssl/ca-certificates.crt\"")
+            sb.appendLine("export OPENSSL_CONF=\"\$HOME/.shelly-ssl/openssl.cnf\"")
             // bug #133 (2026-04-27): git's curl-based HTTPS transport hard-
             // codes the CA bundle at /data/data/com.termux/files/usr/etc/tls/
             // cert.pem (Termux baked-in path, doesn't exist on Shelly).

@@ -762,7 +762,7 @@ const en: Record<string, string> = {
   'settings.llm_url_updated': 'Local LLM URL updated:\n{{url}}',
   'settings.model_error': 'Please enter a model name',
   'settings.model_updated': 'Model updated: {{model}}',
-  'settings.llm_model_hint': 'Recommended on high-end devices: Qwen3.5-4B Q4_K_M. Use Qwen 2.5 3B or 1.5B if the device feels heavy.',
+  'settings.llm_model_hint': 'Recommended on high-end devices: Qwen3.5-4B Q4_K_M. Use Qwen3.5-9B for quality, or Qwen 2.5 3B / 1.5B if the device feels heavy.',
   'settings.llm_success_title': 'llama-server connection successful',
   'settings.llm_success_msg': 'Connected to llama-server.',
   'settings.llm_fail_title': 'llama-server connection failed',
