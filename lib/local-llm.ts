@@ -194,14 +194,14 @@ export function classifyTask(userInput: string): TaskCategory {
 /**
  * 接続確認。llama-server（/health）とOllama（/api/tags）両方に対応。
  */
-export async function checkOllamaConnection(baseUrl: string): Promise<{
+export async function checkOllamaConnection(baseUrl: string, timeoutMs = 5000): Promise<{
   available: boolean;
   models: string[];
   error?: string;
 }> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const apiType = detectApiType(baseUrl);
 
     if (apiType === 'openai') {
@@ -524,6 +524,12 @@ function xhrStream(
     let lastIndex = 0;
     let lineBuffer = '';
     let settled = false;
+    let emittedChunks = 0;
+
+    const handleChunk = (text: string, done: boolean) => {
+      if (text) emittedChunks += 1;
+      onChunk(text, done);
+    };
 
     const finish = (result: { success: boolean; error?: string }) => {
       if (settled) return;
@@ -562,7 +568,7 @@ function xhrStream(
         lineBuffer = '';
       }
       for (const line of lines) {
-        parseSSELine(line, apiType, onChunk);
+        parseSSELine(line, apiType, handleChunk);
       }
     };
 
@@ -593,6 +599,13 @@ function xhrStream(
       }
       // Process any remaining data
       processNewData(true);
+      if (emittedChunks === 0) {
+        finish({
+          success: false,
+          error: 'Local LLM returned an empty response. The model may have crashed or returned an unexpected stream format.',
+        });
+        return;
+      }
       onChunk('', true);
       finish({ success: true });
     };

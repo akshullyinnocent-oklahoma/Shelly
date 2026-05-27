@@ -77,14 +77,33 @@ export function LlamaCppSection({
   const [setupLog, setSetupLog] = useState<string[]>([]);
   const [showSetupLog, setShowSetupLog] = useState(false);
 
-  // ── Auto-check server status on mount ──────────────────────────────────────
+  // ── Re-check server status while this settings sheet is open ───────────────
   useEffect(() => {
-    if (!isConnected) return;
+    if (!isConnected) {
+      setServerStatus('unknown');
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
     const cmd = buildStatusCommand();
-    onRunCommand(cmd, 'Server status check').then((result) => {
-      setServerStatus(resolveServerStatus(result));
-    });
-  }, [isConnected]);
+    const checkStatus = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const result = await onRunCommand(cmd, 'Server status check');
+        if (!cancelled) setServerStatus(resolveServerStatus(result));
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 7000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isConnected, onRunCommand]);
 
   // ── llama.cpp セットアップ ────────────────────────────────────────────────
 

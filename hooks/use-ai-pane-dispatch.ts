@@ -20,7 +20,7 @@ import { groqChatStream, GROQ_DEFAULT_MODEL } from '@/lib/groq';
 import { geminiChatStream, GEMINI_DEFAULT_MODEL } from '@/lib/gemini';
 import { perplexitySearchStream, PERPLEXITY_DEFAULT_MODEL } from '@/lib/perplexity';
 import { cerebrasChatStream, CEREBRAS_DEFAULT_MODEL } from '@/lib/cerebras';
-import { ollamaChatStream } from '@/lib/local-llm';
+import { checkOllamaConnection, ollamaChatStream } from '@/lib/local-llm';
 import type { OllamaMessage } from '@/lib/local-llm';
 import { parseInput } from '@/lib/input-router';
 import { parseAgentCommand, createAgent } from '@/lib/agent-manager';
@@ -145,6 +145,7 @@ function createThrottledUpdate(updateFn: UpdateFn) {
  */
 export function useAIPaneDispatch(paneId: string) {
   const abortRef = useRef<AbortController | null>(null);
+  const lastLocalStreamOkAtRef = useRef(0);
 
   const rawUpdateMessage = useAIPaneStore((s) => s.updateMessage);
   const throttledUpdate = useMemo(
@@ -426,6 +427,23 @@ export function useAIPaneDispatch(paneId: string) {
             );
           }
 
+          const preflightTtlMs = 30_000;
+          if (Date.now() - lastLocalStreamOkAtRef.current > preflightTtlMs) {
+            const connection = await checkOllamaConnection(settings.localLlmUrl, 2000);
+            if (signal.aborted) return;
+            if (!connection.available) {
+              store.updateMessage(paneId, assistantId, {
+                content:
+                  `Local LLM is not responding at ${settings.localLlmUrl}. ` +
+                  `Open Settings → Local LLM and start llama.cpp again. ` +
+                  `If Android stopped it due to low memory, try a smaller model.\n\n${connection.error ?? ''}`.trim(),
+                streamingText: undefined,
+                isStreaming: false,
+              });
+              return;
+            }
+          }
+
           let accumulated = '';
           throttledUpdate(paneId, assistantId, {
             isStreaming: true,
@@ -469,6 +487,17 @@ export function useAIPaneDispatch(paneId: string) {
             });
           } else if (result.success) {
             logInfo('AIPaneDispatch', 'Local LLM response complete');
+            if (!accumulated.trim()) {
+              store.updateMessage(paneId, assistantId, {
+                content:
+                  `Local LLM returned an empty response from ${settings.localLlmUrl}. ` +
+                  `Restart llama.cpp and try again.`,
+                streamingText: undefined,
+                isStreaming: false,
+              });
+              return;
+            }
+            lastLocalStreamOkAtRef.current = Date.now();
             store.updateMessage(paneId, assistantId, {
               content: accumulated,
               streamingText: undefined,

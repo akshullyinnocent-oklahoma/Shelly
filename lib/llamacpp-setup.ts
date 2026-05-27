@@ -479,7 +479,21 @@ export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string)
     `echo "llama-server binary: $REAL_LLAMA_SERVER_BIN"`,
     `echo "llama-server dir: $REAL_LLAMA_SERVER_DIR"`,
     `echo "model: $MODEL_PATH"`,
-    `pkill -x llama-server 2>/dev/null || true`,
+    `if [ -f "${pidFile}" ]; then`,
+    `  OLD_PID="$(cat "${pidFile}" 2>/dev/null || true)"`,
+    `  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then`,
+    `    kill "$OLD_PID" 2>/dev/null || true`,
+    `    sleep 1`,
+    `    kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" 2>/dev/null || true`,
+    `  fi`,
+    `  rm -f "${pidFile}"`,
+    `fi`,
+    `OLD_PID="$(ps -Af 2>/dev/null | grep -F llama-server | grep -v grep | awk '{print $2}' | head -n1)"`,
+    `if [ -n "$OLD_PID" ]; then`,
+    `  kill "$OLD_PID" 2>/dev/null || true`,
+    `  sleep 1`,
+    `  kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" 2>/dev/null || true`,
+    `fi`,
     `sleep 1`,
     `nohup /system/bin/nice -n 10 ${startCmd} > "${logFile}" 2>&1 &`,
     `echo $! > "${pidFile}"`,
@@ -513,19 +527,45 @@ export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string)
  * llama-serverの停止コマンドを生成する。
  */
 export function buildStopCommand(): string {
-  return `pkill -x llama-server && echo "llama-server stopped" || echo "llama-server not running"`;
+  const pidFile = `${MODELS_DIR}/llama-server.pid`;
+  return [
+    `STOPPED=0`,
+    `if [ -f "${pidFile}" ]; then`,
+    `  PID="$(cat "${pidFile}" 2>/dev/null || true)"`,
+    `  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then`,
+    `    kill "$PID" 2>/dev/null || true`,
+    `    sleep 1`,
+    `    kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null || true`,
+    `    STOPPED=1`,
+    `  fi`,
+    `  rm -f "${pidFile}"`,
+    `fi`,
+    `PID="$(ps -Af 2>/dev/null | grep -F llama-server | grep -v grep | awk '{print $2}' | head -n1)"`,
+    `if [ -n "$PID" ]; then`,
+    `  kill "$PID" 2>/dev/null || true`,
+    `  sleep 1`,
+    `  kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null || true`,
+    `  STOPPED=1`,
+    `fi`,
+    `if [ "$STOPPED" = 1 ]; then echo "llama-server stopped"; else echo "llama-server not running"; fi`,
+  ].join('\n');
 }
 
 /**
  * llama-serverの状態確認コマンドを生成する。
  */
 export function buildStatusCommand(): string {
+  const pidFile = `${MODELS_DIR}/llama-server.pid`;
   return [
     `if ${HEALTH_CHECK_CMD}; then`,
     `  echo "running"`,
     `  exit 0`,
     `fi`,
-    `if pgrep -x llama-server >/dev/null 2>&1; then`,
+    `if [ -f "${pidFile}" ] && PID="$(cat "${pidFile}" 2>/dev/null)" && [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then`,
+    `  echo "starting_or_unreachable"`,
+    `  exit 1`,
+    `fi`,
+    `if ps -Af 2>/dev/null | grep -F llama-server | grep -v grep >/dev/null; then`,
     `  echo "starting_or_unreachable"`,
     `  exit 1`,
     `fi`,
@@ -613,7 +653,21 @@ export function buildStartAllScript(model: LlamaCppModel): string {
     `echo "model: $MODEL_PATH"`,
     ``,
     `# 1. 既存プロセスを停止`,
-    `pkill -x llama-server 2>/dev/null || true`,
+    `if [ -f "${pidFile}" ]; then`,
+    `  OLD_PID="$(cat "${pidFile}" 2>/dev/null || true)"`,
+    `  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then`,
+    `    kill "$OLD_PID" 2>/dev/null || true`,
+    `    sleep 1`,
+    `    kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" 2>/dev/null || true`,
+    `  fi`,
+    `  rm -f "${pidFile}"`,
+    `fi`,
+    `OLD_PID="$(ps -Af 2>/dev/null | grep -F llama-server | grep -v grep | awk '{print $2}' | head -n1)"`,
+    `if [ -n "$OLD_PID" ]; then`,
+    `  kill "$OLD_PID" 2>/dev/null || true`,
+    `  sleep 1`,
+    `  kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" 2>/dev/null || true`,
+    `fi`,
     `sleep 1`,
     ``,
     `# 2. llama-serverをバックグラウンドで起動`,
