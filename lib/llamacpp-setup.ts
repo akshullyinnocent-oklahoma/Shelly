@@ -61,35 +61,20 @@ export type SetupPhase =
  */
 export const MODEL_CATALOG: LlamaCppModel[] = [
   {
-    id: 'qwen3-4b-q4',
-    name: 'Qwen3-4B Q4_K_M',
-    description: '推奨。スマホ上のAIペインで常用しやすい速度と賢さのバランスが良いZ Fold6向けモデル。',
-    sizeGb: 2.6,
-    ramRequiredGb: 5.0,
+    id: 'qwen3.5-4b-q4',
+    name: 'Qwen3.5-4B Q4_K_M',
+    description: '推奨。Qwen3世代から更新された、スマホ上のAIペインで常用しやすいZ Fold6向けモデル。',
+    sizeGb: 2.7,
+    ramRequiredGb: 5.2,
     language: 'ja',
     useCase: 'balanced',
     quantization: 'Q4_K_M',
-    huggingFaceRepo: 'unsloth/Qwen3-4B-Instruct-2507-GGUF',
-    filename: 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf',
+    huggingFaceRepo: 'unsloth/Qwen3.5-4B-GGUF',
+    filename: 'Qwen3.5-4B-Q4_K_M.gguf',
     downloadUrl:
-      'https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf',
+      'https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf',
     recommended: true,
     badge: '推奨',
-  },
-  {
-    id: 'qwen3-8b-q4-k-m',
-    name: 'Qwen3-8B Q4_K_M',
-    description: '品質優先。Qwen3 4Bより重いが、日本語、コード、クロスペイン補助の出力品質を優先する時向け。',
-    sizeGb: 4.7,
-    ramRequiredGb: 6.0,
-    language: 'ja',
-    useCase: 'balanced',
-    quantization: 'Q4_K_M',
-    huggingFaceRepo: 'Qwen/Qwen3-8B-GGUF',
-    filename: 'Qwen3-8B-Q4_K_M.gguf',
-    downloadUrl:
-      'https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf',
-    badge: '高品質',
   },
   {
     id: 'gemma3-4b-q4',
@@ -448,7 +433,7 @@ export function buildRecommendedStartCommand(
     port: 8080,
     modelPath,
     // Z Fold6 local use prioritizes system responsiveness. Keep threads low so
-    // Shelly and the AI pane stay responsive while Qwen3 is running locally.
+    // Shelly and the AI pane stay responsive while the local model is running.
     contextSize: 1024,
     threads: 2,
     gpuLayers: 0, // Adreno GPU offloadは現状不安定なためCPU only

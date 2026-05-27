@@ -497,7 +497,7 @@ WRAPPEREOF
 }
 
 find_local_llm_model() {
-  model_name="\${1:-Qwen3-4B-Instruct-2507-Q4_K_M}"
+  model_name="\${1:-Qwen3.5-4B-Q4_K_M}"
   if [ -n "\${LOCAL_LLM_MODEL_PATH:-}" ] && [ -f "$LOCAL_LLM_MODEL_PATH" ]; then
     printf '%s\\n' "$LOCAL_LLM_MODEL_PATH"
     return 0
@@ -536,7 +536,7 @@ find_local_llm_model() {
 
 ensure_local_llm_server() {
   base_url="$1"
-  model_name="\${2:-Qwen3-4B-Instruct-2507-Q4_K_M}"
+  model_name="\${2:-Qwen3.5-4B-Q4_K_M}"
   reason_file="$TMP_DIR/local-llm-start-$AGENT_ID.reason"
   : > "$reason_file"
 
@@ -882,7 +882,7 @@ rm -f "$PROMPT_FILE"`;
     case 'gemini-api':
       return geminiApiCommand(escapedPrompt, resultVar, tool.model);
     case 'local':
-      const localModel = (tool.model || 'Qwen3-4B-Instruct-2507-Q4_K_M').replace(/"/g, '\\"');
+      const localModel = (tool.model || 'Qwen3.5-4B-Q4_K_M').replace(/"/g, '\\"');
       return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
 	REQUEST_FILE="$HOME/.shelly/tmp/agent-request-$AGENT_ID.json"
 	printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
@@ -946,7 +946,7 @@ fi`;
 
 function articleEvalCommand(rawPrompt: string, resultVar: string, localModel?: string, codexCmd?: string): string {
   const promptMarker = `SHELLY_AB_PROMPT_${Math.random().toString(36).slice(2)}`;
-  const localModelValue = (localModel || 'Qwen3-4B-Instruct-2507-Q4_K_M').replace(/"/g, '\\"');
+  const localModelValue = (localModel || 'Qwen3.5-4B-Q4_K_M').replace(/"/g, '\\"');
   const codexCmdValue = (codexCmd || 'codex').replace(/"/g, '\\"');
   return `PROJECT_DIR="\${SHELLY_CONTENT_PROJECT:-$HOME/projects/shelly-content-studio}"
 LOCAL_URL="\${LOCAL_LLM_URL:-http://127.0.0.1:8080}"

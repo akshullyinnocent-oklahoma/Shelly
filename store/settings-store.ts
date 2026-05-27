@@ -21,6 +21,13 @@ function dotenvValue(value: string): string {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 }
 
+export const DEFAULT_LOCAL_LLM_MODEL = 'Qwen3.5-4B-Q4_K_M';
+
+const LEGACY_LOCAL_LLM_MODELS = new Set([
+  'Qwen3-4B-Instruct-2507-Q4_K_M',
+  'Qwen3-8B-Q4_K_M',
+]);
+
 export const DEFAULT_SETTINGS: AppSettings = {
   fontSize: 14,
   lineHeight: 1.4,
@@ -35,7 +42,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   highContrastOutput: true,
   localLlmEnabled: false,
   localLlmUrl: 'http://127.0.0.1:8080',
-  localLlmModel: 'Qwen3-4B-Instruct-2507-Q4_K_M',
+  localLlmModel: DEFAULT_LOCAL_LLM_MODEL,
   groqModel: 'llama-3.3-70b-versatile',
   perplexityApiKey: '',
   teamMembers: {
@@ -97,6 +104,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ...(settingsRaw ? JSON.parse(settingsRaw) : {}),
         ...secureKeys,
       };
+      if (LEGACY_LOCAL_LLM_MODELS.has(settings.localLlmModel)) {
+        settings.localLlmModel = DEFAULT_LOCAL_LLM_MODEL;
+        AsyncStorage.setItem('shelly_settings', JSON.stringify(stripApiKeys(settings))).catch(() => {});
+      }
       // Sync sound store on load
       useSoundStore.getState().setEnabled(settings.soundEffects ?? true);
       useSoundStore.getState().setVolume(settings.soundVolume ?? 0.6);
