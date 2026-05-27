@@ -1173,7 +1173,13 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
     //      as writable roots for apply_patch.
     // 215: Force Codex exec/review/resume and patch canaries into
     //      workspace-write sandbox so apply_patch is not blocked read-only.
-    private const val BASHRC_VERSION = 215
+    // 216: Android has no Codex-supported host sandbox (macOS seatbelt /
+    //      Linux Landlock / Windows sandbox), so upstream Codex rejects
+    //      apply_patch under approval=never even when the target is inside
+    //      workspace-write. For non-interactive exec paths, use Codex's
+    //      danger-full-access permission profile and rely on Android's app
+    //      sandbox as the actual OS boundary. TUI remains unchanged.
+    private const val BASHRC_VERSION = 216
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1619,7 +1625,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    [ -n \"\$__cd_alias\" ] && set -- --add-dir \"\$__cd_alias\" \"\$@\"")
             sb.appendLine("    [ -n \"\$__cd_target\" ] && [ \"\$__cd_target\" != \"\$__cd_canon\" ] && set -- --add-dir \"\$__cd_target\" \"\$@\"")
             sb.appendLine("    [ -n \"\$__cd_canon\" ] && set -- --add-dir \"\$__cd_canon\" \"\$@\"")
-            sb.appendLine("    [ \"\$__sandbox_seen\" = 0 ] && set -- --sandbox workspace-write \"\$@\"")
+            sb.appendLine("    [ \"\$__sandbox_seen\" = 0 ] && set -- --sandbox danger-full-access \"\$@\"")
             sb.appendLine("    set -- --skip-git-repo-check \"\$@\"")
             sb.appendLine("  else")
             sb.appendLine("    __cd_target=\"\$(pwd)\"")
@@ -1629,7 +1635,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("    [ -n \"\$__cd_canon_alias\" ] && set -- --add-dir \"\$__cd_canon_alias\" \"\$@\"")
             sb.appendLine("    [ -n \"\$__cd_alias\" ] && set -- --add-dir \"\$__cd_alias\" \"\$@\"")
             sb.appendLine("    [ \"\$__cd_target\" != \"\$__cd_canon\" ] && set -- --add-dir \"\$__cd_target\" \"\$@\"")
-            sb.appendLine("    [ \"\$__sandbox_seen\" = 0 ] && set -- --sandbox workspace-write \"\$@\"")
+            sb.appendLine("    [ \"\$__sandbox_seen\" = 0 ] && set -- --sandbox danger-full-access \"\$@\"")
             sb.appendLine("    set -- --cd \"\$__cd_canon\" --add-dir \"\$__cd_canon\" --skip-git-repo-check \"\$@\"")
             sb.appendLine("  fi")
             sb.appendLine("  SHELLY_LIB_DIR=\"\$SHELLY_LIB_DIR\" SHELLY_CODEX_EXEC_PATH=\"\$__exec\" SHELLY_CODEX_PROC_EXE_SHIM=1 SHELLY_CODEX_PROC_EXE_OPEN_SHIM=1 LD_PRELOAD=\"\$SHELLY_LIB_DIR/libexec_wrapper.so\" LD_LIBRARY_PATH=\"\$SHELLY_LIB_DIR\" exec /system/bin/linker64 \"\$__exec\" \"\$@\"")
@@ -3864,7 +3870,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      [ -n \"\$__cd_alias\" ] && __codex_args+=(--add-dir \"\$__cd_alias\")")
             sb.appendLine("      [ -n \"\$__cd_canon_alias\" ] && __codex_args+=(--add-dir \"\$__cd_canon_alias\")")
             sb.appendLine("    fi")
-            sb.appendLine("    [ \"\$__include_skip\" = \"1\" ] && [ \"\$__has_sandbox\" = \"0\" ] && __codex_args+=(--sandbox workspace-write)")
+            sb.appendLine("    [ \"\$__include_skip\" = \"1\" ] && [ \"\$__has_sandbox\" = \"0\" ] && __codex_args+=(--sandbox danger-full-access)")
             sb.appendLine("    [ \"\$__include_skip\" = \"1\" ] && __codex_args+=(--skip-git-repo-check)")
             sb.appendLine("    __codex_args+=(\"\$@\")")
             sb.appendLine("  }")
@@ -4281,7 +4287,7 @@ else { console.error("usage: node shelly-patcher.js codex <libDir> [<nm>] | gemi
             sb.appendLine("      (cd \"\$__work_canon\" && git init -q && git add README.md && git -c user.email=shelly@local -c user.name=Shelly commit -q -m init) >/dev/null 2>&1 || true")
             sb.appendLine("    fi")
             sb.appendLine("    echo \"[codex-patch-canary] running codex exec patch canary\"")
-            sb.appendLine("    __out=\$(cd \"\$__work_canon\" && HOME=\"\$HOME\" CODEX_HOME=\"\${CODEX_HOME:-\$HOME/.codex}\" TERM=\"\${TERM:-xterm-256color}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" PATH=\"\$HOME/bin:$libDir:\${PATH:-/system/bin:/vendor/bin}\" timeout 240 /system/bin/env SHELLY_CODEX_EXEC_PATH=\"\$__chosen_exec\" SHELLY_CODEX_PROC_EXE_SHIM=1 SHELLY_CODEX_PROC_EXE_OPEN_SHIM=1 LD_PRELOAD=\"$libDir/libexec_wrapper.so\" LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"\$__chosen_exec\" --sandbox workspace-write --cd \"\$__work_canon\" --add-dir \"\$__work_canon\" --add-dir \"\$__work\" --add-dir \"\$__work_alias\" --add-dir \"\$__work_canon_alias\" --skip-git-repo-check \"\$__prompt\" 2>&1)")
+            sb.appendLine("    __out=\$(cd \"\$__work_canon\" && HOME=\"\$HOME\" CODEX_HOME=\"\${CODEX_HOME:-\$HOME/.codex}\" TERM=\"\${TERM:-xterm-256color}\" TMPDIR=\"\${TMPDIR:-\$HOME/.tmp}\" PATH=\"\$HOME/bin:$libDir:\${PATH:-/system/bin:/vendor/bin}\" timeout 240 /system/bin/env SHELLY_CODEX_EXEC_PATH=\"\$__chosen_exec\" SHELLY_CODEX_PROC_EXE_SHIM=1 SHELLY_CODEX_PROC_EXE_OPEN_SHIM=1 LD_PRELOAD=\"$libDir/libexec_wrapper.so\" LD_LIBRARY_PATH=\"\$SHELLY_LD_LIBRARY_PATH\" /system/bin/linker64 \"\$__chosen_exec\" --sandbox danger-full-access --cd \"\$__work_canon\" --add-dir \"\$__work_canon\" --add-dir \"\$__work\" --add-dir \"\$__work_alias\" --add-dir \"\$__work_canon_alias\" --skip-git-repo-check \"\$__prompt\" 2>&1)")
             sb.appendLine("    __rc=\$?")
             sb.appendLine("    printf '%s\\n' \"\$__out\" | sed -n '1,220p'")
             sb.appendLine("    echo \"[codex-patch-canary] README.md\"")
