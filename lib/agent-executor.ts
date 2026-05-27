@@ -497,7 +497,7 @@ WRAPPEREOF
 }
 
 find_local_llm_model() {
-  model_name="\${1:-Qwen3.5-4B-Q4_K_M}"
+  model_name="\${1:-Qwen3-4B-Instruct-2507-Q4_K_M}"
   if [ -n "\${LOCAL_LLM_MODEL_PATH:-}" ] && [ -f "$LOCAL_LLM_MODEL_PATH" ]; then
     printf '%s\\n' "$LOCAL_LLM_MODEL_PATH"
     return 0
@@ -516,11 +516,10 @@ find_local_llm_model() {
     fi
   done
 
-  search_pattern='Qwen3.5.*4B.*Q4_K_M\\|Qwen3.5.*Q4_K_M.*4B'
+  search_pattern='Qwen3.*4B.*Q4_K_M\\|Qwen3.*Q4_K_M.*4B'
   case "$(printf '%s' "$model_name" | tr '[:upper:]' '[:lower:]')" in
-    *9b*) search_pattern='Qwen3.5.*9B.*Q4_K_M\\|Qwen3.5.*Q4_K_M.*9B' ;;
     *8b*) search_pattern='Qwen3.*8B.*Q4_K_M\\|Qwen3.*Q4_K_M.*8B' ;;
-    *4b*) search_pattern='Qwen3.5.*4B.*Q4_K_M\\|Qwen3.5.*Q4_K_M.*4B' ;;
+    *4b*) search_pattern='Qwen3.*4B.*Q4_K_M\\|Qwen3.*Q4_K_M.*4B' ;;
   esac
 
   for dir in "$HOME/models" "$HOME" "/sdcard/Download" "/sdcard/models" "/sdcard/llama" "/sdcard/Documents/models" "/sdcard/Models"; do
@@ -537,7 +536,7 @@ find_local_llm_model() {
 
 ensure_local_llm_server() {
   base_url="$1"
-  model_name="\${2:-Qwen3.5-4B-Q4_K_M}"
+  model_name="\${2:-Qwen3-4B-Instruct-2507-Q4_K_M}"
   reason_file="$TMP_DIR/local-llm-start-$AGENT_ID.reason"
   : > "$reason_file"
 
@@ -883,7 +882,7 @@ rm -f "$PROMPT_FILE"`;
     case 'gemini-api':
       return geminiApiCommand(escapedPrompt, resultVar, tool.model);
     case 'local':
-      const localModel = (tool.model || 'Qwen3.5-4B-Q4_K_M').replace(/"/g, '\\"');
+      const localModel = (tool.model || 'Qwen3-4B-Instruct-2507-Q4_K_M').replace(/"/g, '\\"');
       return `PROMPT_FILE="$HOME/.shelly/tmp/agent-prompt-$AGENT_ID.txt"
 	REQUEST_FILE="$HOME/.shelly/tmp/agent-request-$AGENT_ID.json"
 	printf '%s\\n%s\\n' '${escapedPrompt}' "$SOURCE_CONTEXT" > "$PROMPT_FILE"
@@ -947,7 +946,7 @@ fi`;
 
 function articleEvalCommand(rawPrompt: string, resultVar: string, localModel?: string, codexCmd?: string): string {
   const promptMarker = `SHELLY_AB_PROMPT_${Math.random().toString(36).slice(2)}`;
-  const localModelValue = (localModel || 'Qwen3.5-4B-Q4_K_M').replace(/"/g, '\\"');
+  const localModelValue = (localModel || 'Qwen3-4B-Instruct-2507-Q4_K_M').replace(/"/g, '\\"');
   const codexCmdValue = (codexCmd || 'codex').replace(/"/g, '\\"');
   return `PROJECT_DIR="\${SHELLY_CONTENT_PROJECT:-$HOME/projects/shelly-content-studio}"
 LOCAL_URL="\${LOCAL_LLM_URL:-http://127.0.0.1:8080}"
@@ -1070,7 +1069,7 @@ $(cat "$RUN_DIR/metrics.json")
 EVALEOF
 
 cat > ${resultVar} <<RESULTEOF
-# Qwen3.5 local vs Codex A/B Article Eval
+# Qwen3 local vs Codex A/B Article Eval
 
 Run directory: $RUN_DIR
 
