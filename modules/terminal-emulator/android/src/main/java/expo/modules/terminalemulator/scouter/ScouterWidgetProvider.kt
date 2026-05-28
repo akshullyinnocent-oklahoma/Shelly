@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import android.widget.RemoteViews
 import expo.modules.terminalemulator.R
 import java.text.SimpleDateFormat
@@ -17,25 +18,28 @@ import java.util.Locale
 
 class ScouterWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
-        val store = ScouterStateStore(context)
-        val snapshots = if (store.isEnabled()) store.all() else emptyList()
-        val load = ScouterSystemSampler(context).sample()
-        ids.forEach { id ->
-            manager.updateAppWidget(id, render(context, snapshots, load))
-        }
+        runCatching { updateWidgets(context, manager, ids) }
+            .onFailure { Log.w(TAG, "Scouter widget update failed", it) }
     }
 
     companion object {
         fun updateAll(context: Context) {
-            val manager = AppWidgetManager.getInstance(context)
-            val component = ComponentName(context, ScouterWidgetProvider::class.java)
-            val ids = manager.getAppWidgetIds(component)
-            if (ids.isEmpty()) return
+            runCatching {
+                val manager = AppWidgetManager.getInstance(context)
+                val component = ComponentName(context, ScouterWidgetProvider::class.java)
+                val ids = manager.getAppWidgetIds(component)
+                if (ids.isEmpty()) return
+                updateWidgets(context, manager, ids)
+            }.onFailure { Log.w(TAG, "Scouter widget updateAll failed", it) }
+        }
+
+        private fun updateWidgets(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val store = ScouterStateStore(context)
             val snapshots = if (store.isEnabled()) store.all() else emptyList()
             val load = ScouterSystemSampler(context).sample()
             ids.forEach { id ->
-                manager.updateAppWidget(id, render(context, snapshots, load))
+                runCatching { manager.updateAppWidget(id, render(context, snapshots, load)) }
+                    .onFailure { Log.w(TAG, "Scouter widget update failed for id=$id", it) }
             }
         }
 
@@ -305,6 +309,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             return SimpleDateFormat(pattern, Locale.US).format(Date(time))
         }
 
+        private const val TAG = "ScouterWidget"
         private const val STALE_AFTER_MS = 10 * 60 * 1000L
     }
 }

@@ -107,7 +107,10 @@ class TerminalEmulatorModule : Module() {
             for (session in sessions.values) {
                 session.emitEvent = ::emitEvent
             }
-            appContext.reactContext?.let { ScouterLifecycleService.get(it).ensureStartedIfEnabled() }
+            appContext.reactContext?.let { context ->
+                runCatching { ScouterLifecycleService.get(context).ensureStartedIfEnabled() }
+                    .onFailure { Log.w("TerminalEmulator", "Scouter autostart skipped after startup failure", it) }
+            }
             Log.i("TerminalEmulator", "OnCreate: rewired ${sessions.size} surviving session(s)")
         }
 
@@ -506,7 +509,16 @@ class TerminalEmulatorModule : Module() {
             val context = appContext.reactContext
                 ?: throw IllegalStateException("React context unavailable")
             val scouter = ScouterLifecycleService.get(context)
-            if (enabled) scouter.start() else scouter.stop()
+            runCatching {
+                if (enabled) scouter.start() else scouter.stop()
+            }.onFailure { error ->
+                Log.w("TerminalEmulator", "setScouterEnabled($enabled) failed", error)
+                if (enabled) {
+                    runCatching { scouter.stop() }
+                        .onFailure { Log.w("TerminalEmulator", "Failed to clean up Scouter after enable failure", it) }
+                }
+                throw IllegalStateException("Scouter failed to ${if (enabled) "start" else "stop"}", error)
+            }
             null
         }
 

@@ -8,7 +8,7 @@ import org.json.JSONObject
 class ScouterLifecycleService private constructor(private val context: Context) {
     private val appContext = context.applicationContext
     private val store = ScouterStateStore(appContext)
-    private val notificationDispatcher = NotificationDispatcher(appContext)
+    private val notificationDispatcher by lazy { NotificationDispatcher(appContext) }
     private var server: HookHttpServer? = null
     private var watcher: JsonlWatcher? = null
     private val longRunningChecks = mutableMapOf<String, Long>()
@@ -18,12 +18,29 @@ class ScouterLifecycleService private constructor(private val context: Context) 
         store.setEnabled(true)
         val token = store.getSessionToken()
         if (server == null) {
-            server = HookHttpServer(token) { handleEvent(it) }.also {
-                store.setRuntimePort(it.start())
+            val newServer = HookHttpServer(token) { handleEvent(it) }
+            runCatching {
+                val port = newServer.start()
+                store.setRuntimePort(port)
+                server = newServer
+            }.onFailure { error ->
+                runCatching { newServer.stop() }
+                    .onFailure { Log.w(TAG, "Failed to clean up Hook server after start failure", it) }
+                runCatching { store.setRuntimePort(-1) }
+                    .onFailure { Log.w(TAG, "Failed to reset Scouter runtime port after start failure", it) }
+                throw error
             }
         }
         if (watcher == null) {
-            watcher = JsonlWatcher(HomeInitializer.getHomeDir(appContext)) { handleEvent(it) }.also { it.start() }
+            val newWatcher = JsonlWatcher(HomeInitializer.getHomeDir(appContext)) { handleEvent(it) }
+            runCatching {
+                newWatcher.start()
+                watcher = newWatcher
+            }.onFailure { error ->
+                runCatching { newWatcher.stop() }
+                    .onFailure { Log.w(TAG, "Failed to clean up JSONL watcher after start failure", it) }
+                throw error
+            }
         }
         handleEvent(ShellyStateBridge.snapshot())
     }
@@ -38,19 +55,30 @@ class ScouterLifecycleService private constructor(private val context: Context) 
         store.setRuntimePort(-1)
         store.clearSnapshots()
         longRunningChecks.clear()
-        ScouterWidgetProvider.updateAll(appContext)
+        runCatching { ScouterWidgetProvider.updateAll(appContext) }
+            .onFailure { Log.w(TAG, "Widget refresh failed while stopping Scouter", it) }
     }
 
     @Synchronized
     fun ensureStartedIfEnabled() {
-        if (store.isEnabled()) start()
+        if (!store.isEnabled()) return
+        runCatching { start() }
+            .onFailure { Log.w(TAG, "Scouter autostart failed; keeping Shelly startup alive", it) }
     }
 
     fun isEnabled(): Boolean = store.isEnabled()
 
     fun debugJson(): JSONObject {
         val base = store.debugJson()
-        base.put("systemLoad", ScouterSystemSampler(appContext).sample().toJson())
+        val systemLoad = runCatching { ScouterSystemSampler(appContext).sample().toJson() }
+            .getOrElse { error ->
+                Log.w(TAG, "System load debug sample failed", error)
+                JSONObject().apply {
+                    put("sampledAt", System.currentTimeMillis())
+                    put("error", error.javaClass.simpleName)
+                }
+            }
+        base.put("systemLoad", systemLoad)
         base.put("serverRunning", server != null)
         base.put("jsonlWatcherRunning", watcher != null)
         base.put("hookTokenPreview", store.getSessionToken().take(6) + "…")
@@ -79,11 +107,18 @@ class ScouterLifecycleService private constructor(private val context: Context) 
     }
 
     private fun handleEvent(event: ScouterEvent) {
-        val snapshot = store.upsert(event)
+        val snapshot = runCatching { store.upsert(event) }
+            .getOrElse {
+                Log.w(TAG, "Dropping Scouter event after store failure source=${event.source} type=${event.eventType}", it)
+                return
+            }
         Log.i(TAG, "event source=${event.source} type=${event.eventType} status=${event.derivedStatus} session=${event.sessionId}")
-        ScouterWidgetProvider.updateAll(appContext)
-        notificationDispatcher.maybeNotify(event, snapshot)
-        scheduleLongRunningCheck(snapshot)
+        runCatching { ScouterWidgetProvider.updateAll(appContext) }
+            .onFailure { Log.w(TAG, "Widget refresh failed after Scouter event", it) }
+        runCatching { notificationDispatcher.maybeNotify(event, snapshot) }
+            .onFailure { Log.w(TAG, "Notification dispatch failed after Scouter event", it) }
+        runCatching { scheduleLongRunningCheck(snapshot) }
+            .onFailure { Log.w(TAG, "Long-running check scheduling failed", it) }
     }
 
     @Synchronized
@@ -104,6 +139,8 @@ class ScouterLifecycleService private constructor(private val context: Context) 
                 }
             } catch (_: InterruptedException) {
                 // Best-effort timer; Scouter Phase 1A has no foreground worker.
+            } catch (error: Throwable) {
+                Log.w(TAG, "Long-running check failed", error)
             }
         }, "ScouterLongRunningCheck").apply {
             isDaemon = true

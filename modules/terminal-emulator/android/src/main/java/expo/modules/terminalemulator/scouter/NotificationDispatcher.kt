@@ -6,23 +6,26 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import expo.modules.terminalemulator.R
 
 class NotificationDispatcher(private val context: Context) {
     private val notificationManager = context.getSystemService(NotificationManager::class.java)
 
     init {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            notificationManager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "Scouter",
-                    NotificationManager.IMPORTANCE_DEFAULT
-                ).apply {
-                    description = "Scouter agent session updates"
-                }
-            )
-        }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                notificationManager.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_ID,
+                        "Scouter",
+                        NotificationManager.IMPORTANCE_DEFAULT
+                    ).apply {
+                        description = "Scouter agent session updates"
+                    }
+                )
+            }
+        }.onFailure { Log.w(TAG, "Failed to create Scouter notification channel", it) }
     }
 
     fun maybeNotify(event: ScouterEvent, snapshot: SessionSnapshot) {
@@ -46,33 +49,37 @@ class NotificationDispatcher(private val context: Context) {
     }
 
     private fun notify(id: Int, title: String, text: String) {
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        val pendingLaunch = if (launchIntent != null) {
-            PendingIntent.getActivity(
-                context,
-                id,
-                launchIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        } else null
+        runCatching {
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            val pendingLaunch = if (launchIntent != null) {
+                PendingIntent.getActivity(
+                    context,
+                    id,
+                    launchIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            } else null
 
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(context, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(context)
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(context, CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(context)
+            }
+            val notification = builder
+                .setContentTitle(title)
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.ic_menu_view)
+                .setContentIntent(pendingLaunch)
+                .setAutoCancel(true)
+                .build()
+            notificationManager.notify(id, notification)
         }
-        val notification = builder
-            .setContentTitle(title)
-            .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentIntent(pendingLaunch)
-            .setAutoCancel(true)
-            .build()
-        notificationManager.notify(id, notification)
+            .onFailure { Log.w(TAG, "Failed to post Scouter notification id=$id", it) }
     }
 
     companion object {
+        private const val TAG = "ScouterNotification"
         private const val CHANNEL_ID = "scouter"
     }
 }

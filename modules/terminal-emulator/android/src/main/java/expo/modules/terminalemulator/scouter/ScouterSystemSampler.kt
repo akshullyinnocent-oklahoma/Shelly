@@ -3,6 +3,7 @@ package expo.modules.terminalemulator.scouter
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Debug
+import android.util.Log
 import org.json.JSONObject
 import java.io.File
 
@@ -18,13 +19,17 @@ data class ScouterSystemLoad(
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("sampledAt", sampledAt)
-        put("cpuPercent", cpuPercent)
-        put("appCpuPercent", appCpuPercent)
-        put("appPssMb", appPssMb)
+        putNullable("cpuPercent", cpuPercent)
+        putNullable("appCpuPercent", appCpuPercent)
+        putNullable("appPssMb", appPssMb)
         put("appHeapUsedMb", appHeapUsedMb)
         put("appHeapMaxMb", appHeapMaxMb)
-        put("ramAvailableMb", ramAvailableMb)
-        put("ramTotalMb", ramTotalMb)
+        putNullable("ramAvailableMb", ramAvailableMb)
+        putNullable("ramTotalMb", ramTotalMb)
+    }
+
+    private fun JSONObject.putNullable(name: String, value: Any?) {
+        put(name, value ?: JSONObject.NULL)
     }
 }
 
@@ -33,6 +38,14 @@ class ScouterSystemSampler(context: Context) {
     private val prefs = appContext.getSharedPreferences("scouter_system_load", Context.MODE_PRIVATE)
 
     fun sample(): ScouterSystemLoad {
+        return runCatching { sampleUnsafe() }
+            .getOrElse {
+                Log.w(TAG, "System load sample failed; returning fallback values", it)
+                fallback(System.currentTimeMillis())
+            }
+    }
+
+    private fun sampleUnsafe(): ScouterSystemLoad {
         val now = System.currentTimeMillis()
         val ticks = readCpuTicks()
         val appTicks = readAppCpuTicks()
@@ -91,6 +104,20 @@ class ScouterSystemSampler(context: Context) {
         return ActivityManager.MemoryInfo().also { manager.getMemoryInfo(it) }
     }
 
+    private fun fallback(now: Long): ScouterSystemLoad {
+        val runtime = Runtime.getRuntime()
+        return ScouterSystemLoad(
+            sampledAt = now,
+            cpuPercent = null,
+            appCpuPercent = null,
+            appPssMb = null,
+            appHeapUsedMb = (runtime.totalMemory() - runtime.freeMemory()).toMb(),
+            appHeapMaxMb = runtime.maxMemory().toMb(),
+            ramAvailableMb = null,
+            ramTotalMb = null
+        )
+    }
+
     private fun readCpuTicks(): CpuTicks? {
         val line = runCatching {
             File("/proc/stat").useLines { lines ->
@@ -126,6 +153,7 @@ class ScouterSystemSampler(context: Context) {
     private data class CpuTicks(val total: Long, val idle: Long)
 
     companion object {
+        private const val TAG = "ScouterSystemSampler"
         private const val KEY_CPU_TOTAL = "cpu_total"
         private const val KEY_CPU_IDLE = "cpu_idle"
         private const val KEY_APP_CPU_TOTAL = "app_cpu_total"
