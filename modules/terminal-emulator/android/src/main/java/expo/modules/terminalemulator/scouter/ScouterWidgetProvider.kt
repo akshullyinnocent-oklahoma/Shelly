@@ -59,8 +59,11 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 metricsId = R.id.scouter_codex_metrics,
                 emptyTitle = "AGENT: CODEX",
                 emptyBadge = "CX",
-                emptyDetail = "State: no Codex session",
-                emptyMetrics = "Usage: watching ~/.codex/sessions"
+                emptyDetail = "STATE  WAIT [..] no Codex session",
+                emptyMetrics = listOf(
+                    "CTX [..........] --% · TOK --",
+                    "FLOW in -- / out -- · CACHE --"
+                ).joinToString("\n")
             )
             bindRow(
                 views = views,
@@ -72,8 +75,11 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 metricsId = R.id.scouter_local_metrics,
                 emptyTitle = "MODEL: LOCAL LLM",
                 emptyBadge = "LL",
-                emptyDetail = "State: no local endpoint",
-                emptyMetrics = "Probe: 8080 / 11434"
+                emptyDetail = "HEALTH LINK [--] no local endpoint",
+                emptyMetrics = listOf(
+                    "WAVE ........ · TPS --",
+                    "PING --ms · PROBE 8080/11434"
+                ).joinToString("\n")
             )
             val latestAt = listOfNotNull(codex?.lastEventAt, local?.lastEventAt).maxOrNull()
             views.setTextViewText(
@@ -150,7 +156,11 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 agentStatus(snapshot, project)
             }
             val label = if (snapshot.source == ScouterSource.LOCAL_LLM) "HEALTH" else "STATE "
-            return if (stale) "STALE  $status" else "$label $status"
+            return if (stale) {
+                "STALE ${statusSignal(snapshot.currentStatus, stale)} $status"
+            } else {
+                "$label ${statusSignal(snapshot.currentStatus, stale)} $status"
+            }
         }
 
         private fun agentStatus(snapshot: SessionSnapshot, project: String): String {
@@ -183,38 +193,44 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         }
 
         private fun codexMetrics(snapshot: SessionSnapshot): String {
-            val parts = mutableListOf<String>()
-            parts += contextGauge(snapshot)
-            snapshot.modelName?.takeIf { it.isNotBlank() }?.let { parts += "MODEL ${shortModelName(it)}" }
-            if (snapshot.tokensUsed > 0L) parts += "tok ${formatTokens(snapshot.tokensUsed)}"
-            if (snapshot.inputTokens > 0L || snapshot.outputTokens > 0L) {
-                parts += "FLOW in ${formatTokens(snapshot.inputTokens)} / out ${formatTokens(snapshot.outputTokens)}"
+            val lines = mutableListOf<String>()
+            val contextParts = mutableListOf<String>()
+            contextParts += contextGauge(snapshot)
+            snapshot.modelName?.takeIf { it.isNotBlank() }?.let { contextParts += "MODEL ${shortModelName(it)}" }
+            if (snapshot.contextPercentRemaining != null && snapshot.tokensUsed > 0L) {
+                contextParts += "TOK ${formatTokens(snapshot.tokensUsed)}"
             }
-            if (snapshot.reasoningOutputTokens > 0L) parts += "reason ${formatTokens(snapshot.reasoningOutputTokens)}"
+            lines += contextParts.filter { it.isNotBlank() }.joinToString(" · ")
+
+            val flowParts = mutableListOf<String>()
+            if (snapshot.inputTokens > 0L || snapshot.outputTokens > 0L) {
+                flowParts += "FLOW in ${formatTokens(snapshot.inputTokens)} / out ${formatTokens(snapshot.outputTokens)}"
+            }
+            if (snapshot.reasoningOutputTokens > 0L) flowParts += "REASON ${formatTokens(snapshot.reasoningOutputTokens)}"
             val cacheTokens = snapshot.cacheCreationInputTokens + snapshot.cacheReadInputTokens
-            if (cacheTokens > 0L) parts += "CACHE ${formatTokens(cacheTokens)}"
-            snapshot.lastMessage?.takeIf { it.isNotBlank() }?.let { parts += "LAST ${shorten(it.redactForScouter(), 22)}" }
-            return parts.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.joinToString(" · ")
-                ?: "Session ${shortSessionId(snapshot.sessionId)}"
+            if (cacheTokens > 0L) flowParts += "CACHE ${formatTokens(cacheTokens)}"
+            if (flowParts.isEmpty()) {
+                flowParts += "TRACE ${formatTime(snapshot.lastEventAt)}"
+                flowParts += "SID ${shortSessionId(snapshot.sessionId)}"
+            }
+            lines += flowParts.joinToString(" · ")
+
+            return lines.filter { it.isNotBlank() }.joinToString("\n")
         }
 
         private fun localMetrics(snapshot: SessionSnapshot): String {
-            val parts = mutableListOf<String>()
-            snapshot.tokensPerSecond?.takeIf { it > 0.0 }?.let { parts += "WAVE ${sparkline(it, 80.0)}" }
-            val perf = localPerf(snapshot)
-            if (perf.isNotBlank()) parts += perf
-            snapshot.localEndpoint?.let { parts += "END $it" }
-            snapshot.queueSize?.let { parts += "QUEUE $it" }
-            snapshot.lastMessage?.takeIf { it.isNotBlank() }?.let { parts += "LAST ${shorten(it.redactForScouter(), 22)}" }
-            return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
-                ?: "PERF   probe 8080 / 11434"
-        }
-
-        private fun localPerf(snapshot: SessionSnapshot): String {
-            val parts = mutableListOf<String>()
-            snapshot.tokensPerSecond?.takeIf { it > 0.0 }?.let { parts += String.format(Locale.US, "TPS %.1f", it) }
-            snapshot.latencyMs?.let { parts += "PING ${it}ms" }
-            return parts.takeIf { it.isNotEmpty() }?.joinToString(" / ")?.let { "PERF $it" } ?: ""
+            val lines = mutableListOf<String>()
+            val wave = snapshot.tokensPerSecond?.takeIf { it > 0.0 }?.let { sparkline(it, 80.0) } ?: "........"
+            val tps = snapshot.tokensPerSecond?.takeIf { it > 0.0 }?.let {
+                String.format(Locale.US, "TPS %.1f", it)
+            } ?: "TPS --"
+            lines += "WAVE $wave · $tps"
+            val linkParts = mutableListOf<String>()
+            snapshot.latencyMs?.let { linkParts += "PING ${it}ms" } ?: run { linkParts += "PING --ms" }
+            snapshot.localEndpoint?.let { linkParts += "END ${shortEndpoint(it)}" } ?: run { linkParts += "END none" }
+            snapshot.queueSize?.let { linkParts += "Q $it" }
+            lines += linkParts.joinToString(" · ")
+            return lines.filter { it.isNotBlank() }.joinToString("\n")
         }
 
         private fun loadLine(load: ScouterSystemLoad): String {
@@ -232,6 +248,19 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             return if (snapshot.tokensUsed > 0L) "TOK ${formatTokens(snapshot.tokensUsed)}" else ""
         }
 
+        private fun statusSignal(status: ScouterStatus, stale: Boolean): String {
+            if (stale) return "[--]"
+            val frame = ((System.currentTimeMillis() / 1000L) % 4L).toInt()
+            return when (status) {
+                ScouterStatus.TOOL_RUNNING -> listOf("[>..]", "[>>.]", "[>>>]", "[.>>]")[frame]
+                ScouterStatus.THINKING -> listOf("[o..]", "[.o.]", "[..o]", "[.o.]")[frame]
+                ScouterStatus.WAITING_PERMISSION -> "[??]"
+                ScouterStatus.ERROR -> "[!!]"
+                ScouterStatus.COMPLETED -> "[OK]"
+                ScouterStatus.IDLE -> "[..]"
+            }
+        }
+
         private fun bar(percent: Double): String {
             val filled = ((percent.coerceIn(0.0, 100.0) / 10.0).toInt()).coerceIn(0, 10)
             return "[" + "#".repeat(filled) + ".".repeat(10 - filled) + "]"
@@ -240,8 +269,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private fun sparkline(value: Double, max: Double): String {
             val levels = listOf("▁", "▂", "▃", "▄", "▅", "▆", "▇", "█")
             val level = ((value.coerceIn(0.0, max) / max) * (levels.size - 1)).toInt()
-            val wave = listOf(-3, -1, 1, 3, 2, 0, -2, 0, 2, 3, 1, -1)
+            val wave = listOf(-3, -1, 1, 3, 2, 0, -2, 0)
             return wave.joinToString("") { offset -> levels[(level + offset).coerceIn(0, levels.lastIndex)] }
+        }
+
+        private fun shortEndpoint(endpoint: String): String {
+            return endpoint.substringAfterLast(':', endpoint).let { port ->
+                if (port.isNotBlank() && port.all { it.isDigit() }) ":$port" else shorten(endpoint, 16)
+            }
         }
 
         private fun displayProjectName(raw: String): String {

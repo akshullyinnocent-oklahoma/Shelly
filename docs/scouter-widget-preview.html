@@ -42,7 +42,7 @@
 
     .widget {
       width: min(760px, 100%);
-      min-height: 168px;
+      height: 168px;
       padding: 11px 12px 10px;
       background: var(--panel);
       color: var(--text);
@@ -59,8 +59,8 @@
     }
 
     .lane + .lane {
-      margin-top: 10px;
-      padding-top: 9px;
+      margin-top: 7px;
+      padding-top: 7px;
       border-top: 1px solid var(--line);
     }
 
@@ -109,7 +109,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       color: #7ddb7d;
-      font-size: 15px;
+      font-size: 13px;
       font-weight: 800;
     }
 
@@ -117,10 +117,11 @@
       margin-top: 4px;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
+      white-space: normal;
       color: var(--crt-soft);
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 700;
+      line-height: 1.32;
     }
 
     .metrics .strong {
@@ -159,7 +160,7 @@
       }
 
       .widget {
-        min-height: 150px;
+        height: 150px;
         padding: 9px 10px;
       }
 
@@ -186,8 +187,11 @@
           <div class="title">AGENT  CODEX@SHELLY</div>
           <div class="badge">CX</div>
         </div>
-        <div class="status">STATE  ● running exec in terminal-emulator</div>
-        <div class="metrics"><span class="hot">CTX [######....] 64%</span> · MODEL gpt-5.2 · FLOW in 92.1K / out 8.3K · REASON 21.6K · <span class="hot">CACHE 61.8K</span></div>
+        <div class="status">STATE [>>.] Running exec in terminal-emulator</div>
+        <div class="metrics">
+          <div><span class="hot">CTX [######....] 64%</span> · MODEL 5.5 · TOK 128.4K</div>
+          <div>FLOW in 92.1K / out 8.3K · REASON 21.6K · <span class="hot">CACHE 61.8K</span></div>
+        </div>
       </div>
 
       <div class="lane">
@@ -196,8 +200,11 @@
           <div class="title">MODEL  qwen3-8b-q4</div>
           <div class="badge">LL</div>
         </div>
-        <div class="status">HEALTH ● ready · llama.cpp</div>
-        <div class="metrics"><span class="hot">WAVE ▁▃▅█▇▄▂▄▇█▅▃</span> · <span class="hot">PERF TPS 42.7 / PING 21ms</span> · END 127.0.0.1:8080 · QUEUE 0</div>
+        <div class="status">HEALTH [OK] Ready · llama.cpp</div>
+        <div class="metrics">
+          <div><span class="hot">WAVE ▁▃▅█▇▄▂▄</span> · TPS 42.7</div>
+          <div>PING 21ms · END :8080 · Q 0</div>
+        </div>
       </div>
 
       <div class="footer">LOAD CPU 37% · RAM 5.8G free · updated 18:24:16</div>

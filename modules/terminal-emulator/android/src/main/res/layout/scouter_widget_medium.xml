@@ -10,9 +10,9 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:paddingStart="10dp"
-    android:paddingTop="8dp"
+    android:paddingTop="7dp"
     android:paddingEnd="10dp"
-    android:paddingBottom="8dp"
+    android:paddingBottom="5dp"
     android:background="@drawable/scouter_widget_bg">
 
     <LinearLayout
@@ -40,7 +40,8 @@
         android:textColor="#F4FFF4"
         android:textSize="14sp"
         android:typeface="monospace"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:includeFontPadding="false" />
 
       <TextView
         android:id="@+id/scouter_codex_badge"
@@ -55,21 +56,23 @@
         android:textColor="#001200"
         android:textSize="10sp"
         android:typeface="monospace"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:includeFontPadding="false" />
     </LinearLayout>
 
     <TextView
       android:id="@+id/scouter_codex_detail"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:layout_marginTop="4dp"
+      android:layout_marginTop="3dp"
       android:ellipsize="end"
       android:singleLine="true"
       android:text="No Codex session"
       android:textColor="#7DDB7D"
-      android:textSize="12sp"
+      android:textSize="11sp"
       android:typeface="monospace"
-      android:textStyle="bold" />
+      android:textStyle="bold"
+      android:includeFontPadding="false" />
 
     <TextView
       android:id="@+id/scouter_codex_metrics"
@@ -77,18 +80,20 @@
       android:layout_height="wrap_content"
       android:layout_marginTop="2dp"
       android:ellipsize="end"
-      android:singleLine="true"
+      android:maxLines="2"
       android:text="Waiting for ~/.codex/sessions"
       android:textColor="#9BC49B"
-      android:textSize="10sp"
+      android:textSize="9sp"
       android:typeface="monospace"
-      android:textStyle="bold" />
+      android:textStyle="bold"
+      android:lineSpacingExtra="0dp"
+      android:includeFontPadding="false" />
 
     <TextView
       android:layout_width="match_parent"
       android:layout_height="1dp"
-      android:layout_marginTop="6dp"
-      android:layout_marginBottom="5dp"
+      android:layout_marginTop="4dp"
+      android:layout_marginBottom="4dp"
       android:background="#33338F33"
       android:text="" />
 
@@ -117,7 +122,8 @@
         android:textColor="#F4FFF4"
         android:textSize="14sp"
         android:typeface="monospace"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:includeFontPadding="false" />
 
       <TextView
         android:id="@+id/scouter_local_badge"
@@ -132,21 +138,23 @@
         android:textColor="#001200"
         android:textSize="10sp"
         android:typeface="monospace"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:includeFontPadding="false" />
     </LinearLayout>
 
     <TextView
       android:id="@+id/scouter_local_detail"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:layout_marginTop="4dp"
+      android:layout_marginTop="3dp"
       android:ellipsize="end"
       android:singleLine="true"
       android:text="No local endpoint"
       android:textColor="#7DDB7D"
-      android:textSize="12sp"
+      android:textSize="11sp"
       android:typeface="monospace"
-      android:textStyle="bold" />
+      android:textStyle="bold"
+      android:includeFontPadding="false" />
 
     <TextView
       android:id="@+id/scouter_local_metrics"
@@ -154,24 +162,27 @@
       android:layout_height="wrap_content"
       android:layout_marginTop="2dp"
       android:ellipsize="end"
-      android:singleLine="true"
+      android:maxLines="2"
       android:text="Probe 8080 / 11434"
       android:textColor="#9BC49B"
-      android:textSize="10sp"
+      android:textSize="9sp"
       android:typeface="monospace"
-      android:textStyle="bold" />
+      android:textStyle="bold"
+      android:lineSpacingExtra="0dp"
+      android:includeFontPadding="false" />
 
     <TextView
       android:id="@+id/scouter_footer"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:layout_marginTop="4dp"
+      android:layout_marginTop="2dp"
       android:ellipsize="end"
       android:singleLine="true"
       android:text="updated --:--:--"
       android:textColor="#7A967A"
       android:textSize="9sp"
       android:typeface="monospace"
-      android:textStyle="bold" />
+      android:textStyle="bold"
+      android:includeFontPadding="false" />
   </LinearLayout>
 </FrameLayout>
