@@ -213,7 +213,7 @@ export const shellyPalette: Palette = {
   diffRemoveBorder: '#FF3366',
 };
 
-// ── Unit-00 palette — blue test-unit chrome with amber warnings.
+// ── Blue palette — cool chrome with amber warnings.
 export const bluePalette: Palette = {
   bgDeep:     '#000000',
   bgSurface:  '#000000',
@@ -265,7 +265,7 @@ export const bluePalette: Palette = {
   diffRemoveBorder: '#FF5A3C',
 };
 
-// ── Unit-02 palette — red production-unit chrome with orange heat.
+// ── Red palette — red chrome with orange heat.
 export const orangePalette: Palette = {
   bgDeep:     '#000000',
   bgSurface:  '#000000',
@@ -317,7 +317,7 @@ export const orangePalette: Palette = {
   diffRemoveBorder: '#FF2E1F',
 };
 
-// ── Unit-01 palette — purple test-type chrome with neon green sync.
+// ── Purple palette — purple chrome with neon green sync.
 export const purplePalette: Palette = {
   bgDeep:     '#000000',
   bgSurface:  '#000000',
@@ -326,8 +326,8 @@ export const purplePalette: Palette = {
 
   accent:        '#8B3FD6',
   accentGreen:   '#39FF14',
-  accentBlue:    '#5C6FFF',
-  accentSky:     '#A06FE0',
+  accentBlue:    '#A06FE0',
+  accentSky:     '#B56CFF',
   accentPurple:  '#8B3FD6',
   accentPink:    '#D24FFF',
   accentAmber:   '#C8FF3C',
@@ -864,6 +864,13 @@ export function applyThemePreset(id: ThemePresetId) {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const themeConfig = require('@/theme.config');
   Object.assign(themeConfig.colors, preset.colors);
+
+  // Keep the older useTheme()/Colors.dark runtime object in sync too.
+  // Several terminal block components still read that API, so leaving it
+  // stale made red/purple themes retain blue command/link accents.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { refreshRuntimeThemeColors } = require('@/lib/theme');
+  refreshRuntimeThemeColors(preset.colors);
 
   // 2. Re-bind the shared neon-glow style objects. They hold
   //    textShadowColor / shadowColor values keyed to the OLD palette;

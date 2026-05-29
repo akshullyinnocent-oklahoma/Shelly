@@ -19,7 +19,7 @@ export type TerminalTheme = {
 
 export const TERMINAL_THEMES: Record<string, TerminalTheme> = {
   blue: {
-    name: 'blue', label: '零号機 / UNIT-00',
+    name: 'blue', label: 'Blue',
     background: '#000000', foreground: '#D6ECF7', cursor: '#1CA9E0',
     black: '#050A0D', red: '#FF5A3C', green: '#2BD9C4', yellow: '#F2B705',
     blue: '#1CA9E0', magenta: '#6FA8D8', cyan: '#5CC8F0', white: '#D6ECF7',
@@ -28,7 +28,7 @@ export const TERMINAL_THEMES: Record<string, TerminalTheme> = {
     brightCyan: '#8BE8FF', brightWhite: '#FFFFFF',
   },
   orange: {
-    name: 'orange', label: '二号機 / UNIT-02',
+    name: 'orange', label: 'Red',
     background: '#000000', foreground: '#F7DCD6', cursor: '#FF8A00',
     black: '#1A0807', red: '#FF2E1F', green: '#FFB020', yellow: '#FFB800',
     blue: '#FF6A3C', magenta: '#E6504A', cyan: '#FFA060', white: '#F7DCD6',
@@ -37,12 +37,12 @@ export const TERMINAL_THEMES: Record<string, TerminalTheme> = {
     brightCyan: '#FFC090', brightWhite: '#FFFFFF',
   },
   purple: {
-    name: 'purple', label: '初号機 / UNIT-01',
+    name: 'purple', label: 'Purple',
     background: '#000000', foreground: '#E8DCF7', cursor: '#39FF14',
     black: '#160B26', red: '#FF3C5A', green: '#39FF14', yellow: '#C8FF3C',
-    blue: '#5C6FFF', magenta: '#D24FFF', cyan: '#A06FE0', white: '#E8DCF7',
+    blue: '#A06FE0', magenta: '#D24FFF', cyan: '#B56CFF', white: '#E8DCF7',
     brightBlack: '#5A4A70', brightRed: '#FF6A7E', brightGreen: '#75FF5A',
-    brightYellow: '#DAFF70', brightBlue: '#8490FF', brightMagenta: '#E38AFF',
+    brightYellow: '#DAFF70', brightBlue: '#C19AFF', brightMagenta: '#E38AFF',
     brightCyan: '#C19AFF', brightWhite: '#FFFFFF',
   },
   shelly: {
@@ -121,7 +121,7 @@ export const TERMINAL_THEMES: Record<string, TerminalTheme> = {
 
 const TERMINAL_THEME_ALIASES: Record<string, string> = {
   // Legacy UI preset ids retained in settings should land on the new
-  // EVA unit ANSI palettes instead of the old standalone terminal colors.
+  // three-color ANSI palettes instead of the old standalone terminal colors.
   shelly: 'purple',
   modal: 'purple',
   blackline: 'blue',

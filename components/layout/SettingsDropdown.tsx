@@ -575,9 +575,9 @@ function ThemeRow() {
         : rawUiFont;
   const updateSettings = useSettingsStore((s) => s.updateSettings);
   const options: { value: UiFontId; label: string; swatch: string }[] = [
-    { value: 'blue',   label: '零号機 / UNIT-00', swatch: themePresets.blue.colors.accent },
-    { value: 'orange', label: '二号機 / UNIT-02', swatch: themePresets.orange.colors.accent },
-    { value: 'purple', label: '初号機 / UNIT-01', swatch: themePresets.purple.colors.accent },
+    { value: 'blue',   label: 'Blue', swatch: themePresets.blue.colors.accent },
+    { value: 'orange', label: 'Red', swatch: themePresets.orange.colors.accent },
+    { value: 'purple', label: 'Purple', swatch: themePresets.purple.colors.accent },
   ];
   return (
     <Row label="Theme">

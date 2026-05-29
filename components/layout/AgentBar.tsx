@@ -56,9 +56,9 @@ export function AgentBar() {
   }, []);
 
   return (
-    <View style={[styles.bar, { backgroundColor: barBg }]}>
+    <View style={[styles.bar, { backgroundColor: barBg, borderBottomColor: C.border }]}>
       <View style={styles.logoMark} pointerEvents="none">
-        <Text style={styles.wordmark} numberOfLines={1}>
+        <Text style={[styles.wordmark, { color: C.accent }]} numberOfLines={1}>
           {SHELLY_WORDMARK}
         </Text>
       </View>
@@ -67,12 +67,18 @@ export function AgentBar() {
           Replaces the previous split into two adjacent buttons (dashboard
           + plus) which users kept confusing with each other. */}
       <Pressable
-        style={styles.addBtn}
+        style={[
+          styles.addBtn,
+          {
+            borderColor: withAlpha(C.accent, 0.35),
+            backgroundColor: withAlpha(C.accent, 0.08),
+          },
+        ]}
         hitSlop={8}
         onPress={() => setSheetVisible(true)}
         accessibilityLabel="Add pane or change layout"
       >
-        <Text style={styles.addBtnText}>+</Text>
+        <Text style={[styles.addBtnText, { color: C.accent }]}>+</Text>
       </Pressable>
 
       <View style={{ flex: 1 }} />

@@ -61,9 +61,9 @@ No Termux. No root. No remote dev server. A real AI coding CLI — today, OpenAI
 
 ## Why Shelly?
 
-Termux gives you a terminal but no AI-native workspace. ChatGPT gives you AI but no terminal. Replit runs in the cloud. Desktop AI coding CLIs are desktop-first.
+Termux is a terminal. ChatGPT is an AI chat. Replit is a cloud workspace. Desktop AI coding CLIs are desktop-first.
 
-Shelly exists for the gap between those tools: local terminal work, app-owned native PTYs, Codex CLI, AI panes, browser/docs, previews, and background API agents on the Android device you already carry.
+Shelly is the workspace that connects those pieces on the Android device you already carry: local terminal work, app-owned native PTYs, Codex CLI, AI panes, browser/docs, previews, and background API agents.
 
 ### The copy-paste problem
 
@@ -149,7 +149,7 @@ Shelly's foreground AI CLI is **Codex**. Everything else is an API provider you 
 
 | Surface | How to sign in | Notes |
 |---|---|---|
-| **Codex CLI** (ChatGPT subscription) | Run `codex`, or `codex-login --open` directly | The supported foreground CLI. If `~/.codex/auth.json` is missing or invalid, the `codex` wrapper starts Shelly's device-code login, opens `auth.openai.com/codex/device` in the in-app Browser Pane, writes `~/.codex/auth.json` (mode `0600`) on success, then launches the normal Codex TUI. No OpenAI API key required — this rides your ChatGPT subscription. |
+| **Codex CLI** (ChatGPT subscription) | Run `codex`, or `codex-login --open` directly | The supported foreground CLI. If `~/.codex/auth.json` is missing or invalid, the `codex` wrapper starts Shelly's device-code login, opens the OpenAI device-code page in the in-app Browser Pane, writes `~/.codex/auth.json` (mode `0600`) on success, then launches the normal Codex TUI. No OpenAI API key required — this rides your ChatGPT subscription. |
 | **API providers** (Gemini, Cerebras, Groq, Perplexity, local) | **Settings → API Keys** or `shelly config` | Paste a key per provider for AI-Pane / `@mention` / `@team` / background-agent use. Keys live in `expo-secure-store`. Local/OpenAI-compatible servers need only a base URL. |
 
 > **Codex login note.** `codex /login` inside the REPL is not the supported path on Shelly. Use bare `codex` and let Shelly's wrapper launch device-code auth, or run `codex-login --open` from bash.
@@ -199,12 +199,14 @@ No Termux install. No proot. No ttyd. No remote bridge.
 |---|---|
 | **Cross-pane intelligence** | Say "fix the error." AI reads your terminal, suggests a fix, one tap to run. Zero copy-paste. |
 | **AI Edit golden path** | Tap a file in the sidebar → preview it → hit `[✨ AI]` → describe the change → accept per hunk → the file is rewritten on disk, the preview reloads automatically. |
+| **Codex apply_patch on-device** | Codex file edits land through the agent's native patch tool on Android, not a shell-only fallback. |
 | **Native PTY (JNI forkpty)** | Kotlin + C, direct PTY fd, no TCP/socket bridge — an embedded native terminal, not a WebView terminal. |
 | **Batteries included** | bash, Node.js, Python 3, git, curl, sqlite3, tmux, vim, ripgrep, jq ship inside the APK. Termux not required. |
 | **5 pane types** | Terminal, AI, Browser (+ background audio), Markdown, Preview. Split up to 4 live panes freely. |
 | **Multi-agent AI** | API-backed Gemini, Cerebras, Groq, Perplexity, Local LLM, plus the foreground Codex terminal CLI. Auto-routed or `@mention` where supported. |
+| **Local LLM that holds its own** | Qwen3.5 models run on-device through the bundled llama.cpp / llama-server flow, with Qwen3.5-4B as the high-end default and Qwen3.5-9B available when quality matters more than responsiveness. |
 | **Codex on Android** | Shelly keeps Codex on a managed-latest path without trusting upstream blindly: it stages the runtime, smoke-tests it on-device, promotes only passing builds, and keeps a last-known-good fallback. Codex runs over the native PTY with a Shelly-owned device-code login wrapper. No proot, no root. |
-| **EVA unit themes** | 零号機 / 初号機 / 二号機 palettes run on the existing preset IDs, so runtime swaps keep your shell alive without settings migration. |
+| **Color themes** | Blue / Red / Purple palettes run on the existing preset IDs, so runtime swaps keep your shell alive without settings migration. |
 | **Voice input** | Speak your commands or AI prompts. Groq Whisper handles transcription, then VoiceChain routes the text through the same input router the keyboard uses. |
 
 <details>
@@ -271,7 +273,7 @@ No Termux install. No proot. No ttyd. No remote bridge.
 - **Terminal context injection** — the AI always has access to the current terminal transcript without you pasting anything
 - **InlineDiff with per-hunk write-back** — see above
 - **Voice input** — long-press the mic in the terminal action bar to open VoiceChat; speech → Groq transcription → AI → TTS response
-- **Local LLM support** — use the built-in GGUF catalog and llama.cpp / llama-server controls, then route via `@local` for fully on-device inference. The high-end recommendation is Qwen3.5-4B Q4_K_M; Qwen3.5-9B is available for quality-focused runs, and Qwen 2.5 1.5B remains the low-memory fallback.
+- **Local LLM support** — use the built-in GGUF catalog and llama.cpp / llama-server controls, then route via `@local` for fully on-device inference. Qwen3.5-4B Q4_K_M is the high-end default, Qwen3.5-9B is available for quality-focused runs, and Qwen 2.5 1.5B remains the low-memory fallback.
 
 </details>
 
@@ -335,7 +337,7 @@ Currently registered:
 - **Git** — Status / Diff / Log / Add all / Commit / Push / Pull --rebase *(routed through the active terminal pane's `pendingCommand` channel)*
 - **Panes** — Add Terminal / AI / Browser / Markdown / Preview
 - **Layouts** — Single Terminal / Terminal + AI / Terminal + Browser / 3-Way Triple
-- **Theme presets** — 零号機 / 二号機 / 初号機
+- **Theme presets** — Blue / Red / Purple
 - **Font presets** — Silk / 8bit / Mono and legacy editor palettes
 - **Voice** — Open dialogue (VoiceChat modal)
 - **Snippets** — first 20 entries from your snippet store, each dispatches to the terminal
@@ -346,8 +348,8 @@ Currently registered:
 <details>
 <summary><strong>Theme &amp; Fonts</strong></summary>
 
-- **EVA unit presets** — 零号機 / UNIT-00 is the default blue test-unit palette, 初号機 / UNIT-01 is purple with neon green sync accents, and 二号機 / UNIT-02 is red-orange production-unit chrome.
-- **Visible presets** — Settings and the Command Palette expose the three EVA unit themes. Legacy and editor palette IDs remain accepted for old saved settings but are no longer the primary UI surface.
+- **Color presets** — Blue is the default cool palette, Red is red-orange chrome, and Purple is purple with neon green accents.
+- **Visible presets** — Settings and the Command Palette expose the three color themes. Legacy and editor palette IDs remain accepted for old saved settings but are no longer the primary UI surface.
 - **Runtime swap** — presets are swapped by mutating the live `colors` object in place (identity preserved) and bumping a theme-version store that key-remounts the shell layout. PTY sessions survive the switch — your vim stays open.
 - **Single-family rendering** — every Text is forced through JetBrains Mono regardless of its `fontWeight`, keeping UI and terminal typography consistent.
 - **Text.render monkey-patch** — `Text.defaultProps.style` is replaced (not merged) when a child passes its own `style`, which would otherwise let 100+ call sites escape the theme font. The patch prepends `{ fontFamily }` to every Text's style array so the preset font reaches every call site without touching them.
@@ -401,7 +403,7 @@ Currently registered:
 | FileTree CRUD (create / rename / delete / copy path) | ✅ shipping |
 | Command Palette — settings, terminal, git, panes, layouts, theme, font, voice | ✅ shipping |
 | Browser fullscreen, desktop UA toggle, link capture, bookmarks | ✅ shipping |
-| Theme presets — 零号機 / 初号機 / 二号機, with legacy preset IDs accepted for saved settings (runtime swap, Text monkey-patch) | ✅ shipping |
+| Theme presets — Blue / Red / Purple, with legacy preset IDs accepted for saved settings (runtime swap, Text monkey-patch) | ✅ shipping |
 | AgentBar + Sidebar git dirty badge (single-writer poll) | ✅ shipping |
 | Sidebar Add Repository existence check + Alert on ghost path | ✅ shipping (bug #73) |
 | AI pane Local LLM routing (URL-driven, no enable toggle) | ✅ shipping (bug #68) |
@@ -412,7 +414,6 @@ Currently registered:
 | Codex CLI launch/auth | ✅ supported; bare `codex` runs over the native PTY, using Shelly device-code auth before TUI launch |
 | Codex managed native runtime (`codex-exec` / `codex-tui` staged under `~/.shelly-runtime/codex/current`, `--version` smoke-tested, last-known-good rollback) | ✅ managed latest with rollback |
 | Gemini API in AI Pane / `@gemini` / `@team` / background agents | ✅ available when a Gemini API key is configured |
-| Arena mode | ✅ wired, under-used — let us know how it feels |
 | Background agents — `@agent` registration, AlarmManager scheduling, Sidebar Tasks list with run-now / delete | ✅ wired, AlarmManager end-to-end smoke test pending |
 | Sidebar Ports monitor (`/proc/net/tcp` → tap to open in Browser pane) | ⚠ Android 10+ SELinux denies both `/proc/net/tcp{,6}` reads and `NETLINK_SOCK_DIAG` sockets from `untrusted_app`; tracked in `docs/superpowers/DEFERRED.md` (P1) — needs an alternative channel (e.g. a bundled privileged helper or system_server intent) in a future release |
 | Sidebar SSH Profiles (key-file auth, ~/.ssh/config import, tap-to-connect) | ✅ shipping |
@@ -464,7 +465,7 @@ Every feature in Shelly started as a frustration I had with existing tools:
 - The approval proxy comes from *"An AI CLI is asking me to approve something in English. I don't know what it means."*
 - The VoiceChain comes from *"I can't type on a phone keyboard fast enough to keep up with my ideas."*
 - The layout system comes from *"Why can't I have a browser, a terminal, and an AI all on the same screen at the same time?"*
-- The EVA unit theme presets come from *"Why do I have to choose between a usable UI and an aesthetically interesting one?"*
+- The color theme presets come from *"Why do I have to choose between a usable UI and an aesthetically interesting one?"*
 
 Every limitation became an innovation that engineers need just as much.
 
@@ -479,7 +480,7 @@ For a React Native app this is an unusual architecture: an embedded native termi
 ### Who is this for?
 
 - **Vibe Coders** — Lovable / Bolt / Replit Agent, but on your phone with a real terminal underneath
-- **Mobile-first developers** — Codex CLI users (and anyone who lived in an AI coding CLI) who want a proper multi-pane IDE around real local terminals
+- **Mobile-first developers** — Codex CLI users and anyone serious about CLI-first AI coding workflows who want a proper multi-pane IDE around real local terminals
 - **Non-engineers with ideas** — Shelly translates everything. Dangerous operations are blocked until you understand them
 
 ---
@@ -640,7 +641,7 @@ The question isn't whether mobile development will happen. It's who builds the t
 
 **RYO ITABASHI** — Creative Director at [Rebuild Factoryz](https://rebuildfactoryz.com/). Branding and design are my profession. Code is not.
 
-I built Shelly because I wanted to use Claude Code on my phone, but Termux was too intimidating. So I made a chat interface that hides the terminal complexity while keeping its full power. Then I realized the real problem wasn't the terminal itself — it was the gap between the terminal and the AI. So I connected them. Then the WebView kept dying, so I directed the AI to replace the entire rendering layer with a native terminal emulator. Then I realized I needed a browser pane, a markdown viewer, a code preview, a sidebar, and a proper layout system to make it a real IDE.
+I built Shelly because I wanted to use Claude Code on my phone, but Termux was too intimidating. So I made a chat interface that hides the terminal complexity while keeping its full power. Along the way, the foreground CLI shifted to Codex — Claude Code's Android compatibility moves faster than any third-party app can chase — but the original frustration stayed the same. Then I realized the real problem wasn't the terminal itself — it was the gap between the terminal and the AI. So I connected them. Then the WebView kept dying, so I directed the AI to replace the entire rendering layer with a native terminal emulator. Then I realized I needed a browser pane, a markdown viewer, a code preview, a sidebar, and a proper layout system to make it a real IDE.
 
 I still don't hand-write code. I describe what I need, the AI builds it, and I decide whether it ships.
 
@@ -679,9 +680,9 @@ Shelly v5.3.1 is pre-release Android software. Here's what we know isn't perfect
 - **`busybox` is not bundled** — `busybox httpd`, `busybox nc`, and other applets return `command not found`. Use the standalone equivalents where available (`curl`, `nc` from the bundle, `python3 -m http.server`), or bundle `busybox-static` yourself. Tracked as bug #35.
 - **`@team` routes to multiple APIs simultaneously** — this consumes credits on every provider at once; a cost warning is shown before execution.
 - **Multi-hunk Accept against a partially-edited file** — per-hunk Accept uses fuzzy re-anchoring so successive hunks land, but if the AI's diff references context that has already been edited to something else, the hunk will be rejected with a toast asking you to regenerate.
-- **Terminal font mismatch** — if a saved legacy theme looks wrong after upgrading, switch Settings → Display → Theme to one of the three EVA unit presets.
+- **Terminal font mismatch** — if a saved legacy theme looks wrong after upgrading, switch Settings → Display → Theme to one of the three color presets.
 - **Codex CLI runs through Shelly-managed runtime routing** — `@openai/codex` can ship native binaries Android cannot execute directly. Shelly stages the npm dispatcher, applies the compatibility hook, and prefers the smoke-tested `codex-exec` runtime under `~/.shelly-runtime/codex/current`. The promoted runtime is whatever last passed the on-device `--version` smoke check. If `codex --version` fails, run `shelly doctor` or check `~/.shelly-cli/install.log` / `~/.shelly-runtime/update.log`.
-- **Codex login uses an in-app device-code OAuth flow** — run bare `codex` or `codex-login --open` from any terminal pane. Shelly validates `~/.codex/auth.json`; if it is missing or invalid, Shelly drives device auth against `auth.openai.com`, opens the verification page in the in-app Browser Pane via the file-queue deep-link bridge, writes `~/.codex/auth.json` (mode `0600`) on success, then launches the normal Codex TUI. No OpenAI API key is required; this rides your ChatGPT Plus/Pro/Business/Enterprise subscription. The flow has a 15-minute device-code timeout — re-run if it expires. Verify with `shelly doctor` (it reports whether `~/.codex/auth.json` is present). Implemented in `modules/terminal-emulator/android/src/main/assets/shelly-codex-auth.js`.
+- **Codex login uses an in-app device-code OAuth flow** — run bare `codex` or `codex-login --open` from any terminal pane. Shelly validates `~/.codex/auth.json`; if it is missing or invalid, Shelly opens the OpenAI verification page in the in-app Browser Pane, writes `~/.codex/auth.json` (mode `0600`) on success, then launches the normal Codex TUI. No OpenAI API key is required; this rides your ChatGPT Plus/Pro/Business/Enterprise subscription. The flow has a 15-minute device-code timeout — re-run if it expires. Verify with `shelly doctor` (it reports whether `~/.codex/auth.json` is present).
 - **`/sdcard` access requires MANAGE_EXTERNAL_STORAGE** — Android 11+ Scoped Storage blocks direct `open(2)` on `/sdcard` paths without this permission. Shelly asks for it on first launch; if you deny it, `source /sdcard/Download/foo.sh` will fail with `Permission denied`. Re-grant from system Settings → Apps → Shelly → Permissions → Files and media → Allow management of all files.
 - **Gemini is API-only** — Gemini is available as an API provider (AI Pane, `@gemini`, `@team`, background agents) with a configured key. There is no bundled Gemini CLI and no interactive `gemini` login flow in this release.
 - **Very large or binary pastes** — the paste path is a one-shot write into the PTY. Multi-megabyte clipboard payloads will take noticeable time and may stall the UI briefly; binary content (non-UTF-8 bytes, null characters) is not a supported transport mechanism and may corrupt the shell buffer. Use `curl -O` / `scp` / `/sdcard/Download/` drop-point for binary transfer.

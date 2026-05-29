@@ -146,12 +146,12 @@ export function CommandPalette() {
       { id: 'pane-add-preview', label: 'Pane: Add Preview', hint: 'split current layout', icon: 'preview', category: 'pane',
         onExecute: () => { addPane('preview'); close(); } },
 
-      // Theme presets — existing ids, rebranded as EVA unit colorways.
-      { id: 'theme-blue', label: 'Theme: 零号機 / UNIT-00', hint: 'blue test-unit chrome', icon: 'palette', category: 'action',
+      // Theme presets — existing ids, exposed as simple color names.
+      { id: 'theme-blue', label: 'Theme: Blue', hint: 'cool blue chrome', icon: 'palette', category: 'action',
         onExecute: () => { applyPalette('blue'); close(); } },
-      { id: 'theme-orange', label: 'Theme: 二号機 / UNIT-02', hint: 'red production-unit chrome', icon: 'palette', category: 'action',
+      { id: 'theme-orange', label: 'Theme: Red', hint: 'red chrome', icon: 'palette', category: 'action',
         onExecute: () => { applyPalette('orange'); close(); } },
-      { id: 'theme-purple', label: 'Theme: 初号機 / UNIT-01', hint: 'purple test-type chrome', icon: 'palette', category: 'action',
+      { id: 'theme-purple', label: 'Theme: Purple', hint: 'purple chrome', icon: 'palette', category: 'action',
         onExecute: () => { applyPalette('purple'); close(); } },
 
       // Voice dialogue
