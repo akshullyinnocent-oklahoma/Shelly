@@ -10,7 +10,7 @@ import { View, Pressable, StyleSheet, Text } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useCommandPaletteStore } from '@/hooks/use-command-palette';
 import { SettingsDropdown } from './SettingsDropdown';
-import { BuildsModal, buildStatusColor, fetchBuildRuns, statusFromRun, type BuildStatus } from './BuildsModal';
+import { BuildsModal, buildStatusColor, fetchUpdateAvailabilityStatus, type BuildStatus } from './BuildsModal';
 import { LayoutAddSheet } from '@/components/multi-pane/LayoutAddSheet';
 import { RecentLogsModal } from './RecentLogsModal';
 import { useFocusStore } from '@/store/focus-store';
@@ -41,8 +41,8 @@ export function AgentBar() {
     let cancelled = false;
     const refresh = async () => {
       try {
-        const runs = await fetchBuildRuns();
-        if (!cancelled) setBuildStatus(statusFromRun(runs[0]));
+        const status = await fetchUpdateAvailabilityStatus();
+        if (!cancelled) setBuildStatus(status);
       } catch {
         if (!cancelled) setBuildStatus('unknown');
       }
@@ -97,7 +97,7 @@ export function AgentBar() {
           onPress={() => setBuildsOpen(true)}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Show build status and updates"
+          accessibilityLabel="Show updates"
         >
           <View>
             <MaterialIcons name="cloud-download" size={16} color={C.text2} />

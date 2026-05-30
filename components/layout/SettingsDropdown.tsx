@@ -123,15 +123,15 @@ export function SettingsDropdown({ visible, onClose }: Props) {
 
 function UpdatesSection({ onOpenBuilds }: { onOpenBuilds: () => void }) {
   return (
-    <Section title="UPDATES / BUILDS">
+    <Section title="UPDATES">
       <Pressable
         style={styles.integrationRow}
         onPress={onOpenBuilds}
         accessibilityRole="button"
-        accessibilityLabel="Open build status and self-update panel"
+        accessibilityLabel="Open updates"
       >
         <MaterialIcons name="cloud-download" size={13} color={C.text2} />
-        <Text style={styles.integrationLabel}>Check builds / install APK</Text>
+        <Text style={styles.integrationLabel}>Check for updates</Text>
         <View style={{ flex: 1 }} />
         <MaterialIcons name="chevron-right" size={14} color={C.text3} />
       </Pressable>

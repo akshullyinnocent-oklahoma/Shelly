@@ -74,6 +74,11 @@ export function statusFromRun(run?: BuildRun | null): BuildStatus {
   return run.conclusion === 'success' ? 'success' : 'failure';
 }
 
+function statusFromUpdate(update?: AndroidUpdateManifest | null, installed?: AppVersionInfo | null): BuildStatus {
+  if (!update || !installed) return 'unknown';
+  return update.versionCode > installed.versionCode ? 'in_progress' : 'success';
+}
+
 export function buildStatusColor(status: BuildStatus): string {
   switch (status) {
     case 'in_progress': return '#F59E0B';
@@ -199,6 +204,18 @@ async function fetchLatestAndroidUpdate(): Promise<AndroidUpdateManifest | null>
   };
 }
 
+export async function fetchUpdateAvailabilityStatus(): Promise<BuildStatus> {
+  try {
+    const [update, installed] = await Promise.all([
+      fetchLatestAndroidUpdate(),
+      TerminalEmulator.getAppVersionInfo(),
+    ]);
+    return statusFromUpdate(update, installed);
+  } catch {
+    return 'unknown';
+  }
+}
+
 async function downloadReleaseApk(update: AndroidUpdateManifest): Promise<string> {
   const outDir = `/sdcard/Download/shelly-update-${update.versionCode}`;
   const apkPath = `${outDir}/${update.apkAssetName}`;
@@ -242,6 +259,7 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
   const [installedVersion, setInstalledVersion] = useState<AppVersionInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [logLoadingId, setLogLoadingId] = useState<number | null>(null);
   const [logTitle, setLogTitle] = useState<string | null>(null);
   const [logText, setLogText] = useState<string>('');
@@ -257,32 +275,35 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
         TerminalEmulator.getAppVersionInfo(),
       ]);
       let nextRuns: BuildRun[] = [];
+      let nextUpdate: AndroidUpdateManifest | null = null;
+      let nextInstalled: AppVersionInfo | null = null;
       const errors: string[] = [];
 
       if (runsResult.status === 'fulfilled') {
         nextRuns = runsResult.value;
         setRuns(nextRuns);
-        onStatusChange?.(statusFromRun(nextRuns[0]), nextRuns[0] ?? null);
       } else {
         setRuns([]);
         errors.push(String(runsResult.reason?.message || runsResult.reason));
-        onStatusChange?.('unknown', null);
       }
 
       if (updateResult.status === 'fulfilled') {
-        setLatestUpdate(updateResult.value);
+        nextUpdate = updateResult.value;
+        setLatestUpdate(nextUpdate);
       } else {
         setLatestUpdate(null);
         errors.push(String(updateResult.reason?.message || updateResult.reason));
       }
 
       if (versionResult.status === 'fulfilled') {
-        setInstalledVersion(versionResult.value);
+        nextInstalled = versionResult.value;
+        setInstalledVersion(nextInstalled);
       } else {
         setInstalledVersion(null);
         errors.push(String(versionResult.reason?.message || versionResult.reason));
       }
 
+      onStatusChange?.(statusFromUpdate(nextUpdate, nextInstalled), nextRuns[0] ?? null);
       if (errors.length > 0) setError(errors.join('\n'));
     } catch (e: any) {
       const msg = String(e?.message || e);
@@ -294,6 +315,7 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
   }, [onStatusChange]);
 
   useEffect(() => {
+    setAdvancedOpen(false);
     if (visible) void refresh();
   }, [refresh, visible]);
 
@@ -319,8 +341,8 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
       }
       const apkPath = await downloadReleaseApk(update);
       Alert.alert(
-        'APK downloaded',
-        `${apkPath}\n\nAndroid will ask you to confirm installation.`,
+        'Update ready',
+        'Android will ask you to confirm installation.',
         [
           { text: 'Later', style: 'cancel' },
           {
@@ -352,13 +374,56 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
     }
   }, []);
 
+  const updateIsNewer = Boolean(
+    installedVersion && latestUpdate && latestUpdate.versionCode > installedVersion.versionCode,
+  );
+  const canInstallUpdate = updateIsNewer && !downloadingUpdate;
+  const currentVersionText = installedVersion
+    ? `Current v${installedVersion.versionName || 'unknown'} (${installedVersion.versionCode})`
+    : 'Current version unavailable';
+  const availableVersionText = latestUpdate
+    ? `Available v${latestUpdate.versionName || 'unknown'} (${latestUpdate.versionCode})`
+    : 'Update details unavailable';
+  const updateStatusText = loading
+    ? 'Checking for updates...'
+    : !latestUpdate
+      ? 'Update status unavailable'
+      : !installedVersion
+        ? 'Cannot verify installed version'
+        : updateIsNewer
+          ? 'Update available'
+          : 'Shelly is up to date';
+  const updateIconName = loading
+    ? 'sync'
+    : !latestUpdate || !installedVersion
+      ? 'error-outline'
+      : updateIsNewer
+        ? 'system-update-alt'
+        : 'check-circle';
+  const updateActionLabel = downloadingUpdate
+    ? 'Downloading...'
+    : updateIsNewer
+      ? 'Update'
+      : loading
+        ? 'Checking...'
+        : latestUpdate && installedVersion
+          ? 'Latest'
+          : 'Unavailable';
+
   return (
     <>
       <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
         <View style={styles.root}>
-          <ModalHeader title="BUILDS / UPDATES" onClose={onClose} />
+          <ModalHeader title="UPDATES" onClose={onClose} />
           <View style={styles.toolbar}>
-            <Text style={styles.subtitle}>GitHub Actions · {REPO}</Text>
+            <Text style={styles.subtitle}>Shelly updates</Text>
+            <Pressable
+              style={styles.refreshBtn}
+              onPress={() => setAdvancedOpen((v) => !v)}
+            >
+              <MaterialIcons name={advancedOpen ? 'expand-less' : 'expand-more'} size={15} color={C.accent} />
+              <Text style={styles.refreshText}>Advanced</Text>
+            </Pressable>
             <Pressable style={styles.refreshBtn} onPress={refresh} disabled={loading}>
               {loading ? (
                 <ActivityIndicator size="small" color={C.accent} />
@@ -368,96 +433,96 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
               <Text style={styles.refreshText}>Refresh</Text>
             </Pressable>
           </View>
-          {error && (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-            {latestUpdate && (
-              <View style={styles.updateBox}>
-                <View style={styles.updateHead}>
-                  <View style={styles.updateCopy}>
-                    <Text style={styles.updateTitle}>
-                      Android update · v{latestUpdate.versionName || 'unknown'} ({latestUpdate.versionCode})
-                    </Text>
-                    <Text style={styles.updateMeta}>
-                      Installed {installedVersion ? `${installedVersion.versionName || 'unknown'} (${installedVersion.versionCode})` : 'unknown'}
-                      {latestUpdate.runNumber ? ` · run #${latestUpdate.runNumber}` : ''}
-                    </Text>
-                  </View>
-                  {(() => {
-                    const updateIsNewer = Boolean(installedVersion && latestUpdate.versionCode > installedVersion.versionCode);
-                    const installable = updateIsNewer && !downloadingUpdate;
-                    return (
-                      <Pressable
-                        style={[styles.actionBtn, !installable && styles.actionBtnDisabled]}
-                        onPress={() => void installLatestUpdate()}
-                        disabled={!installable}
-                      >
-                        {downloadingUpdate ? (
-                          <ActivityIndicator size="small" color={C.bgDeep} />
-                        ) : (
-                          <MaterialIcons name="system-update-alt" size={13} color={installable ? C.bgDeep : C.text3} />
-                        )}
-                        <Text style={[styles.actionText, !installable && styles.actionTextDisabled]}>
-                          {downloadingUpdate ? 'Downloading...' : updateIsNewer ? 'Install APK' : installedVersion ? 'Up to date' : 'Version unknown'}
-                        </Text>
-                      </Pressable>
-                    );
-                  })()}
+            <View style={styles.updateBox}>
+              <View style={styles.updateHead}>
+                <View style={styles.statusIcon}>
+                  <MaterialIcons name={updateIconName as any} size={18} color={C.accent} />
                 </View>
-              </View>
-            )}
-            {runs.map((run) => {
-              const status = statusFromRun(run);
-              const releaseMatchesRun = Boolean(
-                latestUpdate && (
-                  (latestUpdate.runId && latestUpdate.runId === run.databaseId) ||
-                  (!latestUpdate.runId && latestUpdate.gitSha && latestUpdate.gitSha === run.headSha)
-                ),
-              );
-              const failed = run.status === 'completed' && status === 'failure';
-              const logBusy = logLoadingId === run.databaseId;
-              return (
-                <View key={run.databaseId} style={styles.runCard}>
-                  <View style={styles.runHead}>
-                    <View style={[styles.dot, { backgroundColor: buildStatusColor(status) }]} />
-                    <Text style={styles.runTitle} numberOfLines={2}>{run.displayTitle || `Run #${run.databaseId}`}</Text>
-                  </View>
-                  <Text style={styles.runMeta}>
-                    #{run.number || run.databaseId} · {run.status}{run.conclusion ? `/${run.conclusion}` : ''} · {formatDuration(durationSec(run))} · {run.headSha.slice(0, 8)}
+                <View style={styles.updateCopy}>
+                  <Text style={styles.updateTitle}>{updateStatusText}</Text>
+                  <Text style={styles.updateMeta}>{currentVersionText}</Text>
+                  {latestUpdate && <Text style={styles.updateMeta}>{availableVersionText}</Text>}
+                </View>
+                <Pressable
+                  style={[styles.actionBtn, !canInstallUpdate && styles.actionBtnDisabled]}
+                  onPress={() => void installLatestUpdate()}
+                  disabled={!canInstallUpdate}
+                >
+                  {downloadingUpdate ? (
+                    <ActivityIndicator size="small" color={C.bgDeep} />
+                  ) : (
+                    <MaterialIcons name="system-update-alt" size={13} color={canInstallUpdate ? C.bgDeep : C.text3} />
+                  )}
+                  <Text style={[styles.actionText, !canInstallUpdate && styles.actionTextDisabled]}>
+                    {updateActionLabel}
                   </Text>
-                  <Text style={styles.runMeta}>{new Date(run.createdAt).toLocaleString()}</Text>
-                  <View style={styles.runActions}>
-                    {failed && (
-                      <Pressable
-                        style={[styles.actionBtn, styles.logBtn]}
-                        onPress={() => void showFailedLog(run)}
-                        disabled={logBusy}
-                      >
-                        {logBusy ? (
-                          <ActivityIndicator size="small" color={C.accent} />
-                        ) : (
-                          <MaterialIcons name="article" size={13} color={C.accent} />
-                        )}
-                        <Text style={[styles.actionText, styles.logText]}>
-                          {logBusy ? 'Loading log...' : 'Failed log'}
-                        </Text>
-                      </Pressable>
-                    )}
-                    {releaseMatchesRun && (
-                      <View style={styles.releaseBadge}>
-                        <MaterialIcons name="verified" size={12} color={C.accent} />
-                        <Text style={styles.releaseBadgeText}>Release source</Text>
-                      </View>
-                    )}
+                </Pressable>
+              </View>
+              {updateIsNewer && (
+                <Text style={styles.updateHint}>Android will ask you to confirm installation.</Text>
+              )}
+            </View>
+
+            {advancedOpen && (
+              <View style={styles.advancedSection}>
+                <Text style={styles.advancedTitle}>Build details</Text>
+                {error && (
+                  <View style={styles.errorBox}>
+                    <Text style={styles.errorText}>{error}</Text>
                   </View>
-                </View>
-              );
-            })}
-            {!loading && runs.length === 0 && !error && (
-              <Text style={styles.empty}>No recent APK builds found.</Text>
+                )}
+                {runs.map((run) => {
+                  const status = statusFromRun(run);
+                  const releaseMatchesRun = Boolean(
+                    latestUpdate && (
+                      (latestUpdate.runId && latestUpdate.runId === run.databaseId) ||
+                      (!latestUpdate.runId && latestUpdate.gitSha && latestUpdate.gitSha === run.headSha)
+                    ),
+                  );
+                  const failed = run.status === 'completed' && status === 'failure';
+                  const logBusy = logLoadingId === run.databaseId;
+                  return (
+                    <View key={run.databaseId} style={styles.runCard}>
+                      <View style={styles.runHead}>
+                        <View style={[styles.dot, { backgroundColor: buildStatusColor(status) }]} />
+                        <Text style={styles.runTitle} numberOfLines={2}>{run.displayTitle || `Run #${run.databaseId}`}</Text>
+                      </View>
+                      <Text style={styles.runMeta}>
+                        #{run.number || run.databaseId} · {run.status}{run.conclusion ? `/${run.conclusion}` : ''} · {formatDuration(durationSec(run))} · {run.headSha.slice(0, 8)}
+                      </Text>
+                      <Text style={styles.runMeta}>{new Date(run.createdAt).toLocaleString()}</Text>
+                      <View style={styles.runActions}>
+                        {failed && (
+                          <Pressable
+                            style={[styles.actionBtn, styles.logBtn]}
+                            onPress={() => void showFailedLog(run)}
+                            disabled={logBusy}
+                          >
+                            {logBusy ? (
+                              <ActivityIndicator size="small" color={C.accent} />
+                            ) : (
+                              <MaterialIcons name="article" size={13} color={C.accent} />
+                            )}
+                            <Text style={[styles.actionText, styles.logText]}>
+                              {logBusy ? 'Loading log...' : 'Failed log'}
+                            </Text>
+                          </Pressable>
+                        )}
+                        {releaseMatchesRun && (
+                          <View style={styles.releaseBadge}>
+                            <MaterialIcons name="verified" size={12} color={C.accent} />
+                            <Text style={styles.releaseBadgeText}>Release source</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+                {!loading && runs.length === 0 && !error && (
+                  <Text style={styles.empty}>No recent builds found.</Text>
+                )}
+              </View>
             )}
           </ScrollView>
         </View>
@@ -543,6 +608,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  statusIcon: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: R.badge,
+    backgroundColor: C.bgDeep,
+    borderWidth: 1,
+    borderColor: withAlpha(C.accent, 0.4),
+  },
   updateCopy: {
     flex: 1,
     gap: 4,
@@ -557,6 +632,22 @@ const styles = StyleSheet.create({
     color: C.text2,
     fontFamily: F.family,
     fontSize: F.badge.size,
+  },
+  updateHint: {
+    color: C.text3,
+    fontFamily: F.family,
+    fontSize: F.badge.size,
+    marginTop: 4,
+  },
+  advancedSection: {
+    gap: 10,
+  },
+  advancedTitle: {
+    color: C.text2,
+    fontFamily: F.family,
+    fontSize: F.badge.size,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   runCard: {
     borderWidth: 1,
