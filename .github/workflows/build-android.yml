@@ -473,6 +473,26 @@ jobs:
       - name: Prebuild Android
         run: npx expo prebuild --platform android
 
+      - name: Validate Android version code
+        run: |
+          EXPECTED_VERSION_CODE="$(npx expo config --json | node -e '
+            let input = "";
+            process.stdin.on("data", chunk => input += chunk);
+            process.stdin.on("end", () => {
+              const config = JSON.parse(input);
+              const versionCode = config.android && config.android.versionCode;
+              if (!Number.isInteger(versionCode) || versionCode < 1) {
+                process.exit(1);
+              }
+              process.stdout.write(String(versionCode));
+            });
+          ')"
+          ACTUAL_VERSION_CODE="$(awk '/versionCode / { print $2; exit }' android/app/build.gradle)"
+          if [ "${ACTUAL_VERSION_CODE}" != "${EXPECTED_VERSION_CODE}" ]; then
+            echo "FATAL: android/app/build.gradle versionCode ${ACTUAL_VERSION_CODE} does not match app.config.ts ${EXPECTED_VERSION_CODE}" >&2
+            exit 1
+          fi
+
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:

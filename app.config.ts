@@ -51,6 +51,7 @@ const config: ExpoConfig & { android?: any } = {
     // We request it at first run via Environment.isExternalStorageManager().
     // Shelly is distributed via GitHub Releases / F-Droid (not Play Store),
     // so the all-files-access restriction does not apply.
+    versionCode: 532,
     permissions: [
       "POST_NOTIFICATIONS",
       "FOREGROUND_SERVICE",
