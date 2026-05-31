@@ -469,6 +469,36 @@ jobs:
           ls -lh "${GITHUB_WORKSPACE}/${JNILIBS}/libcodex_exec.so" "${GITHUB_WORKSPACE}/${JNILIBS}/libcodex_tui.so"
           [ ! -f "${GITHUB_WORKSPACE}/${JNILIBS}/libcodex_cxx_shared.so" ] || ls -lh "${GITHUB_WORKSPACE}/${JNILIBS}/libcodex_cxx_shared.so"
 
+      - name: Package Codex runtime update
+        run: |
+          set -euo pipefail
+          JNILIBS="modules/terminal-emulator/android/src/main/jniLibs/arm64-v8a"
+          runtime_dir="${RUNNER_TEMP}/codex-runtime"
+          rm -rf "${runtime_dir}"
+          mkdir -p "${runtime_dir}"
+          cp "${JNILIBS}/libcodex_exec.so" "${runtime_dir}/codex_exec"
+          cp "${JNILIBS}/libcodex_tui.so" "${runtime_dir}/codex_tui"
+          chmod 755 "${runtime_dir}/codex_exec" "${runtime_dir}/codex_tui"
+          if [ -f "${JNILIBS}/libcodex_cxx_shared.so" ]; then
+            cp "${JNILIBS}/libcodex_cxx_shared.so" "${runtime_dir}/libc++_shared.so"
+            chmod 755 "${runtime_dir}/libc++_shared.so"
+          fi
+          node -e '
+            const fs = require("fs");
+            const crypto = require("crypto");
+            const out = {};
+            for (const name of fs.readdirSync(process.argv[1]).sort()) {
+              const p = `${process.argv[1]}/${name}`;
+              if (fs.statSync(p).isFile()) {
+                out[name] = crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+              }
+            }
+            fs.writeFileSync(`${process.argv[1]}/files.sha256.json`, JSON.stringify(out, null, 2) + "\n");
+          ' "${runtime_dir}"
+          tar -C "${runtime_dir}" -czf "${RUNNER_TEMP}/codex-runtime.tar.gz" .
+          sha256sum "${RUNNER_TEMP}/codex-runtime.tar.gz"
+          ls -lh "${RUNNER_TEMP}/codex-runtime.tar.gz"
+
       - name: Bundle Codex JS dispatcher
         if: steps.android-payload-cache.outputs.cache-hit != 'true'
         run: |
@@ -699,10 +729,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           UPDATE_TAG: android-latest
           UPDATE_MANIFEST_NAME: latest.json
+          CODEX_RUNTIME_TAG: codex-runtime-latest
+          CODEX_RUNTIME_MANIFEST_NAME: codex-runtime.json
         run: |
           set -euo pipefail
           apk="$(ls android/app/build/outputs/apk/release/*.apk | head -1)"
           test -n "${apk}" || { echo "FATAL: release APK not found" >&2; exit 1; }
+          codex_runtime_tar="${RUNNER_TEMP}/codex-runtime.tar.gz"
+          test -s "${codex_runtime_tar}" || { echo "FATAL: Codex runtime tarball not found" >&2; exit 1; }
 
           config_json="$(npx expo config --json)"
           version_code="$(printf '%s' "${config_json}" | node -e '
@@ -729,6 +763,11 @@ jobs:
           created_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           short_sha="${GITHUB_SHA:0:12}"
           run_attempt="${GITHUB_RUN_ATTEMPT:-1}"
+          codex_runtime_asset_name="Shelly-codex-runtime-v${codex_termux_version#v}-${GITHUB_RUN_ID}-${run_attempt}-${short_sha}.tar.gz"
+          codex_runtime_asset="${RUNNER_TEMP}/${codex_runtime_asset_name}"
+          cp "${codex_runtime_tar}" "${codex_runtime_asset}"
+          codex_runtime_sha256="$(sha256sum "${codex_runtime_asset}" | awk '{print $1}')"
+          codex_runtime_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${CODEX_RUNTIME_TAG}/${codex_runtime_asset_name}"
           update_apk_name="Shelly-android-v${version_name}-${version_code}-${GITHUB_RUN_ID}-${run_attempt}-${short_sha}.apk"
           release_apk="${RUNNER_TEMP}/${update_apk_name}"
           cp "${apk}" "${release_apk}"
@@ -772,6 +811,83 @@ jobs:
           - run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           - sha256: ${sha256}
           EOF
+
+          CODEX_RUNTIME_VERSION="${codex_termux_version#v}" \
+          CODEX_VERSION="${codex_version}" \
+          CODEX_TERMUX_VERSION="${codex_termux_version}" \
+          CODEX_RUNTIME_SHA256="${codex_runtime_sha256}" \
+          CODEX_RUNTIME_URL="${codex_runtime_url}" \
+          CODEX_RUNTIME_ASSET_NAME="${codex_runtime_asset_name}" \
+          CREATED_AT="${created_at}" \
+          node <<'NODE' > "${CODEX_RUNTIME_MANIFEST_NAME}"
+          const manifest = {
+            schemaVersion: 1,
+            channel: "codex-runtime-latest",
+            version: process.env.CODEX_RUNTIME_VERSION,
+            codexVersion: process.env.CODEX_VERSION,
+            codexTermuxVersion: process.env.CODEX_TERMUX_VERSION,
+            gitSha: process.env.GITHUB_SHA,
+            runId: Number(process.env.GITHUB_RUN_ID),
+            runNumber: Number(process.env.GITHUB_RUN_NUMBER),
+            createdAt: process.env.CREATED_AT,
+            assetName: process.env.CODEX_RUNTIME_ASSET_NAME,
+            tarballUrl: process.env.CODEX_RUNTIME_URL,
+            sha256: process.env.CODEX_RUNTIME_SHA256,
+          };
+          process.stdout.write(JSON.stringify(manifest, null, 2) + "\n");
+          NODE
+
+          cat > /tmp/shelly-codex-runtime-release.md <<EOF
+          Rolling Codex runtime update.
+
+          - codex: ${codex_version}
+          - codex-termux: ${codex_termux_version}
+          - commit: ${GITHUB_SHA}
+          - run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - sha256: ${codex_runtime_sha256}
+          EOF
+
+          if gh release view "${CODEX_RUNTIME_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${CODEX_RUNTIME_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "Shelly Codex runtime latest" \
+              --notes-file /tmp/shelly-codex-runtime-release.md
+          else
+            gh release create "${CODEX_RUNTIME_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "Shelly Codex runtime latest" \
+              --notes-file /tmp/shelly-codex-runtime-release.md \
+              --latest=false
+          fi
+
+          gh release upload "${CODEX_RUNTIME_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            "${codex_runtime_asset}"
+
+          uploaded_runtime_asset="$(gh release view "${CODEX_RUNTIME_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json assets \
+            --jq ".assets[] | select(.name == \"${codex_runtime_asset_name}\")")"
+          test -n "${uploaded_runtime_asset}" || { echo "FATAL: uploaded Codex runtime asset not visible in release" >&2; exit 1; }
+          uploaded_runtime_digest="$(printf '%s' "${uploaded_runtime_asset}" | node -e '
+            let input = "";
+            process.stdin.on("data", chunk => input += chunk);
+            process.stdin.on("end", () => {
+              const asset = JSON.parse(input);
+              process.stdout.write(String(asset.digest || ""));
+            });
+          ')"
+          if [ -n "${uploaded_runtime_digest}" ] && [ "${uploaded_runtime_digest}" != "sha256:${codex_runtime_sha256}" ]; then
+            echo "FATAL: Codex runtime digest mismatch: ${uploaded_runtime_digest}" >&2
+            exit 1
+          fi
+
+          gh release upload "${CODEX_RUNTIME_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            "${CODEX_RUNTIME_MANIFEST_NAME}" \
+            --clobber
 
           if gh release view "${UPDATE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release edit "${UPDATE_TAG}" \

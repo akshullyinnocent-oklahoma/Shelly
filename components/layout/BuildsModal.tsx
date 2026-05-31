@@ -27,7 +27,10 @@ const REPO = 'RYOITABASHI/Shelly';
 const WORKFLOW = 'build-android.yml';
 const UPDATE_TAG = 'android-latest';
 const UPDATE_MANIFEST_ASSET = 'latest.json';
+const CODEX_RUNTIME_TAG = 'codex-runtime-latest';
+const CODEX_RUNTIME_MANIFEST_ASSET = 'codex-runtime.json';
 const APK_NAME_RE = /^[A-Za-z0-9._-]+\.apk$/;
+const TARBALL_NAME_RE = /^[A-Za-z0-9._-]+\.tar\.gz$/;
 const SHA256_RE = /^[a-f0-9]{64}$/i;
 
 export type BuildStatus = 'unknown' | 'in_progress' | 'success' | 'failure';
@@ -65,6 +68,28 @@ type AppVersionInfo = {
   packageName: string;
   versionName: string;
   versionCode: number;
+};
+
+type CodexRuntimeManifest = {
+  schemaVersion: number;
+  channel?: string;
+  version: string;
+  codexVersion?: string;
+  codexTermuxVersion?: string;
+  gitSha: string;
+  runId?: number;
+  runNumber?: number;
+  createdAt?: string;
+  assetName: string;
+  tarballUrl: string;
+  sha256: string;
+};
+
+type CodexVersionInfo = {
+  version: string;
+  source: 'runtime' | 'bundled' | 'runtime_broken' | 'unknown';
+  runtimePresent: boolean;
+  runtimeHealthy: boolean;
 };
 
 function sq(value: string): string {
@@ -117,14 +142,49 @@ function codexVersionFromUpdate(update?: AndroidUpdateManifest | null): string |
   return version ? version.replace(/^v/, '') : null;
 }
 
-async function fetchInstalledCodexVersion(): Promise<string | null> {
+function compareSemver(a?: string | null, b?: string | null): number {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  const left = a.replace(/^v/, '').split(/[+-]/)[0].split('.').map((part) => Number(part) || 0);
+  const right = b.replace(/^v/, '').split(/[+-]/)[0].split('.').map((part) => Number(part) || 0);
+  for (let i = 0; i < Math.max(left.length, right.length, 3); i += 1) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return a === b ? 0 : a.localeCompare(b);
+}
+
+async function fetchInstalledCodexVersion(): Promise<CodexVersionInfo | null> {
   const command = [
-    'lib="${LD_LIBRARY_PATH%%:*}"',
-    'if [ -x "$lib/codex_tui" ]; then /system/bin/linker64 "$lib/codex_tui" --version; elif [ -x "$lib/codex_exec" ]; then /system/bin/linker64 "$lib/codex_exec" --version; else exit 127; fi',
+    'lib="${SHELLY_LIB_DIR:-${LD_LIBRARY_PATH%%:*}}"',
+    'runtime="$HOME/.shelly-runtime/codex/current"',
+    'runtime_present=0',
+    '[ -e "$runtime" ] || [ -L "$runtime" ] && runtime_present=1',
+    'runtime_healthy=0',
+    'base="$lib"',
+    'source=bundled',
+    'if [ "${SHELLY_DISABLE_APP_DATA_CODEX_RUNTIME:-0}" != "1" ] && [ -f "$runtime/.healthy" ] && [ -f "$runtime/manifest.json" ] && [ -x "$runtime/codex_tui" ] && [ -x "$runtime/codex_exec" ]; then runtime_healthy=1; base="$runtime"; source=runtime; fi',
+    'if [ "$source" = runtime ]; then bin="$base/codex_tui"; out="$(SHELLY_LIB_DIR="$lib" LD_PRELOAD="$lib/libexec_wrapper.so" SHELLY_CODEX_EXEC_PATH="$bin" SHELLY_CODEX_PROC_EXE_SHIM=1 SHELLY_CODEX_PROC_EXE_OPEN_SHIM=1 LD_LIBRARY_PATH="$base:$lib" /system/bin/linker64 "$bin" --version 2>&1)" && { printf "%s\\t%s\\t%s\\t%s\\n" "$source" "$runtime_present" "$runtime_healthy" "$out"; exit 0; }; source=runtime_broken; base="$lib"; fi',
+    'if [ -x "$base/codex_tui" ]; then bin="$base/codex_tui"; elif [ -x "$base/codex_exec" ]; then bin="$base/codex_exec"; else exit 127; fi',
+    'out="$(SHELLY_LIB_DIR="$lib" LD_LIBRARY_PATH="$base:$lib" /system/bin/linker64 "$bin" --version 2>&1)" || exit $?',
+    'printf "%s\\t%s\\t%s\\t%s\\n" "$source" "$runtime_present" "$runtime_healthy" "$out"',
   ].join('; ');
   const r = await execCommand(command, 15_000);
   if (r.exitCode !== 0) return null;
-  return parseCodexVersion(`${r.stdout}\n${r.stderr}`);
+  const line = r.stdout.trim().split('\n').filter(Boolean).pop() || '';
+  const [rawSource, runtimePresentRaw, runtimeHealthyRaw, ...rest] = line.split('\t');
+  const version = parseCodexVersion(rest.join('\t') || `${r.stdout}\n${r.stderr}`);
+  if (!version) return null;
+  const source = rawSource === 'runtime' || rawSource === 'bundled' || rawSource === 'runtime_broken'
+    ? rawSource
+    : 'unknown';
+  return {
+    version,
+    source,
+    runtimePresent: runtimePresentRaw === '1',
+    runtimeHealthy: runtimeHealthyRaw === '1',
+  };
 }
 
 function mapApiRuns(payload: any): BuildRun[] {
@@ -229,6 +289,72 @@ async function fetchLatestAndroidUpdate(): Promise<AndroidUpdateManifest | null>
   };
 }
 
+async function fetchLatestCodexRuntime(): Promise<CodexRuntimeManifest | null> {
+  const releaseUrl = `https://api.github.com/repos/${REPO}/releases/tags/${CODEX_RUNTIME_TAG}`;
+  const releaseResponse = await fetch(releaseUrl, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Shelly',
+    },
+  });
+  if (releaseResponse.status === 404) return null;
+  if (!releaseResponse.ok) {
+    const body = await releaseResponse.text().catch(() => '');
+    throw new Error(body || `GitHub Codex runtime release API HTTP ${releaseResponse.status}`);
+  }
+
+  const release = await releaseResponse.json();
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  const manifestAsset = assets.find((asset: any) => asset?.name === CODEX_RUNTIME_MANIFEST_ASSET);
+  if (!manifestAsset?.browser_download_url) {
+    throw new Error(`Release ${CODEX_RUNTIME_TAG} has no ${CODEX_RUNTIME_MANIFEST_ASSET} asset.`);
+  }
+
+  const manifestResponse = await fetch(String(manifestAsset.browser_download_url), {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'Shelly',
+    },
+  });
+  if (!manifestResponse.ok) {
+    const body = await manifestResponse.text().catch(() => '');
+    throw new Error(body || `GitHub Codex runtime manifest HTTP ${manifestResponse.status}`);
+  }
+
+  const raw = await manifestResponse.json();
+  const version = String(raw?.version || '').replace(/^v/, '');
+  const assetName = String(raw?.assetName || '');
+  const sha256 = String(raw?.sha256 || '').toLowerCase();
+  const runtimeAsset = assets.find((asset: any) => asset?.name === assetName);
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error('Codex runtime manifest has an invalid version.');
+  }
+  if (!TARBALL_NAME_RE.test(assetName)) {
+    throw new Error('Codex runtime manifest has an invalid asset name.');
+  }
+  if (!SHA256_RE.test(sha256)) {
+    throw new Error('Codex runtime manifest has an invalid sha256.');
+  }
+  if (!runtimeAsset?.browser_download_url) {
+    throw new Error(`Release ${CODEX_RUNTIME_TAG} has no asset named ${assetName}.`);
+  }
+
+  return {
+    schemaVersion: Number(raw?.schemaVersion || 1),
+    channel: raw?.channel ? String(raw.channel) : undefined,
+    version,
+    codexVersion: raw?.codexVersion ? String(raw.codexVersion) : undefined,
+    codexTermuxVersion: raw?.codexTermuxVersion ? String(raw.codexTermuxVersion) : undefined,
+    gitSha: String(raw?.gitSha || ''),
+    runId: Number.isInteger(Number(raw?.runId)) ? Number(raw.runId) : undefined,
+    runNumber: Number.isInteger(Number(raw?.runNumber)) ? Number(raw.runNumber) : undefined,
+    createdAt: raw?.createdAt ? String(raw.createdAt) : undefined,
+    assetName,
+    tarballUrl: String(runtimeAsset.browser_download_url),
+    sha256,
+  };
+}
+
 export async function fetchUpdateAvailabilityStatus(): Promise<BuildStatus> {
   try {
     const [update, installed] = await Promise.all([
@@ -263,6 +389,44 @@ async function downloadReleaseApk(update: AndroidUpdateManifest): Promise<string
   return downloadedPath;
 }
 
+async function installCodexRuntime(update: CodexRuntimeManifest): Promise<string> {
+  const command = [
+    'lib="${SHELLY_LIB_DIR:-${LD_LIBRARY_PATH%%:*}}"',
+    'test -n "$lib"',
+    [
+      'SHELLY_LIB_DIR="$lib"',
+      `SHELLY_CODEX_RUNTIME_VERSION=${sq(update.version)}`,
+      `SHELLY_CODEX_VERSION=${sq(update.codexVersion || '')}`,
+      `SHELLY_CODEX_TERMUX_VERSION=${sq(update.codexTermuxVersion || update.version)}`,
+      `SHELLY_CODEX_RUNTIME_GIT_SHA=${sq(update.gitSha || '')}`,
+      `SHELLY_CODEX_RUNTIME_RUN_ID=${sq(String(update.runId || ''))}`,
+      `SHELLY_CODEX_RUNTIME_ASSET=${sq(update.assetName)}`,
+      `SHELLY_CODEX_RUNTIME_URL=${sq(update.tarballUrl)}`,
+      `SHELLY_CODEX_RUNTIME_SHA256=${sq(update.sha256)}`,
+      'LD_LIBRARY_PATH="$lib"',
+      '/system/bin/linker64 "$lib/node" "$HOME/.shelly-runtime-update.js" codex --install-runtime',
+    ].join(' '),
+  ].join(' && ');
+  const r = await execCommand(command, 600_000);
+  if (r.exitCode !== 0) {
+    throw new Error((r.stderr || r.stdout || `Codex runtime install exited ${r.exitCode}`).trim());
+  }
+  return (r.stdout || '').trim();
+}
+
+async function resetCodexRuntime(): Promise<string> {
+  const command = [
+    'lib="${SHELLY_LIB_DIR:-${LD_LIBRARY_PATH%%:*}}"',
+    'test -n "$lib"',
+    'SHELLY_LIB_DIR="$lib" LD_LIBRARY_PATH="$lib" /system/bin/linker64 "$lib/node" "$HOME/.shelly-runtime-update.js" codex --reset-runtime',
+  ].join(' && ');
+  const r = await execCommand(command, 60_000);
+  if (r.exitCode !== 0) {
+    throw new Error((r.stderr || r.stdout || `Codex runtime reset exited ${r.exitCode}`).trim());
+  }
+  return (r.stdout || '').trim();
+}
+
 async function fetchFailedLog(runId: number): Promise<string> {
   const command = `gh run view ${runId} -R ${sq(REPO)} --log-failed`;
   const r = await execCommand(command, 60_000);
@@ -282,10 +446,13 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
   const { t } = useTranslation();
   const [runs, setRuns] = useState<BuildRun[]>([]);
   const [latestUpdate, setLatestUpdate] = useState<AndroidUpdateManifest | null>(null);
+  const [latestCodexRuntime, setLatestCodexRuntime] = useState<CodexRuntimeManifest | null>(null);
   const [installedVersion, setInstalledVersion] = useState<AppVersionInfo | null>(null);
-  const [installedCodexVersion, setInstalledCodexVersion] = useState<string | null>(null);
+  const [installedCodexInfo, setInstalledCodexInfo] = useState<CodexVersionInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
+  const [installingCodexRuntime, setInstallingCodexRuntime] = useState(false);
+  const [resettingCodexRuntime, setResettingCodexRuntime] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [logLoadingId, setLogLoadingId] = useState<number | null>(null);
   const [logTitle, setLogTitle] = useState<string | null>(null);
@@ -296,16 +463,16 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const [runsResult, updateResult, versionResult, codexResult] = await Promise.allSettled([
+      const [runsResult, updateResult, codexRuntimeResult, versionResult, codexResult] = await Promise.allSettled([
         fetchBuildRuns(),
         fetchLatestAndroidUpdate(),
+        fetchLatestCodexRuntime(),
         TerminalEmulator.getAppVersionInfo(),
         fetchInstalledCodexVersion(),
       ]);
       let nextRuns: BuildRun[] = [];
       let nextUpdate: AndroidUpdateManifest | null = null;
       let nextInstalled: AppVersionInfo | null = null;
-      let nextInstalledCodex: string | null = null;
       const errors: string[] = [];
 
       if (runsResult.status === 'fulfilled') {
@@ -324,6 +491,13 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
         errors.push(String(updateResult.reason?.message || updateResult.reason));
       }
 
+      if (codexRuntimeResult.status === 'fulfilled') {
+        setLatestCodexRuntime(codexRuntimeResult.value);
+      } else {
+        setLatestCodexRuntime(null);
+        errors.push(String(codexRuntimeResult.reason?.message || codexRuntimeResult.reason));
+      }
+
       if (versionResult.status === 'fulfilled') {
         nextInstalled = versionResult.value;
         setInstalledVersion(nextInstalled);
@@ -333,10 +507,9 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
       }
 
       if (codexResult.status === 'fulfilled') {
-        nextInstalledCodex = codexResult.value;
-        setInstalledCodexVersion(nextInstalledCodex);
+        setInstalledCodexInfo(codexResult.value);
       } else {
-        setInstalledCodexVersion(null);
+        setInstalledCodexInfo(null);
       }
 
       onStatusChange?.(statusFromUpdate(nextUpdate, nextInstalled), nextRuns[0] ?? null);
@@ -401,6 +574,37 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
     }
   }, [installedVersion, latestUpdate, t]);
 
+  const installLatestCodexRuntime = useCallback(async () => {
+    const update = latestCodexRuntime;
+    if (!update) {
+      Alert.alert(t('updates.codex_unavailable_title'), t('updates.codex_unavailable_body'));
+      return;
+    }
+    setInstallingCodexRuntime(true);
+    try {
+      await installCodexRuntime(update);
+      Alert.alert(t('updates.codex_ready_title'), t('updates.codex_ready_body'));
+      await refresh();
+    } catch (e: any) {
+      Alert.alert(t('updates.codex_install_failed_title'), String(e?.message || e));
+    } finally {
+      setInstallingCodexRuntime(false);
+    }
+  }, [latestCodexRuntime, refresh, t]);
+
+  const resetInstalledCodexRuntime = useCallback(async () => {
+    setResettingCodexRuntime(true);
+    try {
+      await resetCodexRuntime();
+      Alert.alert(t('updates.codex_reset_title'), t('updates.codex_reset_body'));
+      await refresh();
+    } catch (e: any) {
+      Alert.alert(t('updates.codex_reset_failed_title'), String(e?.message || e));
+    } finally {
+      setResettingCodexRuntime(false);
+    }
+  }, [refresh, t]);
+
   const showFailedLog = useCallback(async (run: BuildRun) => {
     setLogLoadingId(run.databaseId);
     setLogTitle(`#${run.number || run.databaseId} failed log`);
@@ -429,10 +633,32 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
       versionCode: latestUpdate.versionCode,
     })
     : t('updates.details_unavailable');
-  const availableCodexVersion = codexVersionFromUpdate(latestUpdate);
-  const currentCodexText = installedCodexVersion
-    ? t('updates.current_codex_version', { version: installedCodexVersion })
+  const bundledCodexVersion = codexVersionFromUpdate(latestUpdate);
+  const availableCodexVersion = latestCodexRuntime?.version || bundledCodexVersion;
+  const codexRuntimeIsNewer = Boolean(
+    latestCodexRuntime && installedCodexInfo && compareSemver(latestCodexRuntime.version, installedCodexInfo.version) > 0,
+  );
+  const codexRuntimeNeedsRepair = installedCodexInfo?.source === 'runtime_broken';
+  const canInstallCodexRuntime = Boolean(
+    latestCodexRuntime &&
+    !installingCodexRuntime &&
+    !resettingCodexRuntime &&
+    (!installedCodexInfo || codexRuntimeIsNewer || codexRuntimeNeedsRepair),
+  );
+  const currentCodexText = installedCodexInfo
+    ? t('updates.current_codex_version', { version: installedCodexInfo.version })
     : t('updates.current_codex_unavailable');
+  const codexSourceText = installedCodexInfo
+    ? t('updates.codex_runtime_source', {
+      source: installedCodexInfo.source === 'runtime'
+        ? t('updates.codex_runtime_app_data')
+        : installedCodexInfo.source === 'bundled'
+          ? t('updates.codex_runtime_bundled')
+          : installedCodexInfo.source === 'runtime_broken'
+            ? t('updates.codex_runtime_broken_source')
+            : t('updates.unknown'),
+    })
+    : null;
   const availableCodexText = availableCodexVersion
     ? t('updates.available_codex_version', { version: availableCodexVersion })
     : null;
@@ -461,6 +687,39 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
         : latestUpdate && installedVersion
           ? t('updates.latest')
           : t('updates.unavailable');
+  const codexStatusText = loading
+    ? t('updates.checking')
+    : !latestCodexRuntime
+      ? t('updates.codex_status_unavailable')
+      : !installedCodexInfo
+        ? t('updates.current_codex_unavailable')
+      : codexRuntimeNeedsRepair
+        ? t('updates.codex_runtime_broken_status')
+        : codexRuntimeIsNewer
+          ? t('updates.codex_available')
+          : t('updates.codex_latest_status');
+  const codexIconName = loading
+    ? 'sync'
+    : !latestCodexRuntime || !installedCodexInfo
+      ? 'error-outline'
+      : codexRuntimeNeedsRepair
+        ? 'error-outline'
+      : codexRuntimeIsNewer
+        ? 'upgrade'
+        : 'check-circle';
+  const codexActionLabel = installingCodexRuntime
+    ? t('updates.installing')
+    : codexRuntimeNeedsRepair
+      ? t('updates.codex_reinstall')
+      : codexRuntimeIsNewer || !installedCodexInfo
+      ? t('updates.codex_update')
+      : loading
+        ? t('updates.checking_short')
+        : latestCodexRuntime
+          ? t('updates.latest')
+          : t('updates.unavailable');
+  const hasCodexRuntimeToReset = Boolean(installedCodexInfo?.runtimePresent);
+  const canResetCodexRuntime = hasCodexRuntimeToReset && !installingCodexRuntime && !resettingCodexRuntime;
 
   return (
     <>
@@ -495,8 +754,6 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
                   <Text style={styles.updateTitle}>{updateStatusText}</Text>
                   <Text style={styles.updateMeta}>{currentVersionText}</Text>
                   {latestUpdate && <Text style={styles.updateMeta}>{availableVersionText}</Text>}
-                  <Text style={styles.updateMeta}>{currentCodexText}</Text>
-                  {availableCodexText && <Text style={styles.updateMeta}>{availableCodexText}</Text>}
                 </View>
                 <Pressable
                   style={[styles.actionBtn, !canInstallUpdate && styles.actionBtnDisabled]}
@@ -518,6 +775,55 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
               )}
             </View>
 
+            <View style={styles.updateBox}>
+              <View style={styles.updateHead}>
+                <View style={styles.statusIcon}>
+                  <MaterialIcons name={codexIconName as any} size={18} color={C.accent} />
+                </View>
+                <View style={styles.updateCopy}>
+                  <Text style={styles.updateTitle}>{codexStatusText}</Text>
+                  <Text style={styles.updateMeta}>{currentCodexText}</Text>
+                  {codexSourceText && <Text style={styles.updateMeta}>{codexSourceText}</Text>}
+                  {availableCodexText && <Text style={styles.updateMeta}>{availableCodexText}</Text>}
+                  {(codexRuntimeIsNewer || installedCodexInfo?.source === 'runtime' || codexRuntimeNeedsRepair) && (
+                    <Text style={styles.updateHint}>{t('updates.codex_next_terminal_hint')}</Text>
+                  )}
+                </View>
+                <View style={styles.actionGroup}>
+                  <Pressable
+                    style={[styles.actionBtn, !canInstallCodexRuntime && styles.actionBtnDisabled]}
+                    onPress={() => void installLatestCodexRuntime()}
+                    disabled={!canInstallCodexRuntime}
+                  >
+                    {installingCodexRuntime ? (
+                      <ActivityIndicator size="small" color={C.bgDeep} />
+                    ) : (
+                      <MaterialIcons name="upgrade" size={13} color={canInstallCodexRuntime ? C.bgDeep : C.text3} />
+                    )}
+                    <Text style={[styles.actionText, !canInstallCodexRuntime && styles.actionTextDisabled]}>
+                      {codexActionLabel}
+                    </Text>
+                  </Pressable>
+                  {hasCodexRuntimeToReset && (
+                    <Pressable
+                      style={[styles.actionBtn, styles.secondaryActionBtn, !canResetCodexRuntime && styles.actionBtnDisabled]}
+                      onPress={() => void resetInstalledCodexRuntime()}
+                      disabled={!canResetCodexRuntime}
+                    >
+                      {resettingCodexRuntime ? (
+                        <ActivityIndicator size="small" color={C.accent} />
+                      ) : (
+                        <MaterialIcons name="restore" size={13} color={canResetCodexRuntime ? C.accent : C.text3} />
+                      )}
+                      <Text style={[styles.actionText, styles.secondaryActionText, !canResetCodexRuntime && styles.actionTextDisabled]}>
+                        {t('updates.codex_reset')}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            </View>
+
             {advancedOpen && (
               <View style={styles.advancedSection}>
                 <Text style={styles.advancedTitle}>{t('updates.build_details')}</Text>
@@ -529,10 +835,14 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
                 {runs.map((run) => {
                   const status = statusFromRun(run);
                   const releaseMatchesRun = Boolean(
-                    latestUpdate && (
+                    (latestUpdate && (
                       (latestUpdate.runId && latestUpdate.runId === run.databaseId) ||
                       (!latestUpdate.runId && latestUpdate.gitSha && latestUpdate.gitSha === run.headSha)
-                    ),
+                    )) ||
+                    (latestCodexRuntime && (
+                      (latestCodexRuntime.runId && latestCodexRuntime.runId === run.databaseId) ||
+                      (!latestCodexRuntime.runId && latestCodexRuntime.gitSha && latestCodexRuntime.gitSha === run.headSha)
+                    )),
                   );
                   const failed = run.status === 'completed' && status === 'failure';
                   const logBusy = logLoadingId === run.databaseId;
@@ -662,6 +972,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  actionGroup: {
+    alignItems: 'flex-end',
+    gap: 7,
+  },
   statusIcon: {
     width: 28,
     height: 28,
@@ -753,6 +1067,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
+  secondaryActionBtn: {
+    backgroundColor: C.bgDeep,
+    borderWidth: 1,
+    borderColor: withAlpha(C.accent, 0.45),
+  },
   actionText: {
     color: C.bgDeep,
     fontFamily: F.family,
@@ -761,6 +1080,9 @@ const styles = StyleSheet.create({
   },
   actionTextDisabled: {
     color: C.text3,
+  },
+  secondaryActionText: {
+    color: C.accent,
   },
   logBtn: {
     backgroundColor: C.bgDeep,
