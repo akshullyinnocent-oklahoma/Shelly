@@ -10,6 +10,7 @@ import { installSchedule, uninstallSchedule } from './agent-scheduler';
 import { getHomePath } from '@/lib/home-path';
 import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
 import * as Notifications from 'expo-notifications';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const agentsDir = () => `${getHomePath()}/.shelly/agents`;
 
@@ -249,29 +250,33 @@ export async function notifyAgentResult(
  * Called from app initialization.
  */
 export async function loadAgentsFromDisk(
-  runCommand: (cmd: string) => Promise<string>
+  runCommand: (cmd: string) => Promise<string>,
+  options: {
+    syncLogs?: boolean;
+    repairSchedules?: boolean;
+    repairDelayMs?: number;
+    shouldRepair?: () => boolean;
+  } = {}
 ): Promise<void> {
-  try {
-    const output = await runCommand(
-      `ls ${shellQuote(agentsDir())}/*.json 2>/dev/null | while read f; do cat "$f"; echo "---SEPARATOR---"; done`
-    );
+  const {
+    syncLogs = true,
+    repairSchedules = true,
+    repairDelayMs,
+    shouldRepair,
+  } = options;
 
-    if (!output.trim()) {
+  try {
+    const agents = syncLogs
+      ? await readAgentMetadataViaShell(runCommand)
+      : await readAgentMetadataLightweight(runCommand);
+
+    if (agents.length === 0) {
       useAgentStore.getState().setAgents([]);
       return;
     }
-
-    const agents: Agent[] = [];
-    const chunks = output.split('---SEPARATOR---').filter((c) => c.trim());
-    for (const chunk of chunks) {
-      try {
-        const agent = JSON.parse(chunk.trim()) as Agent;
-        agents.push(agent);
-      } catch {
-        // Skip malformed agent files
-      }
-    }
-    const runHistory = await readAgentRunLogs(runCommand);
+    const runHistory = syncLogs
+      ? await readAgentRunLogs(runCommand)
+      : useAgentStore.getState().runHistory;
     const agentsWithStatus = agents.map((agent) => {
       const latest = runHistory[agent.id]?.at(-1);
       return latest
@@ -283,9 +288,13 @@ export async function loadAgentsFromDisk(
         : agent;
     });
 
-    useAgentStore.getState().setRunHistory(runHistory);
+    if (syncLogs) {
+      useAgentStore.getState().setRunHistory(runHistory);
+    }
     useAgentStore.getState().setAgents(agentsWithStatus);
-    scheduleAgentStartupRepair(agentsWithStatus, runCommand);
+    if (repairSchedules) {
+      scheduleAgentStartupRepair(agentsWithStatus, runCommand, repairDelayMs, shouldRepair);
+    }
   } catch {
     useAgentStore.getState().setAgents([]);
   }
@@ -293,14 +302,18 @@ export async function loadAgentsFromDisk(
 
 function scheduleAgentStartupRepair(
   agents: Agent[],
-  runCommand: (cmd: string) => Promise<string>
+  runCommand: (cmd: string) => Promise<string>,
+  delayMs = 60_000,
+  shouldRun: (() => boolean) | undefined
 ): void {
   const scheduledAgents = agents.filter((agent) => agent.enabled && agent.schedule);
   if (scheduledAgents.length === 0) return;
 
   setTimeout(() => {
+    if (shouldRun && !shouldRun()) return;
     void (async () => {
       for (const agent of scheduledAgents) {
+        if (shouldRun && !shouldRun()) return;
         try {
           await materializeAgent(agent, runCommand, true);
           await new Promise((resolve) => setTimeout(resolve, 250));
@@ -309,7 +322,55 @@ function scheduleAgentStartupRepair(
         }
       }
     })();
-  }, 5_000);
+  }, delayMs);
+}
+
+async function readAgentMetadataLightweight(
+  runCommand: (cmd: string) => Promise<string>
+): Promise<Agent[]> {
+  const agents = await readAgentMetadataViaFileSystem();
+  if (agents) return agents;
+  return readAgentMetadataViaShell(runCommand);
+}
+
+async function readAgentMetadataViaFileSystem(): Promise<Agent[] | null> {
+  try {
+    const dirUri = toFileUri(agentsDir());
+    const info = await FileSystem.getInfoAsync(dirUri);
+    if (!info.exists || !info.isDirectory) return [];
+    const names = await FileSystem.readDirectoryAsync(dirUri);
+    const agents: Agent[] = [];
+    for (const name of names.filter((entry) => entry.endsWith('.json'))) {
+      try {
+        const content = await FileSystem.readAsStringAsync(`${dirUri}/${name}`);
+        agents.push(JSON.parse(content) as Agent);
+      } catch {
+        // Skip malformed or concurrently-written metadata files.
+      }
+    }
+    return agents;
+  } catch {
+    return null;
+  }
+}
+
+async function readAgentMetadataViaShell(
+  runCommand: (cmd: string) => Promise<string>
+): Promise<Agent[]> {
+  const output = await runCommand(
+    `ls ${shellQuote(agentsDir())}/*.json 2>/dev/null | while read f; do cat "$f"; echo "---SEPARATOR---"; done`
+  );
+  if (!output.trim()) return [];
+  const agents: Agent[] = [];
+  const chunks = output.split('---SEPARATOR---').filter((c) => c.trim());
+  for (const chunk of chunks) {
+    try {
+      agents.push(JSON.parse(chunk.trim()) as Agent);
+    } catch {
+      // Skip malformed agent files.
+    }
+  }
+  return agents;
 }
 
 export async function syncAgentRunLogsFromDisk(
@@ -389,4 +450,8 @@ ${marker}`;
 
 function shellQuote(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+function toFileUri(path: string): string {
+  return path.startsWith('file://') ? path : `file://${path}`;
 }

@@ -36,6 +36,9 @@ import { useTranslation } from '@/lib/i18n';
 const WIDTH_ICONS = 48;
 const WIDTH_HIDDEN = 0;
 const TIMING_MS = 200;
+const AGENT_RUNNING_POLL_START_DELAY_MS = 15_000;
+const AGENT_RUNNING_POLL_INTERVAL_MS = 15_000;
+const AGENT_RUNNING_BACKGROUND_POLL_INTERVAL_MS = 60_000;
 
 function formatTimeAgo(ts: number, t: (key: string, params?: Record<string, string | number>) => string): string {
   const diff = Math.floor((Date.now() - ts) / 1000);
@@ -61,6 +64,8 @@ export function Sidebar() {
   const runHistory = useAgentStore((s) => s.runHistory);
   const [runningAgentIds, setRunningAgentIds] = useState<Set<string>>(new Set());
   const [pendingAgentIds, setPendingAgentIds] = useState<Set<string>>(new Set());
+  const mountedAtRef = React.useRef(Date.now());
+  const wasAgentsSectionOpenRef = React.useRef(mode === 'expanded' && openSections.tasks);
   const [addRepoVisible, setAddRepoVisible] = useState(false);
   const [repoInput, setRepoInput] = useState('');
 
@@ -119,6 +124,9 @@ export function Sidebar() {
   const openUrl = useBrowserStore((s) => s.openUrl);
   const portsSectionOpen = useSidebarStore((s) => s.openSections.ports);
   const portsPollingDisabled = usePortsStore((s) => s.pollingDisabled);
+  const agentsSectionOpen = mode === 'expanded' && openSections.tasks;
+  const pendingAgentCount = pendingAgentIds.size;
+  const shouldPollRunningAgents = agents.length > 0 || pendingAgentCount > 0;
 
   // Poll active localhost listeners every 15s. Single-writer pattern
   // (Sidebar owns the interval, usePortsStore is the one state source)
@@ -288,17 +296,46 @@ export function Sidebar() {
 
   useEffect(() => {
     let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let startTimer: ReturnType<typeof setTimeout> | null = null;
+    const becameVisible = agentsSectionOpen && !wasAgentsSectionOpenRef.current;
+    wasAgentsSectionOpenRef.current = agentsSectionOpen;
+    const pollIntervalMs = agentsSectionOpen
+      ? AGENT_RUNNING_POLL_INTERVAL_MS
+      : AGENT_RUNNING_BACKGROUND_POLL_INTERVAL_MS;
     const refreshIfMounted = async () => {
       if (!cancelled) await refreshRunningAgents();
     };
+    const stopPolling = () => {
+      if (startTimer) { clearTimeout(startTimer); startTimer = null; }
+      if (interval) { clearInterval(interval); interval = null; }
+    };
+    const startPolling = (immediate: boolean) => {
+      if (!shouldPollRunningAgents) return;
+      if (startTimer || interval) return;
+      const remainingDelay = Math.max(
+        0,
+        AGENT_RUNNING_POLL_START_DELAY_MS - (Date.now() - mountedAtRef.current),
+      );
+      startTimer = setTimeout(() => {
+        startTimer = null;
+        if (cancelled || AppState.currentState !== 'active') return;
+        void refreshIfMounted();
+        interval = setInterval(refreshIfMounted, pollIntervalMs);
+      }, immediate ? 0 : remainingDelay);
+    };
 
-    refreshIfMounted();
-    const interval = setInterval(refreshIfMounted, 15_000);
+    startPolling(becameVisible || pendingAgentCount > 0);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') startPolling(agentsSectionOpen);
+      else stopPolling();
+    });
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stopPolling();
+      sub.remove();
     };
-  }, [agents.length, refreshRunningAgents]);
+  }, [agents.length, agentsSectionOpen, pendingAgentCount, refreshRunningAgents, shouldPollRunningAgents]);
 
   const runningAgents = agents.filter((a) => runningAgentIds.has(a.id) || pendingAgentIds.has(a.id));
 

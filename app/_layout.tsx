@@ -50,6 +50,10 @@ export const unstable_settings = {
   initialRouteName: "index",
 };
 
+const BACKGROUND_AGENT_LOG_START_DELAY_MS = 45_000;
+const BACKGROUND_AGENT_REPAIR_DELAY_MS = 90_000;
+const AGENT_LOG_SYNC_INTERVAL_MS = 60_000;
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     'JetBrainsMono_400Regular': JetBrainsMono_400Regular,
@@ -94,43 +98,59 @@ export default function RootLayout() {
       logError('RootLayout', 'loadSettings failed', e);
     });
 
-    // Load background agents after HOME resolves; otherwise the fallback path
-    // can clear persisted agents from JS state before native HOME is known.
-    import('@/lib/home-path').then(({ initHomePath }) => {
-      initHomePath().then(() => loadAgentsFromDisk(async (cmd) => {
-        const result = await execCommand(cmd, 30_000);
-        if (result.exitCode !== 0) throw new Error(result.stderr || `exit ${result.exitCode}`);
-        return result.stdout;
-      })).then(() => {
+    let disposed = false;
+    const runNativeShell = async (cmd: string, timeoutMs = 30_000) => {
+      const result = await execCommand(cmd, timeoutMs);
+      if (result.exitCode !== 0) throw new Error(result.stderr || `exit ${result.exitCode}`);
+      return result.stdout;
+    };
+
+    // Restore agent metadata immediately so manual @agent commands work after
+    // launch. Heavy log sync and script/alarm repair are still deferred below.
+    void (async () => {
+      try {
+        const { initHomePath } = await import('@/lib/home-path');
+        await initHomePath();
+        if (disposed) return;
+        await loadAgentsFromDisk(runNativeShell, {
+          syncLogs: false,
+          repairSchedules: true,
+          repairDelayMs: BACKGROUND_AGENT_REPAIR_DELAY_MS,
+          shouldRepair: () => !disposed && AppState.currentState === 'active',
+        });
         logInfo('RootLayout', 'Loaded: agents');
-      }).catch((e: any) => {
+      } catch (e: any) {
         logError('RootLayout', 'loadAgentsFromDisk failed', e);
-      });
-    });
+      }
+    })();
 
     // Background agents can complete while the JS bridge is asleep. Refresh
     // their on-disk logs when Shelly returns to foreground, and periodically
     // while it is open, so the sidebar/history reflects scheduled runs.
     let agentLogSyncInFlight = false;
+    let agentLogSyncReady = false;
+    let agentLogInterval: ReturnType<typeof setInterval> | null = null;
     const syncAgentLogs = async () => {
-      if (agentLogSyncInFlight) return;
+      if (disposed || agentLogSyncInFlight) return;
       agentLogSyncInFlight = true;
       try {
         await import('@/lib/home-path').then(({ initHomePath }) => initHomePath());
-        await syncAgentRunLogsFromDisk(async (cmd) => {
-          const result = await execCommand(cmd, 30_000);
-          if (result.exitCode !== 0) throw new Error(result.stderr || `exit ${result.exitCode}`);
-          return result.stdout;
-        });
+        if (disposed) return;
+        await syncAgentRunLogsFromDisk(runNativeShell);
       } catch (e: any) {
         logError('RootLayout', 'syncAgentRunLogsFromDisk failed', e);
       } finally {
         agentLogSyncInFlight = false;
       }
     };
-    const agentLogInterval = setInterval(syncAgentLogs, 60_000);
+    const agentLogStartTimer = setTimeout(() => {
+      if (disposed) return;
+      agentLogSyncReady = true;
+      void syncAgentLogs();
+      agentLogInterval = setInterval(syncAgentLogs, AGENT_LOG_SYNC_INTERVAL_MS);
+    }, BACKGROUND_AGENT_LOG_START_DELAY_MS);
     const agentLogSub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void syncAgentLogs();
+      if (state === 'active' && agentLogSyncReady) void syncAgentLogs();
     });
 
 
@@ -481,11 +501,13 @@ export default function RootLayout() {
       }
     });
     return () => {
+      disposed = true;
       sub.remove();
       agentLogSub.remove();
       linkSub.remove();
+      clearTimeout(agentLogStartTimer);
       clearInterval(queueInterval);
-      clearInterval(agentLogInterval);
+      if (agentLogInterval) clearInterval(agentLogInterval);
     };
   }, [loadSettings]);
 
