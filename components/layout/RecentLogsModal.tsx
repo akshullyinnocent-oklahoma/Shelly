@@ -18,6 +18,7 @@ import { useExecutionLogStore } from '@/store/execution-log-store';
 import { useTerminalStore } from '@/store/terminal-store';
 import { colors as C, fonts as F, radii as R } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
+import { useTranslation } from '@/lib/i18n';
 
 type Props = {
   visible: boolean;
@@ -25,6 +26,7 @@ type Props = {
 };
 
 export function RecentLogsModal({ visible, onClose }: Props) {
+  const { t } = useTranslation();
   const [copyBusy, setCopyBusy] = useState(false);
   const sessionBuffer = useExecutionLogStore((s) => s.sessionBuffer);
   const terminalSessions = useTerminalStore((s) => s.sessions);
@@ -49,9 +51,9 @@ export function RecentLogsModal({ visible, onClose }: Props) {
   const handleShare = async () => {
     if (!hasLogs) return;
     try {
-      await Share.share({ message: text, title: 'Shelly Terminal Logs' });
+      await Share.share({ message: text, title: t('recent_logs.share_title') });
     } catch {
-      Alert.alert('Share failed', 'Unable to open the share sheet.');
+      Alert.alert(t('recent_logs.share_failed_title'), t('recent_logs.share_failed_body'));
     }
   };
 
@@ -59,7 +61,7 @@ export function RecentLogsModal({ visible, onClose }: Props) {
     <ShellyModal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <ModalHeader title="RECENT LOGS" onClose={onClose} />
+          <ModalHeader title={t('recent_logs.title')} onClose={onClose} />
 
           <View style={styles.toolbar}>
             <Pressable
@@ -71,10 +73,10 @@ export function RecentLogsModal({ visible, onClose }: Props) {
               onPress={handleCopy}
               disabled={!hasLogs || copyBusy}
               accessibilityRole="button"
-              accessibilityLabel="Copy recent logs"
+              accessibilityLabel={t('recent_logs.copy_a11y')}
             >
               <MaterialIcons name="content-copy" size={14} color={C.text2} />
-              <Text style={styles.actionText}>Copy</Text>
+              <Text style={styles.actionText}>{t('common.copy')}</Text>
             </Pressable>
 
             <Pressable
@@ -86,16 +88,18 @@ export function RecentLogsModal({ visible, onClose }: Props) {
               onPress={handleShare}
               disabled={!hasLogs}
               accessibilityRole="button"
-              accessibilityLabel="Share recent logs"
+              accessibilityLabel={t('recent_logs.share_a11y')}
             >
               <MaterialIcons name="share" size={14} color={C.text2} />
-              <Text style={styles.actionText}>Share</Text>
+              <Text style={styles.actionText}>{t('common.share')}</Text>
             </Pressable>
 
             <View style={styles.metaWrap}>
               <MaterialIcons name="history" size={13} color={C.text3} />
               <Text style={styles.metaText}>
-                {sessionBuffer.length > 0 ? `${sessionBuffer.length} lines buffered` : 'No buffered logs'}
+                {sessionBuffer.length > 0
+                  ? t('recent_logs.lines_buffered', { count: sessionBuffer.length })
+                  : t('recent_logs.no_buffered_logs')}
               </Text>
             </View>
           </View>

@@ -11,6 +11,7 @@ import type { PaneTab } from '@/hooks/use-multi-pane';
 import { useAddPane } from '@/hooks/use-add-pane';
 import { useSidebarStore } from '@/store/sidebar-store';
 import { colors as C, fonts as F, sizes as S } from '@/theme.config';
+import { useTranslation } from '@/lib/i18n';
 
 type Props = {
   visible: boolean;
@@ -34,6 +35,7 @@ const OPTIONS: SheetOption[] = [
 ];
 
 export function AddPaneSheet({ visible, onClose }: Props) {
+  const { t } = useTranslation();
   const addPane = useAddPane();
   const handleSelect = (opt: SheetOption) => {
     if (opt.kind === 'sidebar') {
@@ -62,7 +64,7 @@ export function AddPaneSheet({ visible, onClose }: Props) {
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.handle} />
-          <Text style={styles.title}>ADD PANE</Text>
+          <Text style={styles.title}>{t('pane.add_pane')}</Text>
           {OPTIONS.map((opt) => (
             <Pressable
               key={`${opt.kind}-${opt.id}`}

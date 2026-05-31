@@ -24,7 +24,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Clipboard from 'expo-clipboard';
 import { useCosmeticStore } from '@/store/cosmetic-store';
 import { useSettingsStore } from '@/store/settings-store';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, useTranslation } from '@/lib/i18n';
 import { colors as C, fonts as F, sizes as S, radii as R } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { McpSectionWrapper } from '@/components/settings/McpSectionWrapper';
@@ -50,6 +50,7 @@ const FONT_SIZE_PRESETS: FontSizePreset[] = [
 ];
 
 export function SettingsDropdown({ visible, onClose }: Props) {
+  const { t } = useTranslation();
   const [mcpOpen, setMcpOpen] = useState(false);
   const [llamaOpen, setLlamaOpen] = useState(false);
   const [buildsOpen, setBuildsOpen] = useState(false);
@@ -66,14 +67,14 @@ export function SettingsDropdown({ visible, onClose }: Props) {
         <Pressable style={styles.panel} onPress={(e) => e.stopPropagation()}>
           <View style={styles.header}>
             <MaterialIcons name="settings" size={13} color={C.text2} />
-            <Text style={styles.headerTitle}>SETTINGS</Text>
+            <Text style={styles.headerTitle}>{t('settings.title')}</Text>
             <View style={{ flex: 1 }} />
             <Pressable
               onPress={onClose}
               hitSlop={8}
               style={styles.closeBtn}
               accessibilityRole="button"
-              accessibilityLabel="Close settings"
+              accessibilityLabel={t('settings.close_a11y')}
             >
               <MaterialIcons name="close" size={13} color={C.text2} />
             </Pressable>
@@ -122,16 +123,17 @@ export function SettingsDropdown({ visible, onClose }: Props) {
 }
 
 function UpdatesSection({ onOpenBuilds }: { onOpenBuilds: () => void }) {
+  const { t } = useTranslation();
   return (
-    <Section title="UPDATES">
+    <Section title={t('updates.title')}>
       <Pressable
         style={styles.integrationRow}
         onPress={onOpenBuilds}
         accessibilityRole="button"
-        accessibilityLabel="Open updates"
+        accessibilityLabel={t('updates.open_a11y')}
       >
         <MaterialIcons name="cloud-download" size={13} color={C.text2} />
-        <Text style={styles.integrationLabel}>Check for updates</Text>
+        <Text style={styles.integrationLabel}>{t('updates.check_for_updates')}</Text>
         <View style={{ flex: 1 }} />
         <MaterialIcons name="chevron-right" size={14} color={C.text3} />
       </Pressable>
@@ -140,6 +142,7 @@ function UpdatesSection({ onOpenBuilds }: { onOpenBuilds: () => void }) {
 }
 
 function ScouterSection({ visible, onCloseSettings }: { visible: boolean; onCloseSettings: () => void }) {
+  const { t } = useTranslation();
   const [enabled, setEnabled] = useState(false);
   const [port, setPort] = useState(-1);
   const [busy, setBusy] = useState(false);
@@ -166,46 +169,46 @@ function ScouterSection({ visible, onCloseSettings }: { visible: boolean; onClos
       await TerminalEmulator.setScouterEnabled(next);
       setEnabled(next);
       await load();
-      ToastAndroid.show(next ? 'Scouter enabled' : 'Scouter disabled', ToastAndroid.SHORT);
+      ToastAndroid.show(next ? t('scouter.enabled') : t('scouter.disabled'), ToastAndroid.SHORT);
       logInfo('SettingsDropdown', 'Scouter enabled=' + next);
     } catch (e: any) {
-      Alert.alert('Scouter failed', String(e?.message || e));
+      Alert.alert(t('scouter.failed'), String(e?.message || e));
       logError('SettingsDropdown', 'Failed to toggle Scouter', e);
     } finally {
       setBusy(false);
     }
-  }, [enabled, load]);
+  }, [enabled, load, t]);
 
   const copyDebug = React.useCallback(async () => {
     try {
       const info = await TerminalEmulator.getScouterDebugInfo();
       await Clipboard.setStringAsync(info);
-      Alert.alert('Scouter Debug', `${info.slice(0, 2500)}\n\nCopied to clipboard.`);
+      Alert.alert(t('scouter.debug_title'), `${info.slice(0, 2500)}\n\n${t('common.copied_clipboard')}`);
     } catch (e: any) {
-      Alert.alert('Scouter Debug failed', String(e?.message || e));
+      Alert.alert(t('scouter.debug_failed'), String(e?.message || e));
       logError('SettingsDropdown', 'Failed to get Scouter debug info', e);
     }
-  }, []);
+  }, [t]);
 
   const copyHooks = React.useCallback(async () => {
     try {
       if (!enabled || port <= 0) {
-        Alert.alert('Scouter disabled', 'Turn Scouter on first, then copy hook templates.');
+        Alert.alert(t('scouter.disabled'), t('scouter.enable_first'));
         return;
       }
       const codex = await TerminalEmulator.getScouterHookTemplate('codex');
       const local = await TerminalEmulator.getScouterHookTemplate('local');
       const text = `Codex:\n${codex}\n\nLocal LLM:\n${local}`;
       await Clipboard.setStringAsync(text);
-      Alert.alert('Scouter Hooks', `${text.slice(0, 2500)}\n\nCopied to clipboard.`);
+      Alert.alert(t('scouter.hooks_title'), `${text.slice(0, 2500)}\n\n${t('common.copied_clipboard')}`);
     } catch (e: any) {
-      Alert.alert('Scouter Hooks failed', String(e?.message || e));
+      Alert.alert(t('scouter.hooks_failed'), String(e?.message || e));
       logError('SettingsDropdown', 'Failed to get Scouter hook templates', e);
     }
-  }, [enabled, port]);
+  }, [enabled, port, t]);
 
   return (
-    <Section title="SCOUTER">
+    <Section title={t('scouter.title')}>
       <Row label="Scouter">
         <Pressable
           style={[styles.switchTrack, enabled && styles.switchTrackOn, busy && styles.integrationRowDisabled]}
@@ -220,10 +223,10 @@ function ScouterSection({ visible, onCloseSettings }: { visible: boolean; onClos
         style={styles.integrationRow}
         onPress={copyDebug}
         accessibilityRole="button"
-        accessibilityLabel="Copy Scouter debug info"
+        accessibilityLabel={t('scouter.copy_debug_a11y')}
       >
         <MaterialIcons name="bug-report" size={13} color={C.text2} />
-        <Text style={styles.integrationLabel}>Copy debug info</Text>
+        <Text style={styles.integrationLabel}>{t('scouter.copy_debug')}</Text>
         <View style={{ flex: 1 }} />
         <MaterialIcons name="content-copy" size={14} color={C.text3} />
       </Pressable>
@@ -235,10 +238,10 @@ function ScouterSection({ visible, onCloseSettings }: { visible: boolean; onClos
           useSettingsStore.getState().setShowScouterDetail(true);
         }}
         accessibilityRole="button"
-        accessibilityLabel="Open Scouter detail"
+        accessibilityLabel={t('scouter.open_monitor_a11y')}
       >
         <MaterialIcons name="desktop-windows" size={13} color={C.text2} />
-        <Text style={styles.integrationLabel}>Open Scouter monitor</Text>
+        <Text style={styles.integrationLabel}>{t('scouter.open_monitor')}</Text>
         <View style={{ flex: 1 }} />
         <MaterialIcons name="open-in-new" size={14} color={C.text3} />
       </Pressable>
@@ -247,10 +250,10 @@ function ScouterSection({ visible, onCloseSettings }: { visible: boolean; onClos
         style={styles.integrationRow}
         onPress={copyHooks}
         accessibilityRole="button"
-        accessibilityLabel="Copy Scouter hook templates"
+        accessibilityLabel={t('scouter.copy_hooks_a11y')}
       >
         <MaterialIcons name="webhook" size={13} color={C.text2} />
-        <Text style={styles.integrationLabel}>Copy hook templates</Text>
+        <Text style={styles.integrationLabel}>{t('scouter.copy_hooks')}</Text>
         <View style={{ flex: 1 }} />
         <MaterialIcons name="content-copy" size={14} color={C.text3} />
       </Pressable>
@@ -265,13 +268,14 @@ function IntegrationsSection({
   onOpenMcp: () => void;
   onOpenLlama: () => void;
 }) {
+  const { t } = useTranslation();
   return (
-    <Section title="INTEGRATIONS">
+    <Section title={t('integrations.title')}>
       <Pressable
         style={styles.integrationRow}
         onPress={onOpenMcp}
         accessibilityRole="button"
-        accessibilityLabel="Open MCP Servers settings"
+        accessibilityLabel={t('integrations.open_mcp_a11y')}
       >
         <MaterialIcons name="extension" size={13} color={C.text2} />
         <Text style={styles.integrationLabel}>MCP Servers</Text>
@@ -282,7 +286,7 @@ function IntegrationsSection({
         style={styles.integrationRow}
         onPress={onOpenLlama}
         accessibilityRole="button"
-        accessibilityLabel="Open Local LLM llama.cpp settings"
+        accessibilityLabel={t('integrations.open_llama_a11y')}
       >
         <MaterialIcons name="memory" size={13} color={C.text2} />
         <Text style={styles.integrationLabel}>Local LLM · llama.cpp</Text>
@@ -299,19 +303,15 @@ function IntegrationsSection({
 // Palette and harder to find). Original Recovery entry stays in
 // ConfigTUI; this is the discoverable mirror.
 function RecoverySection() {
+  const { t } = useTranslation();
   const handleRecover = React.useCallback(() => {
     Alert.alert(
-      'Force-recover Shelly?',
-      'Wipes ~/.shelly-cli.staging and the stale update lockfile. ' +
-      'Live install (~/.shelly-cli) is preserved — your CLIs keep working. ' +
-      'Use this only if Shelly freezes on launch and task-kill from the ' +
-      'recents list does not recover.\n\n' +
-      'After recovery, fully close Shelly (recents → swipe up) and ' +
-      'relaunch. The next launch will refresh from upstream automatically.',
+      t('recovery.confirm_title'),
+      t('recovery.confirm_body'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Recover',
+          text: t('recovery.recover'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -320,37 +320,37 @@ function RecoverySection() {
               const errorCount = Array.isArray(result?.errors) ? result.errors.length : 0;
               if (errorCount > 0) {
                 Alert.alert(
-                  'Recovery completed with warnings',
-                  `Cleaned ${cleanedCount} item(s). ${errorCount} could not be removed:\n\n` +
+                  t('recovery.warn_title'),
+                  t('recovery.warn_body', { cleaned: cleanedCount, errors: errorCount }) + '\n\n' +
                   (result.errors as string[]).slice(0, 5).join('\n') +
-                  (errorCount > 5 ? `\n…+${errorCount - 5} more` : ''),
+                  (errorCount > 5 ? `\n...+${errorCount - 5} ${t('common.more')}` : ''),
                 );
               } else {
                 Alert.alert(
-                  'Recovery complete',
-                  `Cleaned ${cleanedCount} item(s). Force-stop Shelly (recents → swipe up) and relaunch.`,
+                  t('recovery.complete_title'),
+                  t('recovery.complete_body', { cleaned: cleanedCount }),
                 );
               }
               logInfo('SettingsDropdown', 'forceRecoverFromFrozenState ok=' + result?.ok + ' cleaned=' + cleanedCount + ' errors=' + errorCount);
             } catch (e: any) {
               logError('SettingsDropdown', 'forceRecoverFromFrozenState failed', e);
-              Alert.alert('Recovery failed', String(e?.message || e));
+              Alert.alert(t('recovery.failed'), String(e?.message || e));
             }
           },
         },
       ],
     );
-  }, []);
+  }, [t]);
   return (
-    <Section title="RECOVERY">
+    <Section title={t('recovery.title')}>
       <Pressable
         style={styles.integrationRow}
         onPress={handleRecover}
         accessibilityRole="button"
-        accessibilityLabel="Force-recover from frozen state"
+        accessibilityLabel={t('recovery.action_a11y')}
       >
         <MaterialIcons name="healing" size={13} color={C.text2} />
-        <Text style={styles.integrationLabel}>Force-recover from frozen state</Text>
+        <Text style={styles.integrationLabel}>{t('recovery.action')}</Text>
         <View style={{ flex: 1 }} />
         <MaterialIcons name="chevron-right" size={14} color={C.text3} />
       </Pressable>
@@ -370,6 +370,7 @@ function RecoverySection() {
 // eventually be purged and leave the wallpaper blank.
 //
 function WallpaperSection() {
+  const { t } = useTranslation();
   const wallpaperUri = useCosmeticStore((s) => s.wallpaperUri);
   const wallpaperOpacity = useCosmeticStore((s) => s.wallpaperOpacity);
   const panelOpacity = useCosmeticStore((s) => s.panelOpacity);
@@ -386,8 +387,8 @@ function WallpaperSection() {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
         Alert.alert(
-          'Permission needed',
-          'Shelly needs access to your photo library to pick a wallpaper.',
+          t('wallpaper.permission_title'),
+          t('wallpaper.permission_body'),
         );
         return;
       }
@@ -414,7 +415,7 @@ function WallpaperSection() {
       }
       setWallpaper(dest);
     } catch (e) {
-      Alert.alert('Pick failed', String((e as Error)?.message ?? e));
+      Alert.alert(t('wallpaper.pick_failed'), String((e as Error)?.message ?? e));
     }
   };
 
@@ -426,8 +427,8 @@ function WallpaperSection() {
   };
 
   return (
-    <Section title="WALLPAPER">
-      <Row label="Image">
+    <Section title={t('wallpaper.title')}>
+      <Row label={t('wallpaper.image')}>
         <View style={styles.wallpaperRow}>
           {wallpaperUri ? (
             <Image source={{ uri: wallpaperUri }} style={styles.wallpaperPreview} />
@@ -438,12 +439,12 @@ function WallpaperSection() {
           )}
           <Pressable style={styles.wallpaperBtn} onPress={pick} hitSlop={4}>
             <Text style={styles.wallpaperBtnText}>
-              {wallpaperUri ? 'Change' : 'Pick'}
+              {wallpaperUri ? t('wallpaper.change') : t('wallpaper.pick')}
             </Text>
           </Pressable>
           {wallpaperUri && (
             <Pressable style={[styles.wallpaperBtn, styles.wallpaperBtnGhost]} onPress={clear} hitSlop={4}>
-              <Text style={[styles.wallpaperBtnText, { color: C.text2 }]}>Clear</Text>
+              <Text style={[styles.wallpaperBtnText, { color: C.text2 }]}>{t('common.clear')}</Text>
             </Pressable>
           )}
         </View>
@@ -452,12 +453,12 @@ function WallpaperSection() {
       {wallpaperUri && (
         <>
           <SliderRow
-            label="Image Opacity"
+            label={t('wallpaper.image_opacity')}
             value={wallpaperOpacity}
             onChange={setWallpaperOpacity}
           />
           <SliderRow
-            label="Panel Opacity"
+            label={t('wallpaper.panel_opacity')}
             value={panelOpacity}
             onChange={setPanelOpacity}
           />
@@ -515,13 +516,14 @@ function SliderRow({
 // ─── Display ─────────────────────────────────────────────────────────────────
 
 function DisplaySection() {
+  const { t } = useTranslation();
   const fontSize = useSettingsStore((s) => s.settings.fontSize);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
 
   return (
-    <Section title="DISPLAY">
+    <Section title={t('settings.display')}>
       {/* Font size preset */}
-      <Row label="Font Size">
+      <Row label={t('settings.font_size')}>
         <View style={styles.segGroup}>
           {FONT_SIZE_PRESETS.map((p) => {
             const active = fontSize === p.size;
@@ -568,6 +570,7 @@ type UiFontId =
   | 'one-dark';
 
 function ThemeRow() {
+  const { t } = useTranslation();
   const rawUiFont = useSettingsStore((s) => s.settings.uiFont ?? 'blue');
   const uiFont: UiFontId =
     rawUiFont === 'shelly' || rawUiFont === 'modal' ? 'purple'
@@ -575,12 +578,12 @@ function ThemeRow() {
         : rawUiFont;
   const updateSettings = useSettingsStore((s) => s.updateSettings);
   const options: { value: UiFontId; label: string; swatch: string }[] = [
-    { value: 'blue',   label: 'Blue', swatch: themePresets.blue.colors.accent },
-    { value: 'orange', label: 'Red', swatch: themePresets.orange.colors.accent },
-    { value: 'purple', label: 'Purple', swatch: themePresets.purple.colors.accent },
+    { value: 'blue',   label: t('theme.blue'), swatch: themePresets.blue.colors.accent },
+    { value: 'orange', label: t('theme.red'), swatch: themePresets.orange.colors.accent },
+    { value: 'purple', label: t('theme.purple'), swatch: themePresets.purple.colors.accent },
   ];
   return (
-    <Row label="Theme">
+    <Row label={t('settings.theme')}>
       <View style={styles.segGroup}>
         {options.map((opt) => {
           const active = uiFont === opt.value;
@@ -621,11 +624,12 @@ function ThemeRow() {
 // ─── Language ────────────────────────────────────────────────────────────────
 
 function LanguageSection() {
+  const { t } = useTranslation();
   const locale = useI18n((s) => s.locale);
   const setLocale = useI18n((s) => s.setLocale);
 
   return (
-    <Section title="LANGUAGE">
+    <Section title={t('settings.language')}>
       <View style={styles.langRow}>
         <Pressable
           style={styles.langOption}
@@ -657,6 +661,7 @@ const DEFAULT_AGENT_OPTIONS: { value: 'cerebras' | 'groq' | 'codex'; label: stri
 ];
 
 function AgentsSection() {
+  const { t } = useTranslation();
   const defaultAgent = useSettingsStore((s) => s.settings.defaultAgent);
   const autoApproveLevel = useSettingsStore((s) => s.settings.autoApproveLevel);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
@@ -673,8 +678,8 @@ function AgentsSection() {
   const autoOn = autoApproveLevel !== 'none';
 
   return (
-    <Section title="AI AGENTS">
-      <Row label="Default">
+    <Section title={t('agents.title')}>
+      <Row label={t('agents.default')}>
         <Pressable
           style={styles.defaultAgentBtn}
           onPress={() => setPickerOpen((v) => !v)}
@@ -710,7 +715,7 @@ function AgentsSection() {
           })}
         </View>
       )}
-      <Row label="Auto-approve">
+      <Row label={t('agents.auto_approve')}>
         <Pressable
           style={[styles.switchTrack, autoOn && styles.switchTrackOn]}
           onPress={toggleAutoApprove}
@@ -747,6 +752,7 @@ function maskKey(value: string): string {
 }
 
 function ApiKeyRow({ field }: { field: ApiKeyField }) {
+  const { t } = useTranslation();
   const stored = useSettingsStore((s) => (s.settings[field.key] as string | undefined) ?? '');
   const updateSettings = useSettingsStore((s) => s.updateSettings);
 
@@ -794,7 +800,7 @@ function ApiKeyRow({ field }: { field: ApiKeyField }) {
               <Text style={styles.statusOnText}>{maskKey(stored)}</Text>
             </View>
           ) : (
-            <Text style={styles.statusOff}>未設定</Text>
+            <Text style={styles.statusOff}>{t('common.not_set')}</Text>
           )}
         </View>
         <View style={styles.apiKeyActions}>
@@ -806,7 +812,7 @@ function ApiKeyRow({ field }: { field: ApiKeyField }) {
             hitSlop={6}
           >
             <Text style={styles.apiKeyBtnText}>
-              {hasStored ? 'EDIT' : 'SET'}
+              {hasStored ? t('common.edit') : t('common.set')}
             </Text>
           </Pressable>
           {hasStored && (
@@ -815,7 +821,7 @@ function ApiKeyRow({ field }: { field: ApiKeyField }) {
               style={styles.apiKeyBtn}
               hitSlop={6}
             >
-              <Text style={styles.apiKeyBtnText}>CLEAR</Text>
+              <Text style={styles.apiKeyBtnText}>{t('common.clear')}</Text>
             </Pressable>
           )}
         </View>
@@ -843,7 +849,7 @@ function ApiKeyRow({ field }: { field: ApiKeyField }) {
         value={draft}
         onChangeText={setDraft}
         style={styles.apiKeyInput}
-        placeholder={`Paste ${field.label} API key`}
+        placeholder={t('api_keys.paste_placeholder', { name: field.label })}
         placeholderTextColor={C.text3}
         autoCapitalize="none"
         autoCorrect={false}
@@ -855,7 +861,7 @@ function ApiKeyRow({ field }: { field: ApiKeyField }) {
         <Text style={styles.apiKeyHint}>{field.hint}</Text>
         <View style={{ flex: 1 }} />
         <Pressable onPress={handleCancel} style={styles.apiKeyBtn} hitSlop={6}>
-          <Text style={styles.apiKeyBtnText}>CANCEL</Text>
+          <Text style={styles.apiKeyBtnText}>{t('common.cancel')}</Text>
         </Pressable>
         <Pressable
           onPress={handleSave}
@@ -863,7 +869,7 @@ function ApiKeyRow({ field }: { field: ApiKeyField }) {
           hitSlop={6}
         >
           <Text style={[styles.apiKeyBtnText, styles.apiKeyBtnTextPrimary]}>
-            SAVE
+            {t('common.save')}
           </Text>
         </Pressable>
       </View>
@@ -872,8 +878,9 @@ function ApiKeyRow({ field }: { field: ApiKeyField }) {
 }
 
 function ApiKeysSection() {
+  const { t } = useTranslation();
   return (
-    <Section title="API KEYS">
+    <Section title={t('api_keys.title')}>
       {API_KEY_FIELDS.map((f) => (
         <ApiKeyRow key={f.key} field={f} />
       ))}
@@ -891,16 +898,17 @@ function ApiKeysSection() {
 // shelly-doctor (which already reports `codex auth: <exists|missing>`).
 
 function CodexLoginSection({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const addPane = useAddPane();
 
   const start = React.useCallback(() => {
     Alert.alert(
-      'Sign in with ChatGPT?',
-      'Opens the Browser Pane to auth.openai.com for the device-code flow. After you approve in the browser, Shelly writes ~/.codex/auth.json (mode 0600). Run `shelly doctor` afterwards to confirm.',
+      t('codex_login.confirm_title'),
+      t('codex_login.confirm_body'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'Sign in',
+          text: t('codex_login.sign_in'),
           onPress: () => {
             const result = addPane('terminal');
             if (result !== null) return; // useAddPane already alerted
@@ -912,23 +920,21 @@ function CodexLoginSection({ onClose }: { onClose: () => void }) {
         },
       ],
     );
-  }, [addPane, onClose]);
+  }, [addPane, onClose, t]);
 
   return (
-    <Section title="CODEX LOGIN">
+    <Section title={t('codex_login.title')}>
       <Text style={styles.credentialHint}>
-        Sign in with your ChatGPT subscription via device-code OAuth. Runs in a
-        new terminal pane and opens the verification page in Shelly&apos;s Browser
-        Pane.
+        {t('codex_login.description')}
       </Text>
       <Pressable
         style={styles.integrationRow}
         onPress={start}
         accessibilityRole="button"
-        accessibilityLabel="Sign in with ChatGPT for Codex"
+        accessibilityLabel={t('codex_login.sign_in_a11y')}
       >
         <MaterialIcons name="login" size={13} color={C.text2} />
-        <Text style={styles.integrationLabel}>Sign in with ChatGPT</Text>
+        <Text style={styles.integrationLabel}>{t('codex_login.sign_in_chatgpt')}</Text>
         <View style={{ flex: 1 }} />
         <MaterialIcons name="chevron-right" size={14} color={C.text3} />
       </Pressable>

@@ -20,6 +20,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useWorktreeStore, type WorktreeAgent } from '@/store/worktree-store';
 import { colors as C, fonts as F, sizes as S } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
+import { useTranslation } from '@/lib/i18n';
 
 type Props = {
   visible: boolean;
@@ -38,6 +39,7 @@ function supportedInitialAgent(agent: WorktreeAgent): WorktreeAgent {
 }
 
 export function WorktreeAddModal({ visible, repoPath, initialAgent = 'codex', onClose }: Props) {
+  const { t } = useTranslation();
   const addWorktree = useWorktreeStore((s) => s.addWorktree);
   const [agent, setAgent] = useState<WorktreeAgent>(supportedInitialAgent(initialAgent));
   const [branch, setBranch] = useState('');
@@ -61,9 +63,9 @@ export function WorktreeAddModal({ visible, repoPath, initialAgent = 'codex', on
     if (result.ok === true) {
       onClose();
     } else {
-      Alert.alert('Create worktree failed', result.error);
+      Alert.alert(t('worktrees.create_failed'), result.error);
     }
-  }, [repoPath, branch, agent, busy, addWorktree, onClose]);
+  }, [repoPath, branch, agent, busy, addWorktree, onClose, t]);
 
   const canSubmit = !busy && repoPath != null && branch.trim().length > 0;
 
@@ -79,13 +81,13 @@ export function WorktreeAddModal({ visible, repoPath, initialAgent = 'codex', on
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.handle} />
 
-          <Text style={styles.title}>NEW WORKTREE</Text>
+          <Text style={styles.title}>{t('worktrees.new_title')}</Text>
           <Text style={styles.subtitle}>
-            Creates an isolated branch + working copy under ~/.shelly-worktrees/.
+            {t('worktrees.new_subtitle')}
           </Text>
 
           {/* Agent chooser */}
-          <Text style={styles.label}>AGENT</Text>
+          <Text style={styles.label}>{t('worktrees.agent')}</Text>
           <View style={styles.agentRow}>
             {AGENTS.map((a) => (
               <Pressable
@@ -101,7 +103,7 @@ export function WorktreeAddModal({ visible, repoPath, initialAgent = 'codex', on
           </View>
 
           {/* Branch input */}
-          <Text style={styles.label}>BRANCH</Text>
+          <Text style={styles.label}>{t('worktrees.branch')}</Text>
           <TextInput
             style={styles.input}
             value={branch}
@@ -115,13 +117,13 @@ export function WorktreeAddModal({ visible, repoPath, initialAgent = 'codex', on
             editable={!busy}
           />
           <Text style={styles.hint}>
-            Existing branches are reused; new ones are created with `-b`.
+            {t('worktrees.branch_hint')}
           </Text>
 
           {/* Actions */}
           <View style={styles.actions}>
             <Pressable style={styles.cancelBtn} onPress={onClose} disabled={busy}>
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={styles.cancelText}>{t('common.cancel')}</Text>
             </Pressable>
             <Pressable
               style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
@@ -133,7 +135,7 @@ export function WorktreeAddModal({ visible, repoPath, initialAgent = 'codex', on
               ) : (
                 <>
                   <MaterialIcons name="add" size={14} color={C.btnPrimaryText} />
-                  <Text style={styles.submitText}>Create</Text>
+                  <Text style={styles.submitText}>{t('common.create')}</Text>
                 </>
               )}
             </Pressable>

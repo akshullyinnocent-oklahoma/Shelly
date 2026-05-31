@@ -21,6 +21,7 @@ import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorMo
 import { execCommand } from '@/hooks/use-native-exec';
 import { colors as C, fonts as F, radii as R, sizes as S } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
+import { useTranslation } from '@/lib/i18n';
 
 const REPO = 'RYOITABASHI/Shelly';
 const WORKFLOW = 'build-android.yml';
@@ -254,6 +255,7 @@ type Props = {
 };
 
 export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
+  const { t } = useTranslation();
   const [runs, setRuns] = useState<BuildRun[]>([]);
   const [latestUpdate, setLatestUpdate] = useState<AndroidUpdateManifest | null>(null);
   const [installedVersion, setInstalledVersion] = useState<AppVersionInfo | null>(null);
@@ -322,45 +324,48 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
   const installLatestUpdate = useCallback(async () => {
     const update = latestUpdate;
     if (!update) {
-      Alert.alert('No public APK release', `The ${UPDATE_TAG} release is not available yet.`);
+      Alert.alert(t('updates.no_release_title'), t('updates.no_release_body'));
       return;
     }
     setDownloadingUpdate(true);
     try {
       const current = await TerminalEmulator.getAppVersionInfo().catch(() => installedVersion);
       if (!current) {
-        Alert.alert('Cannot verify installed version', 'Shelly could not read the current Android versionCode, so the update was not downloaded.');
+        Alert.alert(t('updates.verify_failed_title'), t('updates.verify_failed_body'));
         return;
       }
       if (update.versionCode <= current.versionCode) {
         Alert.alert(
-          'Up to date',
-          `Installed versionCode ${current.versionCode} is already newer than or equal to available ${update.versionCode}.`,
+          t('updates.up_to_date_title'),
+          t('updates.up_to_date_body', {
+            current: current.versionCode,
+            available: update.versionCode,
+          }),
         );
         return;
       }
       const apkPath = await downloadReleaseApk(update);
       Alert.alert(
-        'Update ready',
-        'Android will ask you to confirm installation.',
+        t('updates.ready_title'),
+        t('updates.android_confirm'),
         [
-          { text: 'Later', style: 'cancel' },
+          { text: t('updates.later'), style: 'cancel' },
           {
-            text: 'Install',
+            text: t('updates.install'),
             onPress: () => {
               TerminalEmulator.installApk(apkPath).catch((e: any) => {
-                Alert.alert('Install failed', String(e?.message || e));
+                Alert.alert(t('updates.install_failed_title'), String(e?.message || e));
               });
             },
           },
         ],
       );
     } catch (e: any) {
-      Alert.alert('Download failed', String(e?.message || e));
+      Alert.alert(t('updates.download_failed_title'), String(e?.message || e));
     } finally {
       setDownloadingUpdate(false);
     }
-  }, [installedVersion, latestUpdate]);
+  }, [installedVersion, latestUpdate, t]);
 
   const showFailedLog = useCallback(async (run: BuildRun) => {
     setLogLoadingId(run.databaseId);
@@ -379,20 +384,26 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
   );
   const canInstallUpdate = updateIsNewer && !downloadingUpdate;
   const currentVersionText = installedVersion
-    ? `Current v${installedVersion.versionName || 'unknown'} (${installedVersion.versionCode})`
-    : 'Current version unavailable';
+    ? t('updates.current_version', {
+      versionName: installedVersion.versionName || t('updates.unknown'),
+      versionCode: installedVersion.versionCode,
+    })
+    : t('updates.current_unavailable');
   const availableVersionText = latestUpdate
-    ? `Available v${latestUpdate.versionName || 'unknown'} (${latestUpdate.versionCode})`
-    : 'Update details unavailable';
+    ? t('updates.available_version', {
+      versionName: latestUpdate.versionName || t('updates.unknown'),
+      versionCode: latestUpdate.versionCode,
+    })
+    : t('updates.details_unavailable');
   const updateStatusText = loading
-    ? 'Checking for updates...'
+    ? t('updates.checking')
     : !latestUpdate
-      ? 'Update status unavailable'
+      ? t('updates.status_unavailable')
       : !installedVersion
-        ? 'Cannot verify installed version'
+        ? t('updates.verify_failed_title')
         : updateIsNewer
-          ? 'Update available'
-          : 'Shelly is up to date';
+          ? t('updates.available')
+          : t('updates.latest_status');
   const updateIconName = loading
     ? 'sync'
     : !latestUpdate || !installedVersion
@@ -401,28 +412,28 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
         ? 'system-update-alt'
         : 'check-circle';
   const updateActionLabel = downloadingUpdate
-    ? 'Downloading...'
+    ? t('updates.downloading')
     : updateIsNewer
-      ? 'Update'
+      ? t('updates.update')
       : loading
-        ? 'Checking...'
+        ? t('updates.checking_short')
         : latestUpdate && installedVersion
-          ? 'Latest'
-          : 'Unavailable';
+          ? t('updates.latest')
+          : t('updates.unavailable');
 
   return (
     <>
       <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
         <View style={styles.root}>
-          <ModalHeader title="UPDATES" onClose={onClose} />
+          <ModalHeader title={t('updates.title')} onClose={onClose} />
           <View style={styles.toolbar}>
-            <Text style={styles.subtitle}>Shelly updates</Text>
+            <Text style={styles.subtitle}>{t('updates.subtitle')}</Text>
             <Pressable
               style={styles.refreshBtn}
               onPress={() => setAdvancedOpen((v) => !v)}
             >
               <MaterialIcons name={advancedOpen ? 'expand-less' : 'expand-more'} size={15} color={C.accent} />
-              <Text style={styles.refreshText}>Advanced</Text>
+              <Text style={styles.refreshText}>{t('updates.advanced')}</Text>
             </Pressable>
             <Pressable style={styles.refreshBtn} onPress={refresh} disabled={loading}>
               {loading ? (
@@ -430,7 +441,7 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
               ) : (
                 <MaterialIcons name="refresh" size={15} color={C.accent} />
               )}
-              <Text style={styles.refreshText}>Refresh</Text>
+              <Text style={styles.refreshText}>{t('updates.refresh')}</Text>
             </Pressable>
           </View>
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
@@ -460,13 +471,13 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
                 </Pressable>
               </View>
               {updateIsNewer && (
-                <Text style={styles.updateHint}>Android will ask you to confirm installation.</Text>
+                <Text style={styles.updateHint}>{t('updates.android_confirm')}</Text>
               )}
             </View>
 
             {advancedOpen && (
               <View style={styles.advancedSection}>
-                <Text style={styles.advancedTitle}>Build details</Text>
+                <Text style={styles.advancedTitle}>{t('updates.build_details')}</Text>
                 {error && (
                   <View style={styles.errorBox}>
                     <Text style={styles.errorText}>{error}</Text>
@@ -505,14 +516,14 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
                               <MaterialIcons name="article" size={13} color={C.accent} />
                             )}
                             <Text style={[styles.actionText, styles.logText]}>
-                              {logBusy ? 'Loading log...' : 'Failed log'}
+                              {logBusy ? t('updates.loading_log') : t('updates.failed_log')}
                             </Text>
                           </Pressable>
                         )}
                         {releaseMatchesRun && (
                           <View style={styles.releaseBadge}>
                             <MaterialIcons name="verified" size={12} color={C.accent} />
-                            <Text style={styles.releaseBadgeText}>Release source</Text>
+                            <Text style={styles.releaseBadgeText}>{t('updates.release_source')}</Text>
                           </View>
                         )}
                       </View>
@@ -520,7 +531,7 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
                   );
                 })}
                 {!loading && runs.length === 0 && !error && (
-                  <Text style={styles.empty}>No recent builds found.</Text>
+                  <Text style={styles.empty}>{t('updates.no_recent_builds')}</Text>
                 )}
               </View>
             )}
@@ -529,9 +540,9 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
       </Modal>
       <Modal visible={Boolean(logTitle)} animationType="slide" onRequestClose={() => setLogTitle(null)}>
         <View style={styles.root}>
-          <ModalHeader title={logTitle || 'FAILED LOG'} onClose={() => setLogTitle(null)} />
+          <ModalHeader title={logTitle || t('updates.failed_log').toUpperCase()} onClose={() => setLogTitle(null)} />
           <ScrollView style={styles.body} contentContainerStyle={styles.logContent}>
-            <Text selectable style={styles.logOutput}>{logText || 'Loading...'}</Text>
+            <Text selectable style={styles.logOutput}>{logText || t('updates.loading')}</Text>
           </ScrollView>
         </View>
       </Modal>

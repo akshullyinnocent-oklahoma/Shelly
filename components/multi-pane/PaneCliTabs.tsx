@@ -31,6 +31,7 @@ import { usePaneStore } from '@/store/pane-store';
 import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
 import { colors as C, fonts as F } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
+import { useTranslation } from '@/lib/i18n';
 
 const MAX_TABS = 4;
 
@@ -63,6 +64,7 @@ type Props = {
 };
 
 export default function PaneCliTabs({ paneSessionId, leafId }: Props = {}) {
+  const { t } = useTranslation();
   const sessions = useTerminalStore((s) => s.sessions);
   const globalActiveSessionId = useTerminalStore((s) => s.activeSessionId);
   const setActiveSession = useTerminalStore((s) => s.setActiveSession);
@@ -211,7 +213,7 @@ export default function PaneCliTabs({ paneSessionId, leafId }: Props = {}) {
           onPress={addTab}
           hitSlop={6}
           style={styles.addBtn}
-          accessibilityLabel="Add terminal tab"
+          accessibilityLabel={t('pane.add_terminal_tab_a11y')}
         >
           <MaterialIcons name="add" size={11} color={C.text2} />
         </Pressable>

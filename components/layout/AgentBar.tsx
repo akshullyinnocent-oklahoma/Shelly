@@ -17,10 +17,12 @@ import { useFocusStore } from '@/store/focus-store';
 import { colors as C, fonts as F, sizes as S, radii as R } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
+import { useTranslation } from '@/lib/i18n';
 
 const SHELLY_WORDMARK = 'Shelly';
 
 export function AgentBar() {
+  const { t } = useTranslation();
   const [sheetVisible, setSheetVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -74,7 +76,7 @@ export function AgentBar() {
         ]}
         hitSlop={8}
         onPress={() => setSheetVisible(true)}
-        accessibilityLabel="Add pane or change layout"
+        accessibilityLabel={t('agentbar.add_or_layout_a11y')}
       >
         <Text style={[styles.addBtnText, { color: C.accent }]}>+</Text>
       </Pressable>
@@ -97,7 +99,7 @@ export function AgentBar() {
           onPress={() => setBuildsOpen(true)}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Show updates"
+          accessibilityLabel={t('updates.show_a11y')}
         >
           <View>
             <MaterialIcons name="cloud-download" size={16} color={C.text2} />
@@ -116,7 +118,7 @@ export function AgentBar() {
           onPress={() => setLogsOpen(true)}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Show recent logs"
+          accessibilityLabel={t('agentbar.show_recent_logs_a11y')}
         >
           <MaterialIcons name="history" size={16} color={C.text2} />
         </Pressable>

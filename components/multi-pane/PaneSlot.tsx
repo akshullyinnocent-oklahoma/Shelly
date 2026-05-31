@@ -17,6 +17,7 @@ import { colors as C, fonts as F, sizes as S, padding as P, radii as R } from '@
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
 import { getAiPaneAgentMeta, getEnabledAiPaneAgents, isAiPaneAgent } from '@/lib/ai-pane-agents';
+import { useTranslation } from '@/lib/i18n';
 
 const ZERO_INSETS = { top: 0, right: 0, bottom: 0, left: 0 };
 
@@ -49,6 +50,7 @@ function getPaneTitle(tab: PaneTab): string {
 }
 
 const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV, canSplit }: Props) => {
+  const { t } = useTranslation();
   const [selectorVisible, setSelectorVisible] = useState(false);
   const [splitMenuVisible, setSplitMenuVisible] = useState(false);
   const [agentMenuVisible, setAgentMenuVisible] = useState(false);
@@ -187,7 +189,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
           ]}
           onPress={() => setSelectorVisible(true)}
           hitSlop={6}
-          accessibilityLabel="Change pane type"
+          accessibilityLabel={t('pane.change_type_a11y')}
         >
           <MaterialIcons name={entry.icon as any} size={11} color={C.accent} />
           {!isVeryNarrow && (
@@ -226,7 +228,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
             style={[styles.agentBadge, { borderColor: aiPaneAgentColor + '66', backgroundColor: aiPaneAgentColor + '14' }]}
             onPress={() => setAgentMenuVisible(true)}
             hitSlop={6}
-            accessibilityLabel="Switch agent"
+            accessibilityLabel={t('pane.switch_agent_a11y')}
           >
             <View style={[styles.agentBadgeDot, { backgroundColor: aiPaneAgentColor }]} />
             <Text style={styles.agentBadgeLabel} numberOfLines={1}>
@@ -244,7 +246,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
             notification.status === 'done' ? styles.notifDone : styles.notifError,
           ]}>
             <Text style={styles.notifText}>
-              {notification.status === 'done' ? 'Done' : 'Error'}
+              {notification.status === 'done' ? t('common.done') : t('common.error')}
             </Text>
           </View>
         )}
@@ -257,7 +259,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
               style={styles.actionBtn}
               onPress={() => setSplitMenuVisible(true)}
               hitSlop={6}
-              accessibilityLabel="Split pane"
+              accessibilityLabel={t('pane.split_a11y')}
             >
               <MaterialIcons name="call-split" size={13} color={C.text2} />
             </Pressable>
@@ -266,7 +268,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
             style={styles.actionBtn}
             onPress={() => useMultiPaneStore.getState().toggleMaximize(leafId)}
             hitSlop={6}
-            accessibilityLabel="Maximize pane"
+            accessibilityLabel={t('pane.maximize_a11y')}
           >
             <MaterialIcons
               name={isMaximized ? 'fullscreen-exit' : 'fullscreen'}
@@ -278,7 +280,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
             style={styles.actionBtn}
             onPress={onRemove}
             hitSlop={6}
-            accessibilityLabel="Close pane"
+            accessibilityLabel={t('pane.close_a11y')}
           >
             <MaterialIcons name="close" size={13} color={C.text2} />
           </Pressable>
@@ -349,6 +351,7 @@ function SplitMenu({
   onSplitV: (tab: PaneTab) => void;
   currentTab: PaneTab;
 }) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<'direction' | 'tab'>('direction');
   const [direction, setDirection] = useState<'h' | 'v'>('h');
 
@@ -379,19 +382,19 @@ function SplitMenu({
       <Pressable style={menuStyles.menu} onPress={(e) => e.stopPropagation()}>
         {step === 'direction' ? (
           <>
-            <Text style={menuStyles.title}>Split Pane</Text>
+            <Text style={menuStyles.title}>{t('pane.split_pane')}</Text>
             <Pressable style={menuStyles.option} onPress={() => handleDirection('h')}>
               <MaterialIcons name="view-column" size={18} color={C.accent} />
-              <Text style={menuStyles.optionText}>Split Right</Text>
+              <Text style={menuStyles.optionText}>{t('pane.split_right')}</Text>
             </Pressable>
             <Pressable style={menuStyles.option} onPress={() => handleDirection('v')}>
               <MaterialIcons name="view-stream" size={18} color={C.accent} />
-              <Text style={menuStyles.optionText}>Split Down</Text>
+              <Text style={menuStyles.optionText}>{t('pane.split_down')}</Text>
             </Pressable>
           </>
         ) : (
           <>
-            <Text style={menuStyles.title}>Open In New Pane</Text>
+            <Text style={menuStyles.title}>{t('pane.open_in_new')}</Text>
             {(['terminal', 'ai', 'browser', 'markdown', 'ask'] as PaneTab[]).map((t) => (
               <Pressable
                 key={t}
@@ -426,6 +429,7 @@ function AgentMenu({
   boundAgent: string | null;
   onSelect: (key: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!visible) return null;
 
   const agents = getEnabledAiPaneAgents(teamMembers);
@@ -433,7 +437,7 @@ function AgentMenu({
   return (
     <Pressable style={menuStyles.backdrop} onPress={onClose}>
       <Pressable style={agentStyles.menu} onPress={(e) => e.stopPropagation()}>
-        <Text style={menuStyles.title}>Switch Agent</Text>
+        <Text style={menuStyles.title}>{t('pane.switch_agent')}</Text>
         {agents.map((key) => {
           const meta = getAiPaneAgentMeta(key);
           const color = meta.color;

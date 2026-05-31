@@ -13,6 +13,7 @@ import { PANE_REGISTRY } from './pane-registry';
 import type { PaneTab } from '@/hooks/use-multi-pane';
 import { colors as C, fonts as F, sizes as S } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
+import { useTranslation } from '@/lib/i18n';
 
 const ALL_TABS = Object.keys(PANE_REGISTRY) as PaneTab[];
 
@@ -24,6 +25,7 @@ type Props = {
 };
 
 export function PaneSelector({ visible, currentTab, onSelect, onClose }: Props) {
+  const { t } = useTranslation();
   return (
     <ShellyModal
       transparent
@@ -33,7 +35,7 @@ export function PaneSelector({ visible, currentTab, onSelect, onClose }: Props) 
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
         <View style={styles.menu}>
-          <Text style={styles.title}>Select Tab</Text>
+          <Text style={styles.title}>{t('pane.select_tab')}</Text>
           <FlatList
             data={ALL_TABS}
             keyExtractor={(item) => item}

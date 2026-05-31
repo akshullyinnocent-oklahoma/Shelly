@@ -21,6 +21,7 @@ import { usePaneStore } from '@/store/pane-store';
 import { WorktreeAddModal } from './WorktreeAddModal';
 import { SidebarSection } from './SidebarSection';
 import { colors as C, fonts as F, padding as P, sizes as S } from '@/theme.config';
+import { useTranslation } from '@/lib/i18n';
 
 function agentColor(agent: WorktreeAgent): string {
   return agent === 'none' ? C.text3 : C.accent;
@@ -63,6 +64,7 @@ type Props = {
 };
 
 export function WorktreesSection({ isOpen, onToggle, iconsOnly }: Props) {
+  const { t } = useTranslation();
   const activeRepoPath = useSidebarStore((s) => s.activeRepoPath);
   const worktrees = useWorktreeStore((s) => s.worktrees);
   const removeWorktree = useWorktreeStore((s) => s.removeWorktree);
@@ -143,24 +145,24 @@ export function WorktreesSection({ isOpen, onToggle, iconsOnly }: Props) {
   const handleRemove = useCallback(
     (worktreeId: string, branch: string) => {
       Alert.alert(
-        'Remove worktree',
-        `Remove the "${branch}" worktree? The branch itself will not be deleted.`,
+        t('worktrees.remove_title'),
+        t('worktrees.remove_body', { branch }),
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Remove',
+            text: t('common.remove'),
             style: 'destructive',
             onPress: async () => {
               const r = await removeWorktree(worktreeId);
               if (r.error) {
-                Alert.alert('Removed with warnings', r.error);
+                Alert.alert(t('worktrees.removed_warnings'), r.error);
               }
             },
           },
         ],
       );
     },
-    [removeWorktree],
+    [removeWorktree, t],
   );
 
   const handleAdd = useCallback((agent: WorktreeAgent) => {
@@ -171,7 +173,7 @@ export function WorktreesSection({ isOpen, onToggle, iconsOnly }: Props) {
   return (
     <>
       <SidebarSection
-        title="WORKTREES"
+        title={t('worktrees.title')}
         icon="call-split"
         isOpen={isOpen}
         onToggle={onToggle}
@@ -179,11 +181,11 @@ export function WorktreesSection({ isOpen, onToggle, iconsOnly }: Props) {
       >
         {!activeRepoPath ? (
           <Text style={styles.empty}>
-            Select a repository to manage worktrees.
+            {t('worktrees.select_repo')}
           </Text>
         ) : repoWorktrees.length === 0 ? (
           <Text style={styles.empty}>
-            No worktrees yet. Add one per agent to work in parallel.
+            {t('worktrees.empty')}
           </Text>
         ) : (
           repoWorktrees.map((wt) => {

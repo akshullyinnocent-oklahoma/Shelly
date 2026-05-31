@@ -17,6 +17,7 @@ import { useTerminalStore } from '@/store/terminal-store';
 import { SidebarSection } from './SidebarSection';
 import { colors as C, fonts as F, padding as P, radii as R } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
+import { useTranslation } from '@/lib/i18n';
 
 type QuickLaunchCommand = 'codex' | 'diag';
 
@@ -37,6 +38,7 @@ type Props = {
 };
 
 export function QuickLaunchSection({ isOpen, onToggle, iconsOnly }: Props) {
+  const { t } = useTranslation();
   const addPane = useAddPane();
 
   const launch = useCallback(
@@ -54,7 +56,7 @@ export function QuickLaunchSection({ isOpen, onToggle, iconsOnly }: Props) {
 
   return (
     <SidebarSection
-      title="QUICK LAUNCH"
+      title={t('quick_launch.title')}
       icon="rocket-launch"
       isOpen={isOpen}
       onToggle={onToggle}
@@ -71,7 +73,7 @@ export function QuickLaunchSection({ isOpen, onToggle, iconsOnly }: Props) {
             onPress={() => launch(command)}
             hitSlop={4}
             accessibilityRole="button"
-            accessibilityLabel={`Launch ${COMMAND_LABEL[command]} in a new terminal pane`}
+            accessibilityLabel={t('quick_launch.launch_a11y', { name: COMMAND_LABEL[command] })}
           >
             <Text style={[styles.chipLabel, { color: C.accent }]}>
               {COMMAND_LABEL[command]}

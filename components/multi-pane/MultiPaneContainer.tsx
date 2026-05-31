@@ -37,10 +37,12 @@ import { Divider } from './Divider';
 import { colors as C, fonts as F } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
+import { useTranslation } from '@/lib/i18n';
 
 /** Fallback used only if persist somehow restores an empty slots array.
  *  removePane refuses to delete the last slot, so this is defensive. */
 function EmptyState() {
+  const { t } = useTranslation();
   const addPane = useAddPane();
   const options: { tab: PaneTab; label: string; icon: string }[] = [
     { tab: 'terminal', label: 'Terminal', icon: 'terminal' },
@@ -49,8 +51,8 @@ function EmptyState() {
   ];
   return (
     <View style={emptyStyles.root}>
-      <Text style={emptyStyles.title}>NO PANES OPEN</Text>
-      <Text style={emptyStyles.subtitle}>Add a pane to get started</Text>
+      <Text style={emptyStyles.title}>{t('pane.empty_title')}</Text>
+      <Text style={emptyStyles.subtitle}>{t('pane.empty_subtitle')}</Text>
       <View style={emptyStyles.row}>
         {options.map((opt) => (
           <Pressable

@@ -31,17 +31,18 @@ import { QuickLaunchSection } from './QuickLaunchSection';
 import { colors as C, fonts as F, sizes as S, padding as P, radii as R, icons as I } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
+import { useTranslation } from '@/lib/i18n';
 
 const WIDTH_ICONS = 48;
 const WIDTH_HIDDEN = 0;
 const TIMING_MS = 200;
 
-function formatTimeAgo(ts: number): string {
+function formatTimeAgo(ts: number, t: (key: string, params?: Record<string, string | number>) => string): string {
   const diff = Math.floor((Date.now() - ts) / 1000);
-  if (diff < 60) return `${diff}S AGO`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}M AGO`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}H AGO`;
-  return `${Math.floor(diff / 86400)}D AGO`;
+  if (diff < 60) return t('time.seconds_ago_short', { count: diff });
+  if (diff < 3600) return t('time.minutes_ago_short', { count: Math.floor(diff / 60) });
+  if (diff < 86400) return t('time.hours_ago_short', { count: Math.floor(diff / 3600) });
+  return t('time.days_ago_short', { count: Math.floor(diff / 86400) });
 }
 
 const QUICK_FOLDERS = [
@@ -53,6 +54,7 @@ const QUICK_FOLDERS = [
 ] as const;
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const { mode, openSections, toggleSection, activeRepoPath, repoPaths, setActiveRepo, setMode, addRepo, removeRepo } =
     useSidebarStore();
   const agents = useAgentStore((s) => s.agents);
@@ -102,8 +104,8 @@ export function Sidebar() {
     }
     if (!exists) {
       Alert.alert(
-        'Directory not found',
-        `The path "${path}" does not exist on this device. Double-check the spelling or pick an existing folder.`,
+        t('sidebar.directory_not_found_title'),
+        t('sidebar.directory_not_found_body', { path }),
       );
       return;
     }
@@ -234,9 +236,9 @@ export function Sidebar() {
       .slice(0, 5)
       .map((log) => ({
         ...log,
-        age: formatTimeAgo(log.timestamp),
+        age: formatTimeAgo(log.timestamp, t),
       }));
-  }, [runHistory, agents, runningAgentIds, pendingAgentIds]);
+  }, [runHistory, agents, runningAgentIds, pendingAgentIds, t]);
 
   const refreshRunningAgents = React.useCallback(async () => {
     const result = await TerminalEmulator.execCommand(
@@ -280,9 +282,9 @@ export function Sidebar() {
         next.delete(agentId);
         return next;
       });
-      Alert.alert('Agent failed', `Could not start "${agentName}".`);
+      Alert.alert(t('sidebar.agent_failed_title'), t('sidebar.agent_failed_body', { name: agentName }));
     }
-  }, [refreshRunningAgents, runCommandForAgentSync]);
+  }, [refreshRunningAgents, runCommandForAgentSync, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -332,7 +334,7 @@ export function Sidebar() {
       >
         {/* TASKS */}
         <SidebarSection
-          title="TASKS"
+          title={t('sidebar.tasks')}
           icon="task-alt"
           isOpen={openSections.tasks}
           onToggle={() => toggleSection('tasks')}
@@ -348,7 +350,7 @@ export function Sidebar() {
                 </Text>
               </View>
               <View style={[styles.statusBadge, { backgroundColor: withAlpha(C.accent, 0.12) }]}>
-                <Text style={[styles.statusBadgeText, { color: C.accent }]}>RUNNING</Text>
+                <Text style={[styles.statusBadgeText, { color: C.accent }]}>{t('sidebar.running')}</Text>
               </View>
             </View>
           ))}
@@ -357,15 +359,15 @@ export function Sidebar() {
               key={`recent-${task.id}`}
               style={({ pressed }) => [styles.taskRow, pressed && styles.taskRowPressed]}
               onPress={() => {
-                const preview = task.errorMessage || task.outputPreview || 'No log preview available.';
+                const preview = task.errorMessage || task.outputPreview || t('sidebar.no_log_preview');
                 Alert.alert(
-                  task.status === 'success' ? 'Agent completed' : 'Agent failed',
-                  `${task.name}\n${task.age}${task.toolUsed ? `\nTool: ${task.toolUsed}` : ''}\n\n${preview}`,
+                  task.status === 'success' ? t('sidebar.agent_completed_title') : t('sidebar.agent_failed_title'),
+                  `${task.name}\n${task.age}${task.toolUsed ? `\n${t('sidebar.tool')}: ${task.toolUsed}` : ''}\n\n${preview}`,
                 );
               }}
               hitSlop={4}
               accessibilityRole="button"
-              accessibilityLabel={`Show result for ${task.name}`}
+              accessibilityLabel={t('sidebar.show_result_a11y', { name: task.name })}
             >
               <MaterialIcons
                 name={task.status === 'success' ? 'check-circle' : 'error'}
@@ -379,7 +381,7 @@ export function Sidebar() {
               </View>
               {task.status === 'error' ? (
                 <View style={styles.taskLogBadge}>
-                  <Text style={styles.taskLogBadgeText}>LOG</Text>
+                  <Text style={styles.taskLogBadgeText}>{t('sidebar.log')}</Text>
                 </View>
               ) : (
                 <Text style={styles.taskAge}>{task.age}</Text>
@@ -391,7 +393,7 @@ export function Sidebar() {
               {(runningAgents.length > 0 || recentTasks.length > 0) && (
                 <View style={styles.tasksSeparator} />
               )}
-              <Text style={styles.tasksSubheader}>SCHEDULED</Text>
+              <Text style={styles.tasksSubheader}>{t('sidebar.scheduled')}</Text>
               {agents.filter((a) => a.enabled && a.schedule).map((agent) => (
                 <View key={`sched-${agent.id}`} style={styles.taskRow}>
                   <View style={[styles.taskDot, { backgroundColor: C.text3 }]} />
@@ -405,19 +407,19 @@ export function Sidebar() {
                     hitSlop={8}
                     style={styles.tasksAction}
                     accessibilityRole="button"
-                    accessibilityLabel={`Run agent ${agent.name} now`}
+                    accessibilityLabel={t('sidebar.run_agent_now_a11y', { name: agent.name })}
                   >
                     <MaterialIcons name="play-arrow" size={12} color={C.accent} />
                   </Pressable>
                   <Pressable
                     onPress={() => {
                       Alert.alert(
-                        'Delete agent',
-                        `Delete "${agent.name}"?`,
+                        t('sidebar.delete_agent_title'),
+                        t('sidebar.delete_agent_body', { name: agent.name }),
                         [
-                          { text: 'Cancel', style: 'cancel' },
+                          { text: t('common.cancel'), style: 'cancel' },
                           {
-                            text: 'Delete',
+                            text: t('common.delete'),
                             style: 'destructive',
                             onPress: async () => {
                               await deleteAgent(agent.id);
@@ -430,7 +432,7 @@ export function Sidebar() {
                     hitSlop={8}
                     style={styles.tasksAction}
                     accessibilityRole="button"
-                    accessibilityLabel={`Delete agent ${agent.name}`}
+                    accessibilityLabel={t('sidebar.delete_agent_a11y', { name: agent.name })}
                   >
                     <MaterialIcons name="delete-outline" size={12} color={C.text2} />
                   </Pressable>
@@ -440,7 +442,7 @@ export function Sidebar() {
           )}
           {runningAgents.length === 0 && recentTasks.length === 0 && agents.length === 0 && (
             <Text style={styles.tasksEmpty}>
-              Type `@agent status` in an AI pane to manage background agents.
+              {t('sidebar.tasks_empty')}
             </Text>
           )}
         </SidebarSection>
@@ -457,7 +459,7 @@ export function Sidebar() {
 
         {/* REPOSITORIES */}
         <SidebarSection
-          title="REPOSITORIES"
+          title={t('sidebar.repositories')}
           icon="folder"
           isOpen={openSections.repos}
           onToggle={() => toggleSection('repos')}
@@ -465,7 +467,7 @@ export function Sidebar() {
         >
           {repoPaths.length === 0 ? (
             <Text style={styles.emptyRepoHint}>
-              No repositories yet. Tap + ADD REPOSITORY to browse your code.
+              {t('sidebar.no_repositories')}
             </Text>
           ) : (
             repoPaths.map((p) => {
@@ -485,11 +487,11 @@ export function Sidebar() {
                   onPress={() => setActiveRepo(p)}
                   onLongPress={() => {
                     Alert.alert(
-                      'Remove repository',
-                      `Remove "${name}" from the sidebar? This does not delete the files on disk.`,
+                      t('sidebar.remove_repository_title'),
+                      t('sidebar.remove_repository_body', { name }),
                       [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Remove', style: 'destructive', onPress: () => removeRepo(p) },
+                        { text: t('common.cancel'), style: 'cancel' },
+                        { text: t('common.remove'), style: 'destructive', onPress: () => removeRepo(p) },
                       ],
                     );
                   }}
@@ -516,7 +518,7 @@ export function Sidebar() {
             })
           )}
           <Pressable style={styles.addRow} onPress={() => setAddRepoVisible(true)}>
-            <Text style={[styles.addRowText, { color: C.accent }]}>+ ADD REPOSITORY</Text>
+            <Text style={[styles.addRowText, { color: C.accent }]}>{t('sidebar.add_repository')}</Text>
           </Pressable>
         </SidebarSection>
 
@@ -531,7 +533,7 @@ export function Sidebar() {
 
         {/* FILE TREE */}
         <SidebarSection
-          title="FILE TREE"
+          title={t('sidebar.file_tree')}
           icon="description"
           isOpen={openSections.files}
           onToggle={() => toggleSection('files')}
@@ -542,7 +544,7 @@ export function Sidebar() {
 
         {/* DEVICE */}
         <SidebarSection
-          title="DEVICE"
+          title={t('sidebar.device')}
           icon="stay-current-portrait"
           isOpen={openSections.device}
           onToggle={() => toggleSection('device')}
@@ -564,7 +566,7 @@ export function Sidebar() {
 
         {/* PORTS — live /proc/net/tcp{,6} scan every 15s (see useEffect above) */}
         <SidebarSection
-          title="PORTS"
+          title={t('sidebar.ports')}
           icon="hub"
           isOpen={openSections.ports}
           onToggle={() => toggleSection('ports')}
@@ -576,7 +578,7 @@ export function Sidebar() {
             // permanently empty on modern phones until bug #99 gets a
             // privileged-helper path. Say so plainly.
             <Text style={styles.portEmpty}>
-              Listener detection unavailable on Android 10+ (SELinux).
+              {t('sidebar.ports_unavailable')}
             </Text>
           ) : (
             portEntries.map((entry) => {
@@ -600,7 +602,7 @@ export function Sidebar() {
 
         {/* PROFILES */}
         <SidebarSection
-          title="PROFILES"
+          title={t('sidebar.profiles')}
           icon="person-outline"
           isOpen={openSections.profiles}
           onToggle={() => toggleSection('profiles')}
@@ -619,7 +621,7 @@ export function Sidebar() {
       >
         <Pressable style={styles.modalBackdrop} onPress={() => { setAddRepoVisible(false); useFocusStore.getState().requestTerminalRefocus(); }}>
           <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>ADD REPOSITORY</Text>
+            <Text style={styles.modalTitle}>{t('sidebar.add_repo_title')}</Text>
             <TextInput
               style={styles.modalInput}
               value={repoInput}
@@ -636,13 +638,13 @@ export function Sidebar() {
                 style={styles.modalCancelBtn}
                 onPress={() => { setRepoInput(''); setAddRepoVisible(false); useFocusStore.getState().requestTerminalRefocus(); }}
               >
-                <Text style={styles.modalCancelText}>CANCEL</Text>
+                <Text style={styles.modalCancelText}>{t('common.cancel')}</Text>
               </Pressable>
               <Pressable
                 style={[styles.modalAddBtn, { backgroundColor: C.accent }]}
                 onPress={() => void tryAddRepo(repoInput)}
               >
-                <Text style={styles.modalAddText}>ADD</Text>
+                <Text style={styles.modalAddText}>{t('common.add')}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -661,7 +663,7 @@ export function Sidebar() {
           color={C.text2}
         />
         {!iconsOnly && (
-          <Text style={styles.toggleLabel}>Collapse</Text>
+          <Text style={styles.toggleLabel}>{t('sidebar.collapse')}</Text>
         )}
       </Pressable>
     </Animated.View>
