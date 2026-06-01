@@ -89,7 +89,7 @@ No copy. No paste. No tab switching. Zero friction.
 
 ## Important Android Notes
 
-- **APK is ~420 MB** because Shelly bundles real tools, not shims. bash,
+- **APK is ~700 MB** because Shelly bundles real tools, not shims. bash,
   Node.js, Python 3, git, curl, ripgrep, jq, tmux, vim, less, sqlite3,
   make, ssh — plus the OpenAI Codex CLI runtime — ship inside the APK.
   No Termux, no repository server, no package manager bootstrap. First
@@ -115,7 +115,11 @@ No copy. No paste. No tab switching. Zero friction.
 
 ### Install
 
-Download the latest APK from [**GitHub Releases**](https://github.com/RYOITABASHI/Shelly/releases).
+Download the current Android APK from [**GitHub Releases**](https://github.com/RYOITABASHI/Shelly/releases). The rolling `android-latest` release is the source of truth for the newest Shelly build; older semver tags remain historical snapshots.
+
+After the first install, Shelly can update itself from inside the app: open the cloud-download button in the top bar or **Settings → Updates**. Shelly reads the public `android-latest/latest.json` manifest, compares Android `versionCode`, downloads the APK to `/sdcard/Download/shelly-update-<versionCode>/`, verifies SHA-256, then opens Android's package installer. Android still asks you to confirm the install because Shelly is distributed outside the Play Store.
+
+Expo OTA is disabled for release APKs. JS, native, and bundled-tool changes ship together through a new APK so the installed binary and app code stay in sync.
 
 ### Build from source
 
@@ -127,9 +131,9 @@ pnpm install && pnpm android
 **Requirements:**
 
 - Android device
-- Node.js 22+
+- Node.js 20+ (CI currently builds on Node 20)
 - pnpm
-- Android NDK r27+
+- Android NDK 26.1.10909125 (or an Android SDK/Gradle setup that resolves that pinned NDK)
 
 Expo Go is not supported — Shelly uses native Kotlin/C modules.
 
@@ -154,6 +158,17 @@ Shelly's foreground AI CLI is **Codex**. Everything else is an API provider you 
 
 > **Codex login note.** `codex /login` inside the REPL is not the supported path on Shelly. Use bare `codex` and let Shelly's wrapper launch device-code auth, or run `codex-login --open` from bash.
 
+### Bundled Shelly commands
+
+| Command | Use |
+|---|---|
+| `codex` | Launch the foreground Codex TUI in the native terminal. If auth is missing, Shelly starts the device-code login flow first. |
+| `codex-login --open` | Start ChatGPT subscription device-code auth and open the verification page in Shelly's Browser Pane. |
+| `shelly-doctor` | Check shell/native binary presence, bundled Codex binaries, JS dispatcher, local LLM endpoints, and Codex auth file presence. |
+| `shelly-codex-diagnose` | Run deeper Codex smoke/canary/edit/patch diagnostics. |
+| `shelly-update-clis codex --check-only` | Probe the active Codex runtime. Runtime installs are normally driven by the Updates UI. |
+| `shelly-cs` / `cs` | GitHub Codespaces helper commands. |
+
 ---
 
 ## Runtime model
@@ -165,7 +180,7 @@ If your AI coding CLI workflow stalled in Termux, proot, or another Android term
 No fragile terminal stack. No WebView terminal crashes. No copy-paste-driven workflow.
 
 - **Native execution path** — Codex runs through Shelly's app-owned native PTY (JNI `forkpty`), not a remote bridge or socket terminal.
-- **Managed latest, not blind latest** — Shelly stages the Codex runtime, verifies it, smoke-tests it on-device, promotes only passing builds, and keeps a last-known-good route when an upstream release breaks on Android.
+- **Managed latest, not blind latest** — Shelly ships a pinned Codex runtime in each APK, and the Updates UI can install a newer verified Codex runtime from the rolling `codex-runtime-latest` release without waiting for the next APK.
 - **Visible state** — the app can show recent terminal logs, so version drift and startup failures are easier to debug on the device itself.
 - **Compliance boundary** — Codex is a foreground, user-controlled terminal CLI. AI-Pane / background automation uses explicit API providers; it does not run a hidden subscription worker.
 
@@ -205,7 +220,7 @@ No Termux install. No proot. No ttyd. No remote bridge.
 | **5 pane types** | Terminal, AI, Browser (+ background audio), Markdown, Preview. Split up to 4 live panes freely. |
 | **Multi-agent AI** | API-backed Gemini, Cerebras, Groq, Perplexity, Local LLM, plus the foreground Codex terminal CLI. Auto-routed or `@mention` where supported. |
 | **Local LLM that holds its own** | Qwen3.5 models run on-device through the bundled llama.cpp / llama-server flow, with Qwen3.5-4B as the high-end default and Qwen3.5-9B available when quality matters more than responsiveness. |
-| **Codex on Android** | Shelly keeps Codex on a managed-latest path without trusting upstream blindly: it stages the runtime, smoke-tests it on-device, promotes only passing builds, and keeps a last-known-good fallback. Codex runs over the native PTY with a Shelly-owned device-code login wrapper. No proot, no root. |
+| **Codex on Android** | Shelly keeps Codex on a managed-latest path without trusting upstream blindly: each APK bundles a pinned runtime, the Updates UI can promote verified runtime releases, and Reset falls back to the bundled runtime. Codex runs over the native PTY with a Shelly-owned device-code login wrapper. No proot, no root. |
 | **Color themes** | Blue / Red / Purple palettes run on the existing preset IDs, so runtime swaps keep your shell alive without settings migration. |
 | **Voice input** | Speak your commands or AI prompts. Groq Whisper handles transcription, then VoiceChain routes the text through the same input router the keyboard uses. |
 
@@ -228,7 +243,11 @@ No Termux install. No proot. No ttyd. No remote bridge.
 
 - **"Fix the error on the right"** — AI reads the current terminal transcript and responds with executable fixes
 - **ActionBlock** — code blocks in AI responses get `[▶ Run]` buttons that dispatch to the active terminal pane
+- **Pane-aware terminal selection** — in split layouts, the AI pane prefers the terminal immediately to its left, then the focused terminal, then the first terminal
 - **Real-time terminal awareness** — AI pane snapshots the terminal transcript on dispatch so the model sees what you just saw
+- **Terminal-safe context** — ANSI/OSC/control sequences and TUI redraw noise are stripped before injection; terminal output is treated as untrusted evidence, not instructions
+- **Local LLM compaction** — `@local` keeps important header/status/error lines and the recent tail so small on-device models still see the useful terminal state
+- **Error-file auto-stage** — when terminal output references a file path, Shelly can stage that file so an AI diff can be accepted directly
 - **CLI Co-Pilot** — in-flight translation of output, approval prompt explanations, session summaries
 - **Approval Proxy** — terminal `[Y/n]` prompts are lifted into chat-style `Approve / Deny / Ask AI` buttons so you never type blind 'Y'
 - **Error Summary** — detected errors surface as persistent chat bubbles with `[Suggest Fix]`
@@ -269,7 +288,7 @@ No Termux install. No proot. No ttyd. No remote bridge.
 <summary><strong>AI Pane</strong></summary>
 
 - **Multi-agent routing** — the router picks the best AI for the task; override with `@mention`
-- **@mention** — direct AI Pane targets are `@gemini`, `@cerebras`, `@groq`, `@perplexity`, and `@local`; `@team` fans out to enabled providers, and `@agent` manages background agents. There is no `@claude` — Claude Code is not a current provider. Codex remains available as the foreground terminal CLI.
+- **@mention** — direct AI Pane providers are `@gemini`, `@cerebras`, `@groq`, `@perplexity`, and `@local`; utility routes include `@team`, `@agent`, `@git`, `@open` / `@browse`, `@plan`, `@arena`, and `@actions` / `@ci`. There is no `@claude` — Claude Code is not a current provider. Codex remains available as the foreground terminal CLI via `codex`.
 - **Terminal context injection** — the AI always has access to the current terminal transcript without you pasting anything
 - **InlineDiff with per-hunk write-back** — see above
 - **Voice input** — long-press the mic in the terminal action bar to open VoiceChat; speech → Groq transcription → AI → TTS response
@@ -375,17 +394,17 @@ Currently registered:
 - **Settings TUI** — full settings also accessible via a terminal-style text UI
 - **Command safety** — regex-based 5-level risk assessment (seatbelt, not firewall — see [Security](#security))
 - **Workspace isolation** — per-project cwd / env / AI context
-- **Background agents** — `@agent` schedule + AlarmManager-triggered runs under tmux through explicit API providers (Gemini API / Cerebras / Groq / Perplexity / local).
-- **Managed Codex runtime updater** — `shelly-update-clis` downloads verified native Codex builds, verifies integrity, smoke-tests on-device, then hot-swaps `~/.shelly-runtime/codex/current` without an APK update. Updates are serialized with `~/.shelly-runtime/.update.lock` so multi-pane launches cannot start duplicate downloads.
-- **`shelly doctor`** — diagnostic command that checks PTY health and bundled-binary presence (including whether `~/.codex/auth.json` is present); run it when something feels broken
+- **Background agents** — `@agent list`, `@agent status`, `@agent run <name>`, `@agent stop <name>`, `@agent history <name>`, or `@agent <natural language>` to create one. Scheduled agents run through AlarmManager when configured.
+- **Managed Codex runtime updater** — the Updates UI reads the public `codex-runtime-latest/codex-runtime.json` manifest, downloads the tarball, verifies SHA-256, smoke-tests both `codex_tui` and `codex_exec` with `--version`, then promotes the runtime under `~/.shelly-runtime/codex/current`. The new runtime is used by newly opened terminal tabs; **Reset** falls back to the APK-bundled runtime.
+- **`shelly-doctor`** — diagnostic command that checks shell/native binary presence, bundled Codex binaries, JS dispatcher, local LLM endpoints, and whether `~/.codex/auth.json` is present; run it when something feels broken
 
 </details>
 
 ### Codex Runtime
 
-- **Native runtime** — `@openai/codex` ships native binaries Android cannot execute directly. Shelly stages the dispatcher, applies its bionic/`linker64` compatibility hook, and runs the smoke-tested `codex-exec` / `codex-tui` runtime under `~/.shelly-runtime/codex/current`.
-- **Managed promotion** — a new candidate is promoted only after an updater-side `--version` smoke check passes on-device; a failing build is held back and the last-known-good runtime stays live.
-- **Overrides:** `SHELLY_FAILED_VERSION_COOLDOWN` controls failed-version cooldown seconds (default `86400`), `SHELLY_NATIVE_VERSION_SMOKE_RUNS` controls the `--version` smoke count (default `3`), and `SHELLY_STAGING_GC_AGE_S` controls stale-staging GC age (default `86400`).
+- **Native runtime** — the npm `@openai/codex` package is only part of the JS dispatcher story. Release APKs bundle pinned Android-native `codex_exec` / `codex_tui` binaries from `.ci-versions/`, and runtime updates install the same shape under `~/.shelly-runtime/codex/current`.
+- **Managed promotion** — a new runtime candidate is promoted only after download, SHA-256 verification, extraction, executable checks, and matching `--version` smoke checks for both `codex_tui` and `codex_exec`.
+- **Repair / reset path** — if the app-data runtime is broken or unwanted, the Updates UI can repair it from the latest runtime release or reset to the APK-bundled Codex runtime.
 
 ---
 
@@ -412,15 +431,17 @@ Currently registered:
 | Local LLM via llama.cpp `@local` (Settings · Integrations · Local LLM: catalog, download, start/stop) | ✅ shipping |
 | MCP Servers (Settings · Integrations · MCP Servers) | ✅ shipping |
 | Codex CLI launch/auth | ✅ supported; bare `codex` runs over the native PTY, using Shelly device-code auth before TUI launch |
-| Codex managed native runtime (`codex-exec` / `codex-tui` staged under `~/.shelly-runtime/codex/current`, `--version` smoke-tested, last-known-good rollback) | ✅ managed latest with rollback |
+| Codex managed native runtime (`codex_exec` / `codex_tui` staged under `~/.shelly-runtime/codex/current`, `--version` smoke-tested, repair / reset to bundled runtime) | ✅ managed latest |
 | Gemini API in AI Pane / `@gemini` / `@team` / background agents | ✅ available when a Gemini API key is configured |
 | Background agents — `@agent` registration, AlarmManager scheduling, Sidebar Tasks list with run-now / delete | ✅ wired, AlarmManager end-to-end smoke test pending |
 | Sidebar Ports monitor (`/proc/net/tcp` → tap to open in Browser pane) | ⚠ Android 10+ SELinux denies both `/proc/net/tcp{,6}` reads and `NETLINK_SOCK_DIAG` sockets from `untrusted_app`; tracked in `docs/superpowers/DEFERRED.md` (P1) — needs an alternative channel (e.g. a bundled privileged helper or system_server intent) in a future release |
 | Sidebar SSH Profiles (key-file auth, ~/.ssh/config import, tap-to-connect) | ✅ shipping |
 | Sidebar Quick Launch / Worktrees (one-tap CLI shortcuts) | ✅ shipping for Codex |
+| In-app Android APK updates (`android-latest/latest.json`, SHA-256 verification, Package Installer handoff) | ✅ shipping |
+| In-app Codex runtime updates (`codex-runtime-latest/codex-runtime.json`, smoke-tested runtime promote / reset) | ✅ shipping |
 | Cloud storage | 🚫 out of scope — use `rclone` from the terminal pane |
 | App icon | ✅ shipping |
-| Distribution channels (Play Store / F-Droid) | 🟡 GitHub Releases only for now |
+| Distribution channels (Play Store / F-Droid) | 🟡 GitHub Releases only for now; current Android release is the rolling `android-latest` build |
 
 Full validation checklist: [`docs/superpowers/specs/2026-04-13-validation-checklist.md`](docs/superpowers/specs/2026-04-13-validation-checklist.md)
 
@@ -599,14 +620,7 @@ The `colors` object is mutable and keeps the same identity, so every `import { c
 
 This started as a personal tool. Community contributions are shaping it into a true OSS project.
 
-**Looking for a first contribution?** Check the [`good first issue`](https://github.com/RYOITABASHI/Shelly/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) label:
-
-- [Set up Jest test framework](https://github.com/RYOITABASHI/Shelly/issues/5) — foundational, unblocks all test work
-- [Add unit tests for input-router.ts](https://github.com/RYOITABASHI/Shelly/issues/1) — pure functions, easy to test
-- [Add unit tests for command-safety.ts](https://github.com/RYOITABASHI/Shelly/issues/2) — security-critical, great for TDD
-- [Add unit tests for auto-savepoint.ts](https://github.com/RYOITABASHI/Shelly/issues/3) — git operations, secret detection
-- [Translate Japanese code comments to English](https://github.com/RYOITABASHI/Shelly/issues/4) — one file per PR is fine
-- [Flesh out CONTRIBUTING.md](https://github.com/RYOITABASHI/Shelly/issues/6) — development setup guide
+**Looking for a first contribution?** Check the [`good first issue`](https://github.com/RYOITABASHI/Shelly/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) label. Unit tests are already wired through Jest; focused tests around routing, update manifests, command safety, and native bridge helpers are especially useful.
 
 **Key files to explore:**
 
@@ -672,7 +686,7 @@ GitHub Sponsors is also enabled via the "Sponsor" button at the top of this repo
 
 ## Known Limitations
 
-Shelly v5.3.1 is pre-release Android software. Here's what we know isn't perfect yet.
+Shelly v5.3.8 is pre-release Android software. Here's what we know isn't perfect yet.
 
 - **No offline mode by default** — Cloud AI features require an internet connection. Local LLM via `@local` works offline with the bundled catalog and llama.cpp / llama-server controls; Qwen3.5-4B Q4_K_M is recommended for high-end foldables, Qwen3.5-9B is the quality-focused option, and Qwen 2.5 1.5B is the low-memory option.
 - **Additional tools beyond the bundle** — Shelly ships with bash, Node.js, Python 3, git, curl, sqlite3, tmux, vim, less, jq, make, and the GNU coreutils set. Notable tools **not** bundled include `busybox`, `watch` (procps-ng), `htop`, and most network daemons. If you need them, install Termux alongside Shelly or open a PR adding the binary to `modules/terminal-emulator/android/src/main/jniLibs/`.
@@ -681,8 +695,8 @@ Shelly v5.3.1 is pre-release Android software. Here's what we know isn't perfect
 - **`@team` routes to multiple APIs simultaneously** — this consumes credits on every provider at once; a cost warning is shown before execution.
 - **Multi-hunk Accept against a partially-edited file** — per-hunk Accept uses fuzzy re-anchoring so successive hunks land, but if the AI's diff references context that has already been edited to something else, the hunk will be rejected with a toast asking you to regenerate.
 - **Terminal font mismatch** — if a saved legacy theme looks wrong after upgrading, switch Settings → Display → Theme to one of the three color presets.
-- **Codex CLI runs through Shelly-managed runtime routing** — `@openai/codex` can ship native binaries Android cannot execute directly. Shelly stages the npm dispatcher, applies the compatibility hook, and prefers the smoke-tested `codex-exec` runtime under `~/.shelly-runtime/codex/current`. The promoted runtime is whatever last passed the on-device `--version` smoke check. If `codex --version` fails, run `shelly doctor` or check `~/.shelly-cli/install.log` / `~/.shelly-runtime/update.log`.
-- **Codex login uses an in-app device-code OAuth flow** — run bare `codex` or `codex-login --open` from any terminal pane. Shelly validates `~/.codex/auth.json`; if it is missing or invalid, Shelly opens the OpenAI verification page in the in-app Browser Pane, writes `~/.codex/auth.json` (mode `0600`) on success, then launches the normal Codex TUI. No OpenAI API key is required; this rides your ChatGPT Plus/Pro/Business/Enterprise subscription. The flow has a 15-minute device-code timeout — re-run if it expires. Verify with `shelly doctor` (it reports whether `~/.codex/auth.json` is present).
+- **Codex CLI runs through Shelly-managed runtime routing** — Shelly prefers a healthy app-data runtime under `~/.shelly-runtime/codex/current`, then falls back to the APK-bundled runtime. If `codex --version` fails, run `shelly-doctor`, `shelly-update-clis codex --check-only`, or use **Settings → Updates → Repair Codex / Reset**.
+- **Codex login uses an in-app device-code OAuth flow** — run bare `codex` or `codex-login --open` from any terminal pane. Shelly validates `~/.codex/auth.json`; if it is missing or invalid, Shelly opens the OpenAI verification page in the in-app Browser Pane, writes `~/.codex/auth.json` (mode `0600`) on success, then launches the normal Codex TUI. No OpenAI API key is required; this rides your ChatGPT Plus/Pro/Business/Enterprise subscription. The flow has a 15-minute device-code timeout — re-run if it expires. Verify with `shelly-doctor` (it reports whether `~/.codex/auth.json` is present).
 - **`/sdcard` access requires MANAGE_EXTERNAL_STORAGE** — Android 11+ Scoped Storage blocks direct `open(2)` on `/sdcard` paths without this permission. Shelly asks for it on first launch; if you deny it, `source /sdcard/Download/foo.sh` will fail with `Permission denied`. Re-grant from system Settings → Apps → Shelly → Permissions → Files and media → Allow management of all files.
 - **Gemini is API-only** — Gemini is available as an API provider (AI Pane, `@gemini`, `@team`, background agents) with a configured key. There is no bundled Gemini CLI and no interactive `gemini` login flow in this release.
 - **Very large or binary pastes** — the paste path is a one-shot write into the PTY. Multi-megabyte clipboard payloads will take noticeable time and may stall the UI briefly; binary content (non-UTF-8 bytes, null characters) is not a supported transport mechanism and may corrupt the shell buffer. Use `curl -O` / `scp` / `/sdcard/Download/` drop-point for binary transfer.
@@ -710,10 +724,10 @@ Shelly runs commands on your device. The safety system is a best-effort layer, n
 
 - **Security model** — Shelly is a normal Android app sandbox, not a hardened VM. Terminal commands and approved AI-agent actions run as the app uid and can read/write whatever the app can access.
 - **Command safety is regex-based** — The 5-level risk assessment uses pattern matching. It catches common dangerous patterns (`rm -rf /`, `dd if=`, etc.) but is not a sandbox. Treat it as a seatbelt, not a firewall.
-- **APK distribution is unsigned** — Release APKs from GitHub Actions are not code-signed. For verified builds, clone the repo and build locally with your own keystore. See [Building from source](#quick-start).
+- **APK distribution uses CI release APKs** — GitHub Actions builds release APKs and publishes them to the rolling `android-latest` release. For production-grade signing guarantees, clone the repo and build with your own keystore. See [Build from source](#build-from-source).
 - **Autonomous agents require explicit approval per action** — AI Pane and background actions run through explicit API providers with per-action command approval. There is no hidden subscription worker.
 - **API keys are stored in SecureStore** — Keys are never written to logs or debug output. SecureStore uses Android Keystore encryption on supported devices.
-- **`shelly doctor`** — reports PTY health, bundled-binary presence, and whether `~/.codex/auth.json` exists. Run it when something feels broken.
+- **`shelly-doctor`** — reports shell/native binary presence, bundled Codex binaries, JS dispatcher, local LLM endpoints, and whether `~/.codex/auth.json` exists. Run it when something feels broken.
 - **Log redaction** — Shelly redacts common API key and token patterns before writing app debug logs. This is a guardrail, not permission to paste secrets into prompts or terminal output.
 - **Convenience ≠ security** — Shelly combines shell execution, AI dispatch, file editing, API key storage, and broad storage access in a single app. This is powerful but means a compromise of any one layer could affect the others. Review the source, build from your own keystore, and treat Shelly as a development tool — not as a production server environment.
 
