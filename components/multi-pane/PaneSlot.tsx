@@ -2,7 +2,7 @@ import React, { useState, useMemo, createContext, useEffect, useRef, useCallback
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-import { PANE_REGISTRY } from './pane-registry';
+import { PANE_REGISTRY, resolvePaneTitle } from './pane-registry';
 import { PaneSelector } from './PaneSelector';
 import PaneCliTabs from './PaneCliTabs';
 import { useMultiPaneStore, type PaneTab, type SlotIndex } from '@/hooks/use-multi-pane';
@@ -37,16 +37,9 @@ type Props = {
   canSplit: boolean;
 };
 
-/** Derive display title for pane header matching mock style */
-function getPaneTitle(tab: PaneTab): string {
-  switch (tab) {
-    case 'terminal': return 'TERMINAL';
-    case 'ai':       return 'AI';
-    case 'browser':  return 'BROWSER';
-    case 'markdown': return 'MARKDOWN';
-    case 'preview':  return 'PREVIEW';
-    default:         return String(tab).toUpperCase();
-  }
+/** Derive display title for pane header matching mock style. */
+function getPaneTitle(tab: PaneTab, translate: (key: string) => string): string {
+  return resolvePaneTitle(tab, translate, 'header').toUpperCase();
 }
 
 const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV, canSplit }: Props) => {
@@ -132,7 +125,7 @@ const PaneSlotInner = ({ leafId, tab, onChangeTab, onRemove, onSplitH, onSplitV,
     useFocusStore.getState().requestTerminalRefocus();
   }, [leafId, setFocusedPane]);
 
-  const paneTitle = getPaneTitle(tab);
+  const paneTitle = getPaneTitle(tab, t);
   const cwdDisplay = activeRepoPath
     ? `— ${activeRepoPath.replace(/^\/data\/data\/com\.termux\/files\/home/, '~')}`
     : '';
@@ -374,7 +367,7 @@ function SplitMenu({
     onClose();
   };
 
-  const suggestedTab: PaneTab = (['terminal', 'ai', 'browser', 'markdown', 'ask'] as PaneTab[])
+  const suggestedTab: PaneTab = (['terminal', 'ai', 'agent-chat', 'browser', 'markdown', 'ask'] as PaneTab[])
     .find((t) => t !== currentTab) ?? 'terminal';
 
   return (
@@ -395,15 +388,15 @@ function SplitMenu({
         ) : (
           <>
             <Text style={menuStyles.title}>{t('pane.open_in_new')}</Text>
-            {(['terminal', 'ai', 'browser', 'markdown', 'ask'] as PaneTab[]).map((t) => (
+            {(['terminal', 'ai', 'agent-chat', 'browser', 'markdown', 'ask'] as PaneTab[]).map((tabOption) => (
               <Pressable
-                key={t}
-                style={[menuStyles.option, t === suggestedTab && menuStyles.optionHighlight]}
-                onPress={() => handleTabSelect(t)}
+                key={tabOption}
+                style={[menuStyles.option, tabOption === suggestedTab && menuStyles.optionHighlight]}
+                onPress={() => handleTabSelect(tabOption)}
               >
-                <MaterialIcons name={PANE_REGISTRY[t].icon as any} size={16} color={t === suggestedTab ? C.accent : C.text2} />
-                <Text style={[menuStyles.optionText, t === suggestedTab && { color: C.accent }]}>
-                  {PANE_REGISTRY[t].title}
+                <MaterialIcons name={PANE_REGISTRY[tabOption].icon as any} size={16} color={tabOption === suggestedTab ? C.accent : C.text2} />
+                <Text style={[menuStyles.optionText, tabOption === suggestedTab && { color: C.accent }]}>
+                  {resolvePaneTitle(tabOption, t)}
                 </Text>
               </Pressable>
             ))}

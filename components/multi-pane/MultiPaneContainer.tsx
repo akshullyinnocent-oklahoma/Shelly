@@ -34,6 +34,7 @@ import { useDeviceLayout } from '@/hooks/use-device-layout';
 import { useAddPane } from '@/hooks/use-add-pane';
 import { PaneSlot } from './PaneSlot';
 import { Divider } from './Divider';
+import { PANE_REGISTRY, resolvePaneTitle } from './pane-registry';
 import { colors as C, fonts as F } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
@@ -44,24 +45,20 @@ import { useTranslation } from '@/lib/i18n';
 function EmptyState() {
   const { t } = useTranslation();
   const addPane = useAddPane();
-  const options: { tab: PaneTab; label: string; icon: string }[] = [
-    { tab: 'terminal', label: 'Terminal', icon: 'terminal' },
-    { tab: 'ai',       label: 'AI Chat',  icon: 'auto-awesome' },
-    { tab: 'browser',  label: 'Browser',  icon: 'language' },
-  ];
+  const options: PaneTab[] = ['terminal', 'ai', 'agent-chat', 'browser'];
   return (
     <View style={emptyStyles.root}>
       <Text style={emptyStyles.title}>{t('pane.empty_title')}</Text>
       <Text style={emptyStyles.subtitle}>{t('pane.empty_subtitle')}</Text>
       <View style={emptyStyles.row}>
-        {options.map((opt) => (
+        {options.map((tab) => (
           <Pressable
-            key={opt.tab}
+            key={tab}
             style={emptyStyles.btn}
-            onPress={() => addPane(opt.tab)}
+            onPress={() => addPane(tab)}
           >
-            <MaterialIcons name={opt.icon as any} size={18} color={C.accent} />
-            <Text style={emptyStyles.btnLabel}>{opt.label}</Text>
+            <MaterialIcons name={PANE_REGISTRY[tab].icon as any} size={18} color={C.accent} />
+            <Text style={emptyStyles.btnLabel}>{resolvePaneTitle(tab, t)}</Text>
           </Pressable>
         ))}
       </View>

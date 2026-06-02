@@ -25,6 +25,7 @@ import { logInfo, logLifecycle } from '@/lib/debug-logger';
 export type PaneTab =
   | 'terminal'
   | 'ai'
+  | 'agent-chat'
   | 'browser'
   | 'markdown'
   | 'preview'

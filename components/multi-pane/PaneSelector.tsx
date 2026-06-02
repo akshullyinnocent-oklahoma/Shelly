@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { ShellyModal } from '@/components/layout/ShellyModal';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { PANE_REGISTRY } from './pane-registry';
+import { PANE_REGISTRY, resolvePaneTitle } from './pane-registry';
 import type { PaneTab } from '@/hooks/use-multi-pane';
 import { colors as C, fonts as F, sizes as S } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
@@ -56,7 +56,7 @@ export function PaneSelector({ visible, currentTab, onSelect, onClose }: Props) 
                     color={isActive ? C.accent : C.text2}
                   />
                   <Text style={[styles.itemText, isActive && styles.itemTextActive]}>
-                    {entry.title}
+                    {resolvePaneTitle(item, t)}
                   </Text>
                 </Pressable>
               );
