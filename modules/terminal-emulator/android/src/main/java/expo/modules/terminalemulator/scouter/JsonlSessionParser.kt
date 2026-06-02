@@ -133,6 +133,9 @@ class JsonlSessionParser(
             payload.optString("stderr"),
             payload.optString("command")
         )
+        val role = payload.optString("role").lowercase()
+        if (payloadType == "message" && (role == "developer" || role == "system")) return null
+        if (isCodexUserMessagePayload(payloadType, role) && isCodexSyntheticUserMessage(message)) return null
         val rateLimitMessage = firstNonBlank(
             payload.optString("error"),
             payload.optString("stderr"),
@@ -149,7 +152,7 @@ class JsonlSessionParser(
         val status = when {
             hasExplicitRateLimitError -> ScouterStatus.ERROR
             "error" in payloadType || hasErrorValue -> ScouterStatus.ERROR
-            "user_message" in payloadType -> ScouterStatus.THINKING
+            isCodexUserMessagePayload(payloadType, role) -> ScouterStatus.THINKING
             "exec_command_begin" in payloadType || "tool_call" in payloadType || "apply_patch_begin" in payloadType || "patch_apply_begin" in payloadType -> ScouterStatus.TOOL_RUNNING
             "exec_command" in payloadType && "end" !in payloadType -> ScouterStatus.TOOL_RUNNING
             "tool_result" in payloadType || "exec_command_end" in payloadType || "apply_patch_end" in payloadType || "patch_apply_end" in payloadType -> ScouterStatus.THINKING
@@ -158,7 +161,7 @@ class JsonlSessionParser(
             else -> ScouterStatus.THINKING
         }
         val eventType = when {
-            "user_message" in payloadType -> ScouterEventType.USER_PROMPT
+            isCodexUserMessagePayload(payloadType, role) -> ScouterEventType.USER_PROMPT
             status == ScouterStatus.ERROR -> ScouterEventType.POST_TOOL_USE_FAILURE
             status == ScouterStatus.TOOL_RUNNING -> ScouterEventType.PRE_TOOL_USE
             status == ScouterStatus.COMPLETED -> ScouterEventType.STOP
@@ -217,6 +220,7 @@ class JsonlSessionParser(
 
         if (payloadType == "message") {
             if (role == "developer" || role == "system") return null
+            if (role == "user" && isCodexSyntheticUserMessage(message)) return null
             val status = when (role) {
                 "user" -> ScouterStatus.THINKING
                 "assistant" -> ScouterStatus.IDLE
@@ -320,6 +324,18 @@ class JsonlSessionParser(
     private fun updateCodexMetadata(vararg jsonObjects: JSONObject?) {
         modelName = jsonObjects.asSequence().mapNotNull { extractCodexModel(it) }.firstOrNull() ?: modelName
         codexCwd = extractCodexCwd(*jsonObjects) ?: codexCwd
+    }
+
+    private fun isCodexSyntheticUserMessage(message: String?): Boolean {
+        val value = message?.trim() ?: return false
+        if (value.startsWith("<environment_context>")) {
+            return value.contains("<cwd>") || value.contains("<current_date>") || value.contains("<timezone>")
+        }
+        return value.startsWith("# AGENTS.md instructions") && value.contains("<INSTRUCTIONS>")
+    }
+
+    private fun isCodexUserMessagePayload(payloadType: String, role: String): Boolean {
+        return "user_message" in payloadType || (payloadType == "message" && role == "user")
     }
 
     private fun stableJsonlEventId(line: String): String {
