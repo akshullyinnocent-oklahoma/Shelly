@@ -3,6 +3,7 @@ import { PANE_REGISTRY } from '@/components/multi-pane/pane-registry';
 describe('PANE_REGISTRY', () => {
   it('registers every pane type used by the shell layout', () => {
     expect(Object.keys(PANE_REGISTRY).sort()).toEqual([
+      'agent-chat',
       'ai',
       'ask',
       'browser',
