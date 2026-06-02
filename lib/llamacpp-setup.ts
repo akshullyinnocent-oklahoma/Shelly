@@ -490,10 +490,10 @@ export function buildRecommendedStartCommand(
   const config: LlamaCppServerConfig = {
     port: 8080,
     modelPath,
-    // Z Fold6 local use prioritizes system responsiveness. Keep threads low so
-    // Shelly and the AI pane stay responsive while the local model is running.
+    // Z Fold6 has enough big-core headroom for a short interactive burst. Four
+    // threads keeps local chat responsive without monopolizing the UI thread.
     contextSize: 1024,
-    threads: 2,
+    threads: 4,
     gpuLayers: 0, // Adreno GPU offloadは現状不安定なためCPU only
   };
   return buildServerStartCommand(config);
@@ -547,7 +547,7 @@ export function buildDaemonStartScript(model: LlamaCppModel, modelPath?: string)
   ls -l "$LLAMA_SERVER_BIN" "$REAL_LLAMA_SERVER_BIN" 2>&1 || true
   echo "--- starting llama-server ---"
 } > "${logFile}"`,
-    `nohup /system/bin/nice -n 10 ${startCmd} >> "${logFile}" 2>&1 &`,
+    `nohup /system/bin/nice -n 5 ${startCmd} >> "${logFile}" 2>&1 &`,
     `echo $! > "${pidFile}"`,
     `echo "llama-server started (PID: $(cat ${pidFile}))"`,
     `echo "API: http://127.0.0.1:8080/v1/chat/completions"`,
@@ -734,7 +734,7 @@ export function buildStartAllScript(model: LlamaCppModel): string {
   ls -l "$LLAMA_SERVER_BIN" "$REAL_LLAMA_SERVER_BIN" 2>&1 || true
   echo "--- starting llama-server ---"
 } > "${logFile}"`,
-    `nohup /system/bin/nice -n 10 ${startCmd} >> "${logFile}" 2>&1 &`,
+    `nohup /system/bin/nice -n 5 ${startCmd} >> "${logFile}" 2>&1 &`,
     `echo $! > "${pidFile}"`,
     `echo "llama-server started (PID: $(cat ${pidFile}))"`,
     ``,

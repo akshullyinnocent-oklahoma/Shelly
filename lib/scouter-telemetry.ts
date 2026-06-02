@@ -14,6 +14,7 @@ type LocalScouterEvent = {
   outputTokens?: number;
   tokensPerSecond?: number;
   latencyMs?: number;
+  firstTokenLatencyMs?: number;
 };
 
 type HookTemplate = {
@@ -59,6 +60,7 @@ async function postLocalLlmScouterEventAsync(event: LocalScouterEvent): Promise<
     outputTokens: event.outputTokens,
     tokensPerSecond: event.tokensPerSecond,
     latencyMs: event.latencyMs,
+    firstTokenLatencyMs: event.firstTokenLatencyMs,
   };
 
   const controller = new AbortController();

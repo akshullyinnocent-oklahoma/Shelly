@@ -40,6 +40,10 @@ export interface OllamaChatRequest {
   };
 }
 
+const DEFAULT_LOCAL_MAX_TOKENS = 384;
+const DEFAULT_LOCAL_CONTEXT_TOKENS = 1024;
+const XHR_PROGRESS_FLUSH_MS = 50;
+
 export interface OllamaChatResponse {
   model: string;
   message: OllamaMessage;
@@ -290,7 +294,7 @@ export async function ollamaChat(
   messages: OllamaMessage[],
   timeoutMs = 60000,
   externalSignal?: AbortSignal,
-  maxTokens = 512,
+  maxTokens = DEFAULT_LOCAL_MAX_TOKENS,
   _retried = false,
 ): Promise<{ success: boolean; content: string; error?: string }> {
   try {
@@ -312,7 +316,7 @@ export async function ollamaChat(
         model: config.model,
         messages,
         stream: false,
-        temperature: 0.7,
+        temperature: 0.4,
         max_tokens: maxTokens,
       });
       body = JSON.stringify(req);
@@ -323,7 +327,11 @@ export async function ollamaChat(
         model: config.model,
         messages,
         stream: false,
-        options: { temperature: 0.7, num_predict: maxTokens },
+        options: {
+          temperature: 0.4,
+          num_ctx: DEFAULT_LOCAL_CONTEXT_TOKENS,
+          num_predict: maxTokens,
+        },
       });
       body = JSON.stringify(req);
     }
@@ -392,7 +400,7 @@ export async function ollamaChatStream(
   timeoutMs = 120000,
   externalSignal?: AbortSignal,
   _retried = false,
-  maxTokens = 1024,
+  maxTokens = DEFAULT_LOCAL_MAX_TOKENS,
 ): Promise<{ success: boolean; content?: string; error?: string }> {
   const apiType = detectApiType(config.baseUrl);
   const isReactNative = typeof navigator !== 'undefined' && navigator.product === 'ReactNative';
@@ -406,7 +414,7 @@ export async function ollamaChatStream(
       model: config.model,
       messages,
       stream: true,
-      temperature: 0.7,
+      temperature: 0.4,
       max_tokens: maxTokens,
     });
     body = JSON.stringify(req);
@@ -416,7 +424,11 @@ export async function ollamaChatStream(
       model: config.model,
       messages,
       stream: true,
-      options: { temperature: 0.7, num_predict: maxTokens },
+      options: {
+        temperature: 0.4,
+        num_ctx: DEFAULT_LOCAL_CONTEXT_TOKENS,
+        num_predict: maxTokens,
+      },
     });
     body = JSON.stringify(req);
   }
@@ -692,7 +704,7 @@ function xhrStream(
         progressTimer = null;
         if (settled) return;
         processNewDataSafely();
-      }, 80);
+      }, XHR_PROGRESS_FLUSH_MS);
     };
 
     xhr.onload = () => {

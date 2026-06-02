@@ -69,6 +69,8 @@ describe('local LLM request compatibility', () => {
 
     expect(requestBody(fetchMock)).toMatchObject({
       chat_template_kwargs: { enable_thinking: false },
+      temperature: 0.4,
+      max_tokens: 384,
     });
   });
 
@@ -84,7 +86,14 @@ describe('local LLM request compatibility', () => {
       messages,
     );
 
-    expect(requestBody(fetchMock)).toMatchObject({ think: false });
+    expect(requestBody(fetchMock)).toMatchObject({
+      think: false,
+      options: {
+        temperature: 0.4,
+        num_ctx: 1024,
+        num_predict: 384,
+      },
+    });
   });
 
   it('parses an unterminated final OpenAI SSE content chunk', async () => {

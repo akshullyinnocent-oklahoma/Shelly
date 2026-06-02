@@ -14,6 +14,7 @@ import { useAIPaneStore } from '@/store/ai-pane-store';
 import { usePaneStore } from '@/store/pane-store';
 import { useSettingsStore } from '@/store/settings-store';
 import {
+  buildLocalAIPaneSystemPrompt,
   buildAIPaneSystemPrompt,
   compactTerminalContextForLocalLlm,
   describeTerminalContextForLog,
@@ -499,16 +500,14 @@ export function useAIPaneDispatch(paneId: string) {
 
       try {
         const promptTerminalCtx =
-          agent === 'local' ? compactTerminalContextForLocalLlm(terminalCtx) : terminalCtx;
+          agent === 'local' ? compactTerminalContextForLocalLlm(terminalCtx, 900) : terminalCtx;
         logInfo(
           'AIPaneDispatch',
           `Terminal context: agent=${agent} session=${terminalSessionId ?? 'active'} raw=${describeTerminalContextForLog(terminalCtx)} injected=${describeTerminalContextForLog(promptTerminalCtx)}`,
         );
-        const systemPrompt = buildAIPaneSystemPrompt(
-          promptTerminalCtx,
-          agent,
-          agent === 'local' ? null : stagedFile,
-        );
+        const systemPrompt = agent === 'local'
+          ? buildLocalAIPaneSystemPrompt(promptTerminalCtx)
+          : buildAIPaneSystemPrompt(promptTerminalCtx, agent, stagedFile);
         const conv = store.getOrCreate(paneId);
         // Exclude the streaming placeholder and the current user message;
         // the active prompt is passed separately to each provider below.
@@ -535,16 +534,20 @@ export function useAIPaneDispatch(paneId: string) {
 
           const preflightTtlMs = 30_000;
           if (Date.now() - lastLocalStreamOkAtRef.current > preflightTtlMs) {
-            const connection = await checkOllamaConnection(settings.localLlmUrl, 2000);
-            if (signal.aborted) return;
-            if (!connection.available) {
+            void checkOllamaConnection(settings.localLlmUrl, 750).then((connection) => {
+              if (signal.aborted || connection.available) return;
               logInfo(
                 'AIPaneDispatch',
-                `Local LLM preflight failed; attempting stream anyway: ${connection.error ?? 'unknown'}`,
+                `Local LLM preflight failed; stream already attempted: ${connection.error ?? 'unknown'}`,
               );
-            }
+            }).catch((err) => {
+              logInfo(
+                'AIPaneDispatch',
+                `Local LLM preflight error; stream already attempted: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
           }
-          await postLocalLlmScouterEvent({
+          void postLocalLlmScouterEvent({
             phase: 'start',
             endpoint: settings.localLlmUrl,
             model: settings.localLlmModel ?? 'default',
@@ -554,6 +557,7 @@ export function useAIPaneDispatch(paneId: string) {
           });
 
           let accumulated = '';
+          let firstTokenLatencyMs: number | undefined;
           throttledUpdate(paneId, assistantId, {
             isStreaming: true,
             streamingText: '',
@@ -574,6 +578,9 @@ export function useAIPaneDispatch(paneId: string) {
             messages,
             (chunk, _done) => {
               if (signal.aborted || !chunk) return;
+              if (firstTokenLatencyMs === undefined) {
+                firstTokenLatencyMs = Date.now() - localStartedAt;
+              }
               accumulated += chunk;
               throttledUpdate(paneId, assistantId, {
                 streamingText: accumulated,
@@ -589,7 +596,7 @@ export function useAIPaneDispatch(paneId: string) {
 
           if (signal.aborted) {
             const outputTokens = estimateTokens(accumulated);
-            await postLocalLlmScouterEvent({
+            void postLocalLlmScouterEvent({
               phase: 'snapshot',
               endpoint: settings.localLlmUrl,
               model: settings.localLlmModel ?? 'default',
@@ -598,6 +605,7 @@ export function useAIPaneDispatch(paneId: string) {
               inputTokens: localInputTokens,
               outputTokens,
               latencyMs: Date.now() - localStartedAt,
+              firstTokenLatencyMs,
             });
             store.updateMessage(paneId, assistantId, {
               content: accumulated,
@@ -608,7 +616,7 @@ export function useAIPaneDispatch(paneId: string) {
           } else if (result.success) {
             logInfo('AIPaneDispatch', 'Local LLM response complete');
             if (!accumulated.trim()) {
-              await postLocalLlmScouterEvent({
+              void postLocalLlmScouterEvent({
                 phase: 'error',
                 endpoint: settings.localLlmUrl,
                 model: settings.localLlmModel ?? 'default',
@@ -629,7 +637,7 @@ export function useAIPaneDispatch(paneId: string) {
             lastLocalStreamOkAtRef.current = Date.now();
             const outputTokens = estimateTokens(accumulated);
             const elapsedSeconds = Math.max((Date.now() - localStartedAt) / 1000, 0.001);
-            await postLocalLlmScouterEvent({
+            void postLocalLlmScouterEvent({
               phase: 'snapshot',
               endpoint: settings.localLlmUrl,
               model: settings.localLlmModel ?? 'default',
@@ -639,6 +647,7 @@ export function useAIPaneDispatch(paneId: string) {
               outputTokens,
               tokensPerSecond: outputTokens / elapsedSeconds,
               latencyMs: Date.now() - localStartedAt,
+              firstTokenLatencyMs,
             });
             store.updateMessage(paneId, assistantId, {
               content: accumulated,
@@ -648,7 +657,7 @@ export function useAIPaneDispatch(paneId: string) {
             });
           } else {
             logError('AIPaneDispatch', `Local LLM failed: ${result.error ?? 'unknown'}`);
-            await postLocalLlmScouterEvent({
+            void postLocalLlmScouterEvent({
               phase: 'error',
               endpoint: settings.localLlmUrl,
               model: settings.localLlmModel ?? 'default',

@@ -70,6 +70,7 @@ data class ScouterEvent(
     val tokensPerSecond: Double? = null,
     val queueSize: Int? = null,
     val latencyMs: Long? = null,
+    val firstTokenLatencyMs: Long? = null,
     val rateLimitStatus: ScouterRateLimitStatus? = null,
     val rateLimitRemainingRequests: Long? = null,
     val rateLimitRemainingTokens: Long? = null,
@@ -109,6 +110,7 @@ data class ScouterEvent(
         put("tokensPerSecond", tokensPerSecond)
         put("queueSize", queueSize)
         put("latencyMs", latencyMs)
+        put("firstTokenLatencyMs", firstTokenLatencyMs)
         put("rateLimitStatus", rateLimitStatus?.name)
         put("rateLimitRemainingRequests", rateLimitRemainingRequests)
         put("rateLimitRemainingTokens", rateLimitRemainingTokens)
@@ -147,6 +149,7 @@ data class ScouterEvent(
             tokensPerSecond = tokensPerSecond ?: previous?.tokensPerSecond,
             queueSize = queueSize ?: previous?.queueSize,
             latencyMs = latencyMs ?: previous?.latencyMs,
+            firstTokenLatencyMs = firstTokenLatencyMs ?: previous?.firstTokenLatencyMs,
             rateLimitStatus = rateLimitStatus ?: previous?.rateLimitStatus,
             rateLimitRemainingRequests = if (clearsRateLimitDetails) rateLimitRemainingRequests else rateLimitRemainingRequests ?: previous?.rateLimitRemainingRequests,
             rateLimitRemainingTokens = if (clearsRateLimitDetails) rateLimitRemainingTokens else rateLimitRemainingTokens ?: previous?.rateLimitRemainingTokens,
@@ -182,6 +185,7 @@ data class SessionSnapshot(
     val tokensPerSecond: Double?,
     val queueSize: Int?,
     val latencyMs: Long?,
+    val firstTokenLatencyMs: Long?,
     val rateLimitStatus: ScouterRateLimitStatus?,
     val rateLimitRemainingRequests: Long?,
     val rateLimitRemainingTokens: Long?,
@@ -215,6 +219,7 @@ data class SessionSnapshot(
         put("tokensPerSecond", tokensPerSecond)
         put("queueSize", queueSize)
         put("latencyMs", latencyMs)
+        put("firstTokenLatencyMs", firstTokenLatencyMs)
         put("rateLimitStatus", rateLimitStatus?.name)
         put("rateLimitRemainingRequests", rateLimitRemainingRequests)
         put("rateLimitRemainingTokens", rateLimitRemainingTokens)
@@ -257,6 +262,9 @@ data class SessionSnapshot(
                 } else null,
                 latencyMs = if (json.has("latencyMs") && !json.isNull("latencyMs")) {
                     json.optLong("latencyMs")
+                } else null,
+                firstTokenLatencyMs = if (json.has("firstTokenLatencyMs") && !json.isNull("firstTokenLatencyMs")) {
+                    json.optLong("firstTokenLatencyMs")
                 } else null,
                 rateLimitStatus = parseScouterRateLimitStatus(json.optString("rateLimitStatus").ifBlank { null }),
                 rateLimitRemainingRequests = if (json.has("rateLimitRemainingRequests") && !json.isNull("rateLimitRemainingRequests")) {

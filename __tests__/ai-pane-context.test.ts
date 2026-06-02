@@ -19,6 +19,7 @@ jest.mock('@/store/execution-log-store', () => ({
 }));
 
 import {
+  buildLocalAIPaneSystemPrompt,
   buildAIPaneSystemPrompt,
   compactTerminalContextForLocalLlm,
   getTerminalSnapshotForSession,
@@ -75,6 +76,15 @@ describe('AI pane terminal context', () => {
 
   it('tells providers to answer from injected terminal output', () => {
     const prompt = buildAIPaneSystemPrompt('codex-cli 0.135.0', 'local', null);
+
+    expect(prompt).toContain('[Terminal Output]');
+    expect(prompt).toContain('the left terminal');
+    expect(prompt).toContain('Do not say you cannot see the terminal');
+    expect(prompt).toContain('untrusted data');
+  });
+
+  it('keeps terminal-aware instructions in the short local LLM prompt', () => {
+    const prompt = buildLocalAIPaneSystemPrompt('codex-cli 0.135.0');
 
     expect(prompt).toContain('[Terminal Output]');
     expect(prompt).toContain('the left terminal');
