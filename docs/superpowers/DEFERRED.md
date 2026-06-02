@@ -1716,6 +1716,12 @@ claude() {
 - Nacre の後継、分割型レイアウト、トラックボール
 - MEMORY.md の「やりたいことリスト」参照
 
+### Codex Agent Chat の Watch / Shelly-owned STT 拡張
+- **優先度**: P3
+- **現状**: `docs/superpowers/specs/2026-06-02-codex-agent-chat-ui-design.md` で V1 は Shelly 本体の `TextInput` ベース Agent Chat に限定。Type-less など外部入力ツールが文字を入れる前提で、Shelly 側の mic button / speech recognition / Galaxy Watch reply は入れない。
+- **Why not now**: Codex JSONL ↔ PTY session binding と安全な reply routing が先。Watch や Shelly-owned STT を同時に入れると、バグの切り分け対象が UI / native event bridge / audio focus / wearable transport に分散する。
+- → sync: `docs/superpowers/specs/2026-06-02-codex-agent-chat-ui-design.md`
+
 ### UI セルフチェック機能
 - ワイヤレス ADB 経由でスクショ → マルチモーダル AI に UI/UX バグ検出依頼
 - MEMORY.md の「やりたいことリスト」参照
@@ -1743,6 +1749,7 @@ claude() {
 - **2026-05-13**: v119 実機で bare `claude` native route が TUI まで到達する一方、`/login` 後の trust/onboarding prompt で Bun SEA が exit 139。v120 で `~/.claude.json` HOME trust seed と `shelly-doctor` 診断を追加。`SHELLY_AUTO_UPDATE_CLIS=0` は v101 の foreground TUI 汚染対策として維持し、auto-update 再有効化は P2 に defer。
 - **2026-05-20**: Claude Code 2.1.143+ Bash tool 追従で、内部 subprocess 実装追跡だけでは更新時に再発しやすいことを確認。`sdk-tools.d.ts` snapshot + schema diff + behavior smoke + breaking version gate を P1 として登録。
 - **2026-05-21**: Claude Code Bash tool `Exit code 1` 追跡で 7 ビルドを試したが未解決。証明済みの CI marker / exec-wrapper null-deref hardening のみ main に残し、未検証の relay / launcher / stack-frame churn は deferred 化。
+- **2026-06-02**: Codex Agent Chat UI 設計を追加。V1 は Shelly 本体の pane-native chat + Type-less など外部入力ツールからの text input に限定し、Galaxy Watch / Shelly-owned STT は P3 deferred。
 
 ---
 
