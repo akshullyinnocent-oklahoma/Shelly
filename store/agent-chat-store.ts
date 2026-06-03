@@ -489,9 +489,17 @@ function dedupeTimelineEvents(events: AgentChatEvent[]): AgentChatEvent[] {
   const recentByContent = new Map<string, AgentChatEvent>();
   const seenUsersBySession = new Map<string, Set<string>>();
   const seenAssistantsBySession = new Map<string, Set<string>>();
+  const latestStatusBySession = new Map<string, AgentChatEvent>();
   const kept: AgentChatEvent[] = [];
   for (const event of [...events].sort((a, b) => a.timestamp - b.timestamp)) {
     if (isSyntheticAgentChatEvent(event)) continue;
+    if (event.kind === 'status') {
+      const previous = latestStatusBySession.get(event.codexSessionId);
+      if (!previous || event.timestamp >= previous.timestamp) {
+        latestStatusBySession.set(event.codexSessionId, event);
+      }
+      continue;
+    }
     const key = messageContentKey(event);
     if (key && event.kind === 'user_message') {
       const seenUsers = getSeenMessageSet(seenUsersBySession, event.codexSessionId);
@@ -512,7 +520,10 @@ function dedupeTimelineEvents(events: AgentChatEvent[]): AgentChatEvent[] {
     }
     kept.push(event);
   }
-  return kept;
+  return [
+    ...kept,
+    ...latestStatusBySession.values(),
+  ].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 function getSeenMessageSet(map: Map<string, Set<string>>, sessionId: string): Set<string> {

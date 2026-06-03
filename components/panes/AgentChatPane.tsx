@@ -55,9 +55,9 @@ export default function AgentChatPane() {
   const visibleEvents = useMemo(() => {
     const sessionId = activeSession?.codexSessionId;
     if (!sessionId) return [];
-    return events.filter((event) => event.codexSessionId === sessionId);
+    return events.filter((event) => event.codexSessionId === sessionId && event.kind !== 'status');
   }, [activeSession?.codexSessionId, events]);
-  const hasTimelineEvents = visibleEvents.some((event) => event.kind !== 'status');
+  const hasTimelineEvents = visibleEvents.length > 0;
 
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<AgentChatEvent>) => (

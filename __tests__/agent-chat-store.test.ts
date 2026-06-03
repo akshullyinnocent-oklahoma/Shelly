@@ -232,4 +232,36 @@ describe('agent chat store', () => {
       expect.objectContaining({ kind: 'status', text: 'THINKING' }),
     ]);
   });
+
+  it('keeps only the latest status event per session', () => {
+    const baseTime = 1_811_115_000_000;
+
+    useAgentChatStore.getState().ingestNativeEvent({
+      emittedAt: baseTime,
+      snapshotJson: JSON.stringify({
+        source: 'CODEX',
+        sessionId: 'session-status',
+        projectName: 'home',
+        currentStatus: 'THINKING',
+        lastEventAt: baseTime,
+        sessionStartAt: baseTime,
+      }),
+    });
+    useAgentChatStore.getState().ingestNativeEvent({
+      emittedAt: baseTime + 1_000,
+      snapshotJson: JSON.stringify({
+        source: 'CODEX',
+        sessionId: 'session-status',
+        projectName: 'home',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 1_000,
+        sessionStartAt: baseTime,
+      }),
+    });
+
+    const statusEvents = useAgentChatStore.getState().events.filter((event) => event.kind === 'status');
+    expect(statusEvents).toEqual([
+      expect.objectContaining({ codexSessionId: 'session-status', text: 'IDLE' }),
+    ]);
+  });
 });
