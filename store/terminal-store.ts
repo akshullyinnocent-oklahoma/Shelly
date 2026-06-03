@@ -28,7 +28,15 @@ export type PendingCommand =
       id: string;
       command: string;
       sessionId?: string | null;
+      durable?: boolean;
+      createdAt?: number;
+      expiresAt?: number;
     };
+
+type InsertCommandOptions = {
+  durable?: boolean;
+  ttlMs?: number;
+};
 
 function allocateSessionName(sessions: TabSession[]): string | null {
   const used = new Set(sessions.map((s) => s.nativeSessionId));
@@ -52,6 +60,29 @@ function createSession(id: string, name: string, sessionName: string = SESSION_N
     nativeSessionId: sessionName,
     sessionStatus: 'starting',
     isAlive: false,
+  };
+}
+
+function serializeDurablePendingCommand(pendingCommand: PendingCommand | null): PendingCommand | null {
+  if (!pendingCommand || typeof pendingCommand === 'string') return null;
+  if (pendingCommand.durable !== true) return null;
+  if (typeof pendingCommand.expiresAt === 'number' && pendingCommand.expiresAt <= Date.now()) return null;
+  return pendingCommand;
+}
+
+function parseDurablePendingCommand(value: unknown): PendingCommand | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<Extract<PendingCommand, object>>;
+  if (candidate.durable !== true) return null;
+  if (typeof candidate.id !== 'string' || typeof candidate.command !== 'string') return null;
+  if (typeof candidate.expiresAt === 'number' && candidate.expiresAt <= Date.now()) return null;
+  return {
+    id: candidate.id,
+    command: candidate.command,
+    sessionId: typeof candidate.sessionId === 'string' ? candidate.sessionId : null,
+    durable: true,
+    createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : Date.now(),
+    expiresAt: typeof candidate.expiresAt === 'number' ? candidate.expiresAt : Date.now() + 30 * 60 * 1000,
   };
 }
 
@@ -122,7 +153,7 @@ type TerminalState = {
 
   // Actions — pending command (Creator / Snippet insert)
   /** Write a command into a terminal; optionally scope it to one session. */
-  insertCommand: (command: string, sessionId?: string | null) => void;
+  insertCommand: (command: string, sessionId?: string | null, options?: InsertCommandOptions) => void;
   /** Clear the pending command after it has been consumed */
   clearPendingCommand: (id?: string) => void;
 
@@ -225,7 +256,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const session = get().sessions.find((s) => s.id === targetId);
     set((state) => ({
       sessions: state.sessions.map((s) =>
-        s.id === targetId ? { ...s, blocks: [], entries: [], commandHistory: [], currentDir: getHomePath(), sessionStatus: 'starting' as const, isAlive: false } : s
+        s.id === targetId ? { ...s, blocks: [], entries: [], commandHistory: [], currentDir: getHomePath(), activeCli: null, sessionStatus: 'starting' as const, isAlive: false } : s
       ),
     }));
     // Also clear the execution log buffers so stale output doesn't reappear
@@ -525,25 +556,40 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   // ── Pending command (Creator / Snippet insert) ─────────────────────────────────────────
 
-  insertCommand: (command: string, sessionId?: string | null) => {
+  insertCommand: (command: string, sessionId?: string | null, options?: InsertCommandOptions) => {
+    const now = Date.now();
     set({
       pendingCommand: {
-        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id: `pending-${now}-${Math.random().toString(36).slice(2)}`,
         command,
         sessionId: sessionId ?? null,
+        durable: options?.durable === true,
+        createdAt: now,
+        expiresAt: options?.durable === true ? now + (options.ttlMs ?? 30 * 60 * 1000) : undefined,
       },
     });
+    if (options?.durable === true) {
+      void get().saveSessionState();
+    }
   },
 
   clearPendingCommand: (id?: string) => {
+    let shouldPersist = false;
     set((state) => {
-      if (!id) return { pendingCommand: null };
+      if (!id) {
+        shouldPersist = typeof state.pendingCommand === 'object' && state.pendingCommand?.durable === true;
+        return { pendingCommand: null };
+      }
       const pending = state.pendingCommand;
       if (!pending || typeof pending === 'string' || pending.id === id) {
+        shouldPersist = typeof pending === 'object' && pending?.durable === true;
         return { pendingCommand: null };
       }
       return {};
     });
+    if (shouldPersist) {
+      void get().saveSessionState();
+    }
   },
 
   // ── Session reset (consumed by terminal.tsx) ────────────────────────────────
@@ -561,7 +607,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   saveSessionState: async () => {
     try {
-      const { sessions, activeSessionId } = get();
+      const { sessions, activeSessionId, pendingCommand } = get();
+      const durablePendingCommand = serializeDurablePendingCommand(pendingCommand);
       // bug #65: capture transcript snapshots from every live native session
       // so that on next launch we can replay the visible history into the
       // freshly-forked emulator (pseudo-immortal, Case C).
@@ -605,7 +652,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             isStreaming: false,
             streamingText: undefined, // clear partial streaming text
           })),
-        activeCli: s.activeCli ?? null,
+        activeCli: null,
         tmuxSession: s.tmuxSession ?? 'shelly-1',
         nativeSessionId: s.nativeSessionId ?? s.tmuxSession ?? 'shelly-1',
         sessionStatus: 'starting',
@@ -615,6 +662,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       await AsyncStorage.setItem('shelly_terminal_sessions', JSON.stringify({
         sessions: serializable,
         activeSessionId,
+        pendingCommand: durablePendingCommand,
       }));
     } catch (e) {
       console.warn('[SessionPersist] save failed:', e);
@@ -648,7 +696,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         commandHistory: s.commandHistory || [],
         blocks: (s.blocks || []).map((b: any) => ({ ...b, isRunning: false })),
         entries: (s.entries || []).map((e: any) => ({ ...e, isStreaming: false })),
-        activeCli: s.activeCli ?? null,
+        activeCli: null,
         tmuxSession: s.tmuxSession || SESSION_NAMES[index] || 'shelly-1',
         nativeSessionId: s.nativeSessionId || s.tmuxSession || SESSION_NAMES[index] || 'shelly-1',
         sessionStatus: 'starting' as const,
@@ -658,7 +706,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const activeId = parsed.activeSessionId && restored.some((s: TabSession) => s.id === parsed.activeSessionId)
         ? parsed.activeSessionId
         : restored[0].id;
-      set({ sessions: restored, activeSessionId: activeId });
+      set({
+        sessions: restored,
+        activeSessionId: activeId,
+        pendingCommand: parseDurablePendingCommand(parsed.pendingCommand),
+      });
     } catch (e) {
       console.warn('[SessionPersist] load failed:', e);
     }

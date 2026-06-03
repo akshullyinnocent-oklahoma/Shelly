@@ -128,6 +128,7 @@ data class ScouterEvent(
             source = source,
             projectName = projectName,
             gitBranch = gitBranch ?: previous?.gitBranch,
+            cwd = cwd,
             currentStatus = derivedStatus,
             currentTool = if (isTerminalState) null else toolName ?: previous?.currentTool,
             currentFile = if (isTerminalState) null else targetFile ?: previous?.currentFile,
@@ -164,6 +165,7 @@ data class SessionSnapshot(
     val source: ScouterSource,
     val projectName: String,
     val gitBranch: String?,
+    val cwd: String,
     val currentStatus: ScouterStatus,
     val currentTool: String?,
     val currentFile: String?,
@@ -198,6 +200,7 @@ data class SessionSnapshot(
         put("sourceBadge", source.badge())
         put("projectName", projectName)
         put("gitBranch", gitBranch)
+        put("cwd", cwd)
         put("currentStatus", currentStatus.name)
         put("currentTool", currentTool)
         put("currentFile", currentFile)
@@ -234,6 +237,7 @@ data class SessionSnapshot(
                 source = runCatching { ScouterSource.valueOf(json.optString("source")) }.getOrDefault(ScouterSource.SHELLY),
                 projectName = json.optString("projectName", "Shelly"),
                 gitBranch = json.optString("gitBranch").ifBlank { null },
+                cwd = json.optString("cwd").ifBlank { null } ?: "",
                 currentStatus = runCatching { ScouterStatus.valueOf(json.optString("currentStatus")) }.getOrDefault(ScouterStatus.IDLE),
                 currentTool = json.optString("currentTool").ifBlank { null },
                 currentFile = json.optString("currentFile").ifBlank { null },

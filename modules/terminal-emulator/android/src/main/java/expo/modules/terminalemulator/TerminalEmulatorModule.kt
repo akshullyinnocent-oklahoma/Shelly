@@ -342,6 +342,12 @@ class TerminalEmulatorModule : Module() {
             session.getTranscriptText(maxLines)
         }
 
+        AsyncFunction("getScreenText") { sessionId: String ->
+            val session = sessions[sessionId]
+                ?: throw IllegalArgumentException("Session $sessionId not found")
+            session.getScreenText()
+        }
+
         AsyncFunction("writeToEmulator") { sessionId: String, text: String ->
             val session = sessions[sessionId]
                 ?: throw IllegalArgumentException("Session $sessionId not found")

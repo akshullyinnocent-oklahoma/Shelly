@@ -172,6 +172,13 @@ class ShellyTerminalSession(
         return if (lines.size > maxLines) lines.takeLast(maxLines).joinToString("\n") else fullText
     }
 
+    fun getScreenText(): String {
+        val emulator = terminalSession.emulator ?: return ""
+        return emulator.screen
+            .getSelectedText(0, 0, 10000, 10000, false)
+            .trimEnd()
+    }
+
     fun destroy() {
         batchHandler.removeCallbacks(flushRunnable)
         flushOutputBuffer()

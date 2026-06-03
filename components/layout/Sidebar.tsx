@@ -28,6 +28,7 @@ import { FileTree } from './FileTree';
 import { ProfilesSection } from './ProfilesSection';
 import { WorktreesSection } from './WorktreesSection';
 import { QuickLaunchSection } from './QuickLaunchSection';
+import { CodexSessionsSection } from './CodexSessionsSection';
 import { colors as C, fonts as F, sizes as S, padding as P, radii as R, icons as I } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
@@ -491,6 +492,12 @@ export function Sidebar() {
         <QuickLaunchSection
           isOpen={openSections.quickLaunch ?? true}
           onToggle={() => toggleSection('quickLaunch')}
+          iconsOnly={iconsOnly}
+        />
+
+        <CodexSessionsSection
+          isOpen={openSections.codexSessions ?? true}
+          onToggle={() => toggleSection('codexSessions')}
           iconsOnly={iconsOnly}
         />
 

@@ -1,8 +1,10 @@
-import React, { useCallback, useContext, useEffect, useMemo } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -10,12 +12,15 @@ import {
 } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { MultiPaneContext } from '@/components/multi-pane/PaneSlot';
+import { useAddPane } from '@/hooks/use-add-pane';
 import {
   useAgentChatStore,
+  type AgentChatBindingConfidence,
   type AgentChatEvent,
   type AgentChatSession,
   type AgentChatStatus,
 } from '@/store/agent-chat-store';
+import { resumeCodexSession } from '@/lib/codex-session-resume';
 import { useTranslation } from '@/lib/i18n';
 import { useTheme } from '@/hooks/use-theme';
 import type { ThemeColorPalette } from '@/lib/theme';
@@ -25,6 +30,7 @@ import { usePanelBackground } from '@/hooks/use-panel-background';
 
 export default function AgentChatPane() {
   const { t } = useTranslation();
+  const addPane = useAddPane();
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const paneBg = usePanelBackground(colors.background);
@@ -38,18 +44,39 @@ export default function AgentChatPane() {
   const sessions = useAgentChatStore((s) => s.sessions);
   const events = useAgentChatStore((s) => s.events);
   const latestSessionId = useAgentChatStore((s) => s.latestSessionId);
-  const lastUpdatedAt = useAgentChatStore((s) => s.lastUpdatedAt);
   const startPolling = useAgentChatStore((s) => s.startPolling);
   const stopPolling = useAgentChatStore((s) => s.stopPolling);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     startPolling();
     return () => stopPolling();
   }, [startPolling, stopPolling]);
 
+  const sessionTabs = useMemo(
+    () => [...sessions].sort((a, b) => b.lastEventAt - a.lastEventAt).slice(0, 8),
+    [sessions],
+  );
+
+  useEffect(() => {
+    const fallbackSessionId = latestSessionId ?? sessionTabs[0]?.codexSessionId ?? null;
+    const selectedExists = selectedSessionId
+      ? sessionTabs.some((session) => session.codexSessionId === selectedSessionId)
+      : false;
+    const nextSessionId = selectedExists ? selectedSessionId : fallbackSessionId;
+    if (nextSessionId !== selectedSessionId) {
+      setSelectedSessionId(nextSessionId);
+    }
+  }, [latestSessionId, selectedSessionId, sessionTabs]);
+
   const activeSession = useMemo(
-    () => sessions.find((session) => session.codexSessionId === latestSessionId) ?? sessions[0] ?? null,
-    [latestSessionId, sessions],
+    () => (
+      sessions.find((session) => session.codexSessionId === selectedSessionId)
+      ?? sessions.find((session) => session.codexSessionId === latestSessionId)
+      ?? sessions[0]
+      ?? null
+    ),
+    [latestSessionId, selectedSessionId, sessions],
   );
 
   const visibleEvents = useMemo(() => {
@@ -72,6 +99,13 @@ export default function AgentChatPane() {
   );
 
   const keyExtractor = useCallback((item: AgentChatEvent) => item.id, []);
+  const resumeSelectedSession = useCallback(async () => {
+    if (!activeSession) return;
+    const result = await resumeCodexSession(activeSession, { addTerminalPane: addPane });
+    if (result.status === 'failed') {
+      Alert.alert(t('sidebar.codex_resume_failed_title'), t('sidebar.codex_resume_failed_body'));
+    }
+  }, [activeSession, addPane, t]);
 
   return (
     <View style={[styles.root, { backgroundColor: paneBg }]}>
@@ -83,6 +117,16 @@ export default function AgentChatPane() {
             <Text style={styles.readOnlyText}>{t('agent_chat.read_only')}</Text>
           </View>
           <View style={styles.headerSpacer} />
+          <Pressable
+            style={[styles.iconButton, !activeSession && styles.iconButtonDisabled]}
+            onPress={resumeSelectedSession}
+            disabled={!activeSession}
+            accessibilityRole="button"
+            accessibilityLabel={t('agent_chat.resume_selected_a11y')}
+            hitSlop={6}
+          >
+            <MaterialIcons name="play-arrow" size={17} color={activeSession ? colors.accent : colors.inactive} />
+          </Pressable>
           <Pressable
             style={styles.iconButton}
             onPress={() => void refresh()}
@@ -97,7 +141,15 @@ export default function AgentChatPane() {
             )}
           </Pressable>
         </View>
-        <SessionStrip session={activeSession} lastUpdatedAt={lastUpdatedAt} styles={styles} t={t} />
+        <SessionStrip session={activeSession} styles={styles} t={t} />
+        <SessionTabs
+          sessions={sessionTabs}
+          selectedSessionId={activeSession?.codexSessionId ?? null}
+          onSelect={setSelectedSessionId}
+          styles={styles}
+          colors={colors}
+          t={t}
+        />
       </View>
 
       {!hasTimelineEvents ? (
@@ -133,7 +185,7 @@ export default function AgentChatPane() {
 
       <View style={styles.footer}>
         <MaterialIcons name="lock-outline" size={13} color={colors.muted} />
-        <Text style={styles.footerText}>{t('agent_chat.phase1_hint')}</Text>
+        <Text style={styles.footerText}>{t('agent_chat.phase3_hint')}</Text>
       </View>
     </View>
   );
@@ -141,12 +193,10 @@ export default function AgentChatPane() {
 
 function SessionStrip({
   session,
-  lastUpdatedAt,
   styles,
   t,
 }: {
   session: AgentChatSession | null;
-  lastUpdatedAt: number | null;
   styles: ReturnType<typeof makeStyles>;
   t: (key: string, params?: Record<string, string | number>) => string;
 }) {
@@ -155,7 +205,7 @@ function SessionStrip({
   }
 
   const status = statusLabel(rawStatusToAgentStatus(session.currentStatus), session.currentStatus, t);
-  const updated = lastUpdatedAt ? formatClock(lastUpdatedAt) : formatClock(session.lastEventAt);
+  const updated = formatClock(session.lastEventAt);
 
   return (
     <View style={styles.sessionStrip}>
@@ -164,6 +214,15 @@ function SessionStrip({
       </Text>
       <Text style={styles.sessionMeta} numberOfLines={1}>
         {status}
+      </Text>
+      <Text
+        style={[
+          styles.sessionMeta,
+          session.bindingConfidence === 'reliable' ? styles.sessionBindingReliable : styles.sessionBindingMuted,
+        ]}
+        numberOfLines={1}
+      >
+        {bindingLabel(session.bindingConfidence, session.ptySessionId, t)}
       </Text>
       {session.modelName ? (
         <Text style={styles.sessionMeta} numberOfLines={1}>
@@ -179,6 +238,69 @@ function SessionStrip({
         {t('agent_chat.last_event', { time: updated })}
       </Text>
     </View>
+  );
+}
+
+function SessionTabs({
+  sessions,
+  selectedSessionId,
+  onSelect,
+  styles,
+  colors,
+  t,
+}: {
+  sessions: AgentChatSession[];
+  selectedSessionId: string | null;
+  onSelect: (sessionId: string) => void;
+  styles: ReturnType<typeof makeStyles>;
+  colors: ThemeColorPalette;
+  t: (key: string, params?: Record<string, string | number>) => string;
+}) {
+  if (sessions.length <= 1) return null;
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.sessionTabsScroll}
+      contentContainerStyle={styles.sessionTabs}
+    >
+      {sessions.map((session) => {
+        const selected = session.codexSessionId === selectedSessionId;
+        const bound = session.bindingConfidence === 'reliable';
+        return (
+          <Pressable
+            key={session.codexSessionId}
+            style={[
+              styles.sessionTab,
+              selected && styles.sessionTabSelected,
+            ]}
+            onPress={() => onSelect(session.codexSessionId)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            accessibilityLabel={t('agent_chat.session_tab_a11y', {
+              name: session.projectName || session.codexSessionId,
+            })}
+            hitSlop={4}
+          >
+            <View style={[
+              styles.sessionTabDot,
+              { backgroundColor: bound ? colors.accent : colors.inactive },
+            ]} />
+            <View style={styles.sessionTabTextWrap}>
+              <Text style={[styles.sessionTabTitle, selected && styles.sessionTabTitleSelected]} numberOfLines={1}>
+                {session.projectName || t('agent_chat.session_fallback')}
+              </Text>
+              <Text style={styles.sessionTabMeta} numberOfLines={1}>
+                {session.modelName || shortSessionId(session.codexSessionId)}
+              </Text>
+            </View>
+            <Text style={styles.sessionTabAge} numberOfLines={1}>
+              {formatAge(session.lastEventAt, t)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
   );
 }
 
@@ -342,11 +464,40 @@ function statusColor(status: AgentChatStatus | undefined, colors: ThemeColorPale
   }
 }
 
+function bindingLabel(
+  confidence: AgentChatBindingConfidence,
+  ptySessionId: string | null | undefined,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  if (confidence === 'reliable' && ptySessionId) {
+    return t('agent_chat.binding_reliable', { pty: ptySessionId });
+  }
+  if (confidence === 'candidate' && ptySessionId) {
+    return t('agent_chat.binding_candidate', { pty: ptySessionId });
+  }
+  return t('agent_chat.binding_unbound');
+}
+
 function formatClock(timestamp: number): string {
   const date = new Date(timestamp);
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes}`;
+}
+
+function formatAge(
+  timestamp: number,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  const diff = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (diff < 60) return t('time.seconds_ago_short', { count: diff });
+  if (diff < 3600) return t('time.minutes_ago_short', { count: Math.floor(diff / 60) });
+  if (diff < 86400) return t('time.hours_ago_short', { count: Math.floor(diff / 3600) });
+  return t('time.days_ago_short', { count: Math.floor(diff / 86400) });
+}
+
+function shortSessionId(sessionId: string): string {
+  return sessionId.slice(0, 8);
 }
 
 function makeStyles(colors: ThemeColorPalette) {
@@ -402,6 +553,9 @@ function makeStyles(colors: ThemeColorPalette) {
       justifyContent: 'center',
       borderRadius: 6,
     },
+    iconButtonDisabled: {
+      opacity: 0.5,
+    },
     sessionStrip: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -427,6 +581,72 @@ function makeStyles(colors: ThemeColorPalette) {
       fontFamily: F.family,
       fontSize: 7,
       lineHeight: 12,
+    },
+    sessionBindingReliable: {
+      color: colors.success,
+    },
+    sessionBindingMuted: {
+      color: colors.inactive,
+    },
+    sessionTabsScroll: {
+      flexGrow: 0,
+      marginTop: -1,
+    },
+    sessionTabs: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingRight: 2,
+    },
+    sessionTab: {
+      minWidth: 108,
+      maxWidth: 168,
+      height: 30,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 8,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: withAlpha(colors.border, 0.74),
+      backgroundColor: withAlpha(colors.surfaceHigh, 0.48),
+    },
+    sessionTabSelected: {
+      borderColor: withAlpha(colors.accent, 0.74),
+      backgroundColor: withAlpha(colors.accent, 0.13),
+    },
+    sessionTabDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    sessionTabTextWrap: {
+      flex: 1,
+      minWidth: 0,
+    },
+    sessionTabTitle: {
+      color: colors.muted,
+      fontFamily: F.family,
+      fontSize: 7,
+      fontWeight: '800',
+      lineHeight: 10,
+      letterSpacing: 0,
+    },
+    sessionTabTitleSelected: {
+      color: colors.foreground,
+    },
+    sessionTabMeta: {
+      color: colors.inactive,
+      fontFamily: F.family,
+      fontSize: 6,
+      lineHeight: 9,
+      letterSpacing: 0,
+    },
+    sessionTabAge: {
+      color: colors.inactive,
+      fontFamily: F.family,
+      fontSize: 6,
+      lineHeight: 9,
     },
     list: {
       flex: 1,

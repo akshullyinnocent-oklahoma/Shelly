@@ -21,6 +21,8 @@ function resetAgentChatStore(): void {
     jsonlWatcherRunning: false,
     sessions: [],
     events: [],
+    bindings: {},
+    codexPtyLaunches: [],
     latestSessionId: null,
     loading: false,
     error: null,
@@ -262,6 +264,254 @@ describe('agent chat store', () => {
     const statusEvents = useAgentChatStore.getState().events.filter((event) => event.kind === 'status');
     expect(statusEvents).toEqual([
       expect.objectContaining({ codexSessionId: 'session-status', text: 'IDLE' }),
+    ]);
+  });
+
+  it('binds a Codex JSONL session to a recent foreground PTY with matching cwd', async () => {
+    const baseTime = 1_811_116_000_000;
+    const cwd = '/data/data/dev.shelly.terminal/files/home';
+
+    useAgentChatStore.getState().recordCodexPtyCandidate({
+      ptySessionId: 'shelly-1',
+      shellySessionId: 'session-1',
+      cwd,
+      startedAt: baseTime - 1_000,
+      lastSeenAt: baseTime + 2_000,
+    });
+
+    mockGetScouterDebugInfo.mockResolvedValue(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'session-bound',
+        projectName: 'home',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 3_000,
+        sessionStartAt: baseTime,
+        modelName: 'gpt-5.5',
+        tokensUsed: 11,
+      }],
+      recentEvents: [{
+        eventId: 'event-context-cwd',
+        source: 'CODEX',
+        sessionId: 'session-bound',
+        timestamp: baseTime + 1,
+        eventType: 'USER_PROMPT',
+        derivedStatus: 'THINKING',
+        lastMessage: `<environment_context><cwd>${cwd}</cwd></environment_context>`,
+      }, {
+        eventId: 'event-bound-user',
+        source: 'CODEX',
+        sessionId: 'session-bound',
+        timestamp: baseTime + 2_000,
+        eventType: 'USER_PROMPT',
+        derivedStatus: 'THINKING',
+        lastMessage: 'こんにちは',
+      }],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+
+    expect(useAgentChatStore.getState().sessions).toEqual([
+      expect.objectContaining({
+        codexSessionId: 'session-bound',
+        ptySessionId: 'shelly-1',
+        shellySessionId: 'session-1',
+        bindingConfidence: 'reliable',
+        cwd,
+      }),
+    ]);
+    expect(useAgentChatStore.getState().events.filter((event) => event.kind === 'user_message')).toEqual([
+      expect.objectContaining({
+        text: 'こんにちは',
+        ptySessionId: 'shelly-1',
+      }),
+    ]);
+  });
+
+  it('does not reliably bind a JSONL session to a PTY candidate from another cwd', async () => {
+    const baseTime = 1_811_117_000_000;
+
+    useAgentChatStore.getState().recordCodexPtyCandidate({
+      ptySessionId: 'shelly-1',
+      shellySessionId: 'session-1',
+      cwd: '/data/data/dev.shelly.terminal/files/home',
+      startedAt: baseTime,
+      lastSeenAt: baseTime,
+    });
+
+    mockGetScouterDebugInfo.mockResolvedValue(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'session-unbound',
+        projectName: 'project',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 500,
+        sessionStartAt: baseTime,
+        cwd: '/data/data/dev.shelly.terminal/files/project',
+      }],
+      recentEvents: [],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+
+    expect(useAgentChatStore.getState().sessions).toEqual([
+      expect.objectContaining({
+        codexSessionId: 'session-unbound',
+        ptySessionId: null,
+        bindingConfidence: 'none',
+      }),
+    ]);
+  });
+
+  it('clears event PTY ids when a previously bound session becomes unbound', async () => {
+    const baseTime = 1_811_118_000_000;
+    const homeCwd = '/data/data/dev.shelly.terminal/files/home';
+
+    useAgentChatStore.getState().recordCodexPtyCandidate({
+      ptySessionId: 'shelly-1',
+      shellySessionId: 'session-1',
+      cwd: homeCwd,
+      startedAt: baseTime,
+      lastSeenAt: baseTime,
+    });
+
+    mockGetScouterDebugInfo.mockResolvedValueOnce(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'session-rebound',
+        projectName: 'home',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 1_000,
+        sessionStartAt: baseTime,
+        cwd: homeCwd,
+      }],
+      recentEvents: [{
+        eventId: 'event-rebound-user',
+        source: 'CODEX',
+        sessionId: 'session-rebound',
+        timestamp: baseTime + 500,
+        eventType: 'USER_PROMPT',
+        derivedStatus: 'THINKING',
+        lastMessage: 'binding test',
+      }],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+    expect(useAgentChatStore.getState().events.find((event) => event.kind === 'user_message')).toEqual(
+      expect.objectContaining({ ptySessionId: 'shelly-1' }),
+    );
+
+    mockGetScouterDebugInfo.mockResolvedValueOnce(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'session-rebound',
+        projectName: 'project',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 2_000,
+        sessionStartAt: baseTime,
+        cwd: '/data/data/dev.shelly.terminal/files/project',
+      }],
+      recentEvents: [],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+
+    expect(useAgentChatStore.getState().sessions).toEqual([
+      expect.objectContaining({ codexSessionId: 'session-rebound', bindingConfidence: 'none' }),
+    ]);
+    expect(useAgentChatStore.getState().events.find((event) => event.kind === 'user_message')).toEqual(
+      expect.objectContaining({ ptySessionId: undefined }),
+    );
+  });
+
+  it('does not keep a reliable binding after its PTY launch candidate disappears', async () => {
+    const baseTime = 1_811_119_000_000;
+    const cwd = '/data/data/dev.shelly.terminal/files/home';
+
+    useAgentChatStore.getState().recordCodexPtyCandidate({
+      ptySessionId: 'shelly-1',
+      shellySessionId: 'session-1',
+      cwd,
+      startedAt: baseTime,
+      lastSeenAt: baseTime,
+    });
+
+    mockGetScouterDebugInfo.mockResolvedValue(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'session-stale',
+        projectName: 'home',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 500,
+        sessionStartAt: baseTime,
+        cwd,
+      }],
+      recentEvents: [],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+    expect(useAgentChatStore.getState().sessions[0]).toEqual(
+      expect.objectContaining({ bindingConfidence: 'reliable', ptySessionId: 'shelly-1' }),
+    );
+
+    useAgentChatStore.setState({ codexPtyLaunches: [] });
+    await useAgentChatStore.getState().refresh();
+
+    expect(useAgentChatStore.getState().sessions[0]).toEqual(
+      expect.objectContaining({ bindingConfidence: 'none', ptySessionId: null }),
+    );
+  });
+
+  it('uses a PTY launch for only one reliable Codex session', async () => {
+    const baseTime = 1_811_120_000_000;
+    const cwd = '/data/data/dev.shelly.terminal/files/home';
+
+    useAgentChatStore.getState().recordCodexPtyCandidate({
+      ptySessionId: 'shelly-1',
+      shellySessionId: 'session-1',
+      cwd,
+      startedAt: baseTime,
+      lastSeenAt: baseTime + 3_000,
+    });
+
+    mockGetScouterDebugInfo.mockResolvedValue(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'session-newer',
+        projectName: 'home',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 2_000,
+        sessionStartAt: baseTime + 1_000,
+        cwd,
+      }, {
+        source: 'CODEX',
+        sessionId: 'session-older',
+        projectName: 'home',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 1_000,
+        sessionStartAt: baseTime,
+        cwd,
+      }],
+      recentEvents: [],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+
+    expect(useAgentChatStore.getState().sessions).toEqual([
+      expect.objectContaining({ codexSessionId: 'session-newer', bindingConfidence: 'reliable', ptySessionId: 'shelly-1' }),
+      expect.objectContaining({ codexSessionId: 'session-older', bindingConfidence: 'none', ptySessionId: null }),
     ]);
   });
 });

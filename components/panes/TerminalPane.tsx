@@ -199,20 +199,6 @@ export default function TerminalScreen() {
     creatingSessions.current.add(session.id);
 
     try {
-      // Check if emulator already exists
-      const hasEmu = await TerminalEmulator.hasEmulator(session.nativeSessionId).catch(() => false);
-      if (hasEmu) {
-        useTerminalStore.setState((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.id === session.id ? { ...s, sessionStatus: 'alive' as const, isAlive: true } : s
-          ),
-        }));
-        return;
-      }
-
-      // Destroy any stale session
-      try { await TerminalEmulator.destroySession(session.nativeSessionId); } catch {}
-
       // Create session via JNI forkpty. If a live session with the same id
       // already exists in the Service-owned registry (Case B — the foreground
       // service kept the forked PTY child alive across app background / RN
@@ -234,7 +220,14 @@ export default function TerminalScreen() {
       // Update session status
       useTerminalStore.setState((state) => ({
         sessions: state.sessions.map((s) =>
-          s.id === session.id ? { ...s, sessionStatus: 'alive' as const, isAlive: true } : s
+          s.id === session.id
+            ? {
+                ...s,
+                activeCli: resumedLive ? s.activeCli : null,
+                sessionStatus: 'alive' as const,
+                isAlive: true,
+              }
+            : s
         ),
       }));
 
@@ -267,7 +260,7 @@ export default function TerminalScreen() {
       Alert.alert('Terminal Error', String(err?.message || err));
       useTerminalStore.setState((state) => ({
         sessions: state.sessions.map((s) =>
-          s.id === session.id ? { ...s, sessionStatus: 'exited' as const, isAlive: false } : s
+          s.id === session.id ? { ...s, activeCli: null, sessionStatus: 'exited' as const, isAlive: false } : s
         ),
       }));
     } finally {
@@ -452,8 +445,21 @@ export default function TerminalScreen() {
 
   // ProcessGuard: listen for session exits with signal 9 (SIGKILL)
   useEffect(() => {
-    const sub = TerminalEmulator.addListener('onSessionExit', (event: { sessionId: string; exitCode: number; signal: number }) => {
-      if (isProcessKill(event.signal, event.exitCode)) {
+    const sub = TerminalEmulator.addListener('onSessionExit', (event: { sessionId: string; exitCode: number; signal?: number }) => {
+      useTerminalStore.setState((state) => ({
+        sessions: state.sessions.map((session) =>
+          session.nativeSessionId === event.sessionId
+            ? {
+                ...session,
+                activeCli: null,
+                sessionStatus: 'exited' as const,
+                isAlive: false,
+              }
+            : session
+        ),
+      }));
+
+      if (isProcessKill(event.signal ?? 0, event.exitCode)) {
         killCountRef.current += 1;
         if (killCountRef.current >= 2) {
           setShowProcessGuard(true);
@@ -487,6 +493,7 @@ export default function TerminalScreen() {
   useEffect(() => {
     if (!pendingCommand) return;
     if (!activeSession?.id || !activeSession.nativeSessionId) return;
+    if (activeSession.sessionStatus !== 'alive' || !activeSession.isAlive) return;
 
     const command = typeof pendingCommand === 'string'
       ? pendingCommand
@@ -506,11 +513,32 @@ export default function TerminalScreen() {
     }
 
     const target = activeSession.nativeSessionId;
-    TerminalEmulator.writeToSession(target, command).catch((err) => {
-      console.warn('[Terminal] pendingCommand writeToSession failed:', err);
-    });
-    useTerminalStore.getState().clearPendingCommand(pendingId);
-  }, [pendingCommand, activeSession?.id, activeSession?.nativeSessionId]);
+    TerminalEmulator.writeToSession(target, command)
+      .then(() => {
+        useTerminalStore.getState().clearPendingCommand(pendingId);
+      })
+      .catch((err) => {
+        console.warn('[Terminal] pendingCommand writeToSession failed:', err);
+        useTerminalStore.setState((state) => ({
+          sessions: state.sessions.map((session) =>
+            session.id === activeSession.id
+              ? {
+                  ...session,
+                  activeCli: null,
+                  sessionStatus: 'exited' as const,
+                  isAlive: false,
+                }
+              : session
+          ),
+        }));
+      });
+  }, [
+    pendingCommand,
+    activeSession?.id,
+    activeSession?.nativeSessionId,
+    activeSession?.sessionStatus,
+    activeSession?.isAlive,
+  ]);
 
   // FirstMate disabled — CLI tools are pre-installed, MOTD is sufficient
   // useEffect(() => {
