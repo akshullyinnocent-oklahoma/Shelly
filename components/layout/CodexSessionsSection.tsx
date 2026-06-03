@@ -1,5 +1,14 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type GestureResponderEvent,
+} from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAddPane } from '@/hooks/use-add-pane';
 import { useAgentChatStore, type AgentChatSession } from '@/store/agent-chat-store';
@@ -23,6 +32,9 @@ export function CodexSessionsSection({ isOpen, onToggle, iconsOnly }: Props) {
   const startPolling = useAgentChatStore((s) => s.startPolling);
   const stopPolling = useAgentChatStore((s) => s.stopPolling);
   const dismissSession = useAgentChatStore((s) => s.dismissSession);
+  const renameSession = useAgentChatStore((s) => s.renameSession);
+  const [renamingSession, setRenamingSession] = useState<AgentChatSession | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
 
   useEffect(() => {
     if (!isOpen || iconsOnly) return undefined;
@@ -61,65 +73,155 @@ export function CodexSessionsSection({ isOpen, onToggle, iconsOnly }: Props) {
     );
   }, [dismissSession, t]);
 
+  const beginRename = useCallback((session: AgentChatSession) => {
+    setRenamingSession(session);
+    setRenameDraft(session.projectName || t('agent_chat.session_fallback'));
+  }, [t]);
+
+  const closeRename = useCallback(() => {
+    setRenamingSession(null);
+    setRenameDraft('');
+  }, []);
+
+  const confirmRename = useCallback(() => {
+    if (!renamingSession) return;
+    const title = renameDraft.trim();
+    if (!title) return;
+    renameSession(renamingSession.codexSessionId, title);
+    closeRename();
+  }, [closeRename, renameDraft, renameSession, renamingSession]);
+
+  const renameSaveDisabled = renameDraft.trim().length === 0;
+
   return (
-    <SidebarSection
-      title={t('sidebar.codex_sessions')}
-      icon="history"
-      isOpen={isOpen}
-      onToggle={onToggle}
-      badge={codexSessions.length}
-      iconsOnly={iconsOnly}
-    >
-      {codexSessions.length === 0 ? (
-        <Text style={styles.empty}>
-          {loading ? t('agent_chat.loading') : t('sidebar.codex_sessions_empty')}
-        </Text>
-      ) : (
-        codexSessions.map((session) => (
-          <Pressable
-            key={session.codexSessionId}
-            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            onPress={() => resume(session)}
-            hitSlop={4}
-            accessibilityRole="button"
-            accessibilityLabel={t('sidebar.codex_resume_a11y', {
-              name: session.projectName || session.codexSessionId,
-            })}
-          >
-            <View style={[
-              styles.dot,
-              { backgroundColor: session.bindingConfidence === 'reliable' ? C.accent : C.text3 },
-            ]} />
-            <View style={styles.info}>
-              <Text style={styles.name} numberOfLines={1}>
-                {(session.projectName || t('agent_chat.session_fallback')).toUpperCase()}
-              </Text>
-              <Text style={styles.meta} numberOfLines={1}>
-                {session.modelName || shortSessionId(session.codexSessionId)}
-              </Text>
-            </View>
-            <Text style={styles.age} numberOfLines={1}>
-              {formatAge(session.lastEventAt, t)}
-            </Text>
-            <MaterialIcons name="play-arrow" size={12} color={C.accent} />
+    <>
+      <SidebarSection
+        title={t('sidebar.codex_sessions')}
+        icon="history"
+        isOpen={isOpen}
+        onToggle={onToggle}
+        badge={codexSessions.length}
+        iconsOnly={iconsOnly}
+      >
+        {codexSessions.length === 0 ? (
+          <Text style={styles.empty}>
+            {loading ? t('agent_chat.loading') : t('sidebar.codex_sessions_empty')}
+          </Text>
+        ) : (
+          codexSessions.map((session) => (
             <Pressable
-              style={styles.deleteButton}
-              onPress={(event: GestureResponderEvent) => {
-                event.stopPropagation();
-                confirmDismiss(session);
-              }}
+              key={session.codexSessionId}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              onPress={() => resume(session)}
+              hitSlop={4}
               accessibilityRole="button"
-              accessibilityLabel={t('agent_chat.dismiss_session_a11y', {
+              accessibilityLabel={t('sidebar.codex_resume_a11y', {
                 name: session.projectName || session.codexSessionId,
               })}
-              hitSlop={6}
             >
-              <MaterialIcons name="close" size={11} color={C.text3} />
+              <View style={[
+                styles.dot,
+                { backgroundColor: session.bindingConfidence === 'reliable' ? C.accent : C.text3 },
+              ]} />
+              <View style={styles.info}>
+                <Text style={styles.name} numberOfLines={1}>
+                  {(session.projectName || t('agent_chat.session_fallback')).toUpperCase()}
+                </Text>
+                <Text style={styles.meta} numberOfLines={1}>
+                  {session.modelName || shortSessionId(session.codexSessionId)}
+                </Text>
+              </View>
+              <Text style={styles.age} numberOfLines={1}>
+                {formatAge(session.lastEventAt, t)}
+              </Text>
+              <MaterialIcons name="play-arrow" size={12} color={C.accent} />
+              <Pressable
+                style={styles.actionButton}
+                onPress={(event: GestureResponderEvent) => {
+                  event.stopPropagation();
+                  beginRename(session);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('agent_chat.rename_session_a11y', {
+                  name: session.projectName || session.codexSessionId,
+                })}
+                hitSlop={6}
+              >
+                <MaterialIcons name="edit" size={11} color={C.text3} />
+              </Pressable>
+              <Pressable
+                style={styles.actionButton}
+                onPress={(event: GestureResponderEvent) => {
+                  event.stopPropagation();
+                  confirmDismiss(session);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('agent_chat.dismiss_session_a11y', {
+                  name: session.projectName || session.codexSessionId,
+                })}
+                hitSlop={6}
+              >
+                <MaterialIcons name="close" size={11} color={C.text3} />
+              </Pressable>
             </Pressable>
-          </Pressable>
-        ))
-      )}
-    </SidebarSection>
+          ))
+        )}
+      </SidebarSection>
+      <Modal
+        transparent
+        visible={Boolean(renamingSession)}
+        animationType="fade"
+        onRequestClose={closeRename}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.renameDialog}>
+            <Text style={styles.renameTitle}>{t('agent_chat.rename_session_title')}</Text>
+            <Text style={styles.renameBody}>
+              {t('agent_chat.rename_session_body', {
+                name: renamingSession?.projectName || renamingSession?.codexSessionId || t('agent_chat.session_fallback'),
+              })}
+            </Text>
+            <TextInput
+              value={renameDraft}
+              onChangeText={setRenameDraft}
+              placeholder={t('agent_chat.rename_session_placeholder')}
+              placeholderTextColor={C.text3}
+              style={styles.renameInput}
+              autoFocus
+              selectTextOnFocus
+              maxLength={48}
+              returnKeyType="done"
+              onSubmitEditing={confirmRename}
+              accessibilityLabel={t('agent_chat.rename_session_title')}
+            />
+            <View style={styles.renameActions}>
+              <Pressable
+                style={({ pressed }) => [styles.renameButton, pressed && styles.rowPressed]}
+                onPress={closeRename}
+                accessibilityRole="button"
+              >
+                <Text style={styles.renameButtonText}>{t('common.cancel')}</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.renameButton,
+                  styles.renameButtonPrimary,
+                  renameSaveDisabled && styles.renameButtonDisabled,
+                  pressed && !renameSaveDisabled && styles.renameButtonPressed,
+                ]}
+                onPress={confirmRename}
+                disabled={renameSaveDisabled}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.renameButtonText, styles.renameButtonPrimaryText]}>
+                  {t('common.save')}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -193,7 +295,7 @@ const styles = StyleSheet.create({
     color: C.text2,
     letterSpacing: 0.3,
   },
-  deleteButton: {
+  actionButton: {
     width: 18,
     height: 18,
     borderRadius: 5,
@@ -207,5 +309,82 @@ const styles = StyleSheet.create({
     paddingHorizontal: P.sidebarItem.px,
     paddingVertical: 6,
     letterSpacing: 0.3,
+  },
+  modalBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 18,
+    backgroundColor: withAlpha('#000000', 0.72),
+  },
+  renameDialog: {
+    width: '100%',
+    maxWidth: 360,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 6,
+    backgroundColor: C.bgSurface,
+    padding: 14,
+    gap: 10,
+  },
+  renameTitle: {
+    fontSize: F.sidebarSection.size,
+    fontFamily: F.family,
+    fontWeight: F.sidebarSection.weight,
+    color: C.text1,
+    letterSpacing: 0,
+  },
+  renameBody: {
+    fontSize: F.sidebarItem.size,
+    fontFamily: F.family,
+    color: C.text3,
+    lineHeight: 18,
+    letterSpacing: 0,
+  },
+  renameInput: {
+    height: 38,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.badge,
+    paddingHorizontal: 10,
+    fontSize: F.sidebarItem.size,
+    fontFamily: F.family,
+    color: C.text1,
+    backgroundColor: C.bgDeep,
+  },
+  renameActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  renameButton: {
+    minWidth: 74,
+    height: 32,
+    borderRadius: R.badge,
+    borderWidth: 1,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  renameButtonPrimary: {
+    borderColor: C.accent,
+    backgroundColor: withAlpha(C.accent, 0.14),
+  },
+  renameButtonPressed: {
+    backgroundColor: withAlpha(C.accent, 0.24),
+  },
+  renameButtonDisabled: {
+    opacity: 0.45,
+  },
+  renameButtonText: {
+    fontSize: F.sidebarItem.size,
+    fontFamily: F.family,
+    fontWeight: F.sidebarItem.weight,
+    color: C.text2,
+    letterSpacing: 0,
+  },
+  renameButtonPrimaryText: {
+    color: C.text1,
   },
 });

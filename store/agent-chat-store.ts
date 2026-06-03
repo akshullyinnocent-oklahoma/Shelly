@@ -125,6 +125,7 @@ type AgentChatState = {
   bindings: Record<string, AgentChatBinding>;
   codexPtyLaunches: CodexPtyLaunch[];
   dismissedSessionIds: string[];
+  sessionTitleOverrides: Record<string, string>;
   latestSessionId: string | null;
   loading: boolean;
   error: string | null;
@@ -132,6 +133,7 @@ type AgentChatState = {
   ingestNativeEvent: (payload: NativeScouterEventPayload) => void;
   recordCodexPtyCandidate: (candidate: CodexPtyCandidate) => void;
   dismissSession: (sessionId: string) => void;
+  renameSession: (sessionId: string, title: string) => void;
   refresh: () => Promise<void>;
   startPolling: () => void;
   stopPolling: () => void;
@@ -145,17 +147,21 @@ type NativeScouterEventPayload = {
 
 const MAX_EVENTS = 200;
 const MAX_DISMISSED_SESSIONS = 200;
+const MAX_SESSION_TITLE_LENGTH = 48;
 const REFRESH_MS = 5_000;
 const DEDUPE_WINDOW_MS = 2_000;
 const BINDING_MATCH_WINDOW_MS = 15 * 60_000;
 const PTY_LAUNCH_TTL_MS = 2 * 60 * 60_000;
 const MAX_PTY_LAUNCHES = 12;
 const DISMISSED_SESSIONS_STORAGE_KEY = 'shelly_agent_chat_dismissed_sessions';
+const SESSION_TITLES_STORAGE_KEY = 'shelly_agent_chat_session_titles';
 let pollingRefCount = 0;
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
 let liveSubscription: { remove(): void } | null = null;
 let dismissedSessionsHydrated = false;
 let dismissedSessionsHydratePromise: Promise<void> | null = null;
+let sessionTitlesHydrated = false;
+let sessionTitlesHydratePromise: Promise<void> | null = null;
 
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   enabled: false,
@@ -165,6 +171,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   bindings: {},
   codexPtyLaunches: [],
   dismissedSessionIds: [],
+  sessionTitleOverrides: {},
   latestSessionId: null,
   loading: false,
   error: null,
@@ -196,7 +203,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const sessionCwdById = collectRecentEventCwd(parsedEvent ? [parsedEvent] : []);
     const sessionsWithCwd = applyRecentEventCwd(sessions, sessionCwdById);
     const bindings = reconcileBindings(sessionsWithCwd, get().codexPtyLaunches, get().bindings);
-    const boundSessions = applyBindingsToSessions(sessionsWithCwd, bindings);
+    const boundSessions = applySessionTitleOverrides(
+      applyBindingsToSessions(sessionsWithCwd, bindings),
+      get().sessionTitleOverrides,
+    );
     const incomingEvents = [
       ...(parsedSession ? sessionToEvents(parsedSession) : []),
       ...(parsedEvent ? scouterRecentEventToAgentChatEvent(parsedEvent) : []),
@@ -225,7 +235,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set({
       codexPtyLaunches: launches,
       bindings,
-      sessions: applyBindingsToSessions(get().sessions, bindings),
+      sessions: applySessionTitleOverrides(
+        applyBindingsToSessions(get().sessions, bindings),
+        get().sessionTitleOverrides,
+      ),
       events: applyBindingsToEvents(get().events, bindings),
     });
   },
@@ -252,10 +265,33 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     persistDismissedSessionIds(dismissedSessionIds);
   },
 
+  renameSession: (sessionId, title) => {
+    const normalized = normalizeCodexSessionId(sessionId);
+    const nextTitle = normalizeSessionTitle(title);
+    if (!normalized || !nextTitle) return;
+    const sessionTitleOverrides = {
+      ...get().sessionTitleOverrides,
+      [normalized]: nextTitle,
+    };
+    const sessions = get().sessions.map((session) => (
+      normalizeCodexSessionId(session.codexSessionId) === normalized
+        ? { ...session, projectName: nextTitle }
+        : session
+    ));
+    set({
+      sessionTitleOverrides,
+      sessions,
+      latestSessionId: sessions[0]?.codexSessionId ?? null,
+      lastUpdatedAt: Date.now(),
+    });
+    persistSessionTitleOverrides(sessionTitleOverrides);
+  },
+
   refresh: async () => {
     set({ loading: true, error: null });
     try {
       await hydrateDismissedSessionIds(set, get);
+      await hydrateSessionTitleOverrides(set, get);
       const dismissedIds = new Set(get().dismissedSessionIds);
       const raw = await (
         TerminalEmulator.refreshScouter?.()
@@ -274,7 +310,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       });
       const launches = prunePtyLaunches(get().codexPtyLaunches, Date.now());
       const bindings = reconcileBindings(sessions, launches, get().bindings);
-      const boundSessions = applyBindingsToSessions(sessions, bindings);
+      const boundSessions = applySessionTitleOverrides(
+        applyBindingsToSessions(sessions, bindings),
+        get().sessionTitleOverrides,
+      );
       const newEvents = [
         ...codexSessions.flatMap(sessionToEvents),
         ...recentEvents.flatMap(scouterRecentEventToAgentChatEvent),
@@ -307,6 +346,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   startPolling: () => {
     pollingRefCount += 1;
     void hydrateDismissedSessionIds(set, get);
+    void hydrateSessionTitleOverrides(set, get);
     startLiveSubscription();
     if (pollingTimer !== null) return;
     void get().refresh();
@@ -392,6 +432,37 @@ async function hydrateDismissedSessionIds(
   return dismissedSessionsHydratePromise;
 }
 
+async function hydrateSessionTitleOverrides(
+  setState: (partial: Partial<AgentChatState>) => void,
+  getState: () => AgentChatState,
+): Promise<void> {
+  if (sessionTitlesHydrated) return;
+  if (sessionTitlesHydratePromise) return sessionTitlesHydratePromise;
+  sessionTitlesHydratePromise = AsyncStorage.getItem(SESSION_TITLES_STORAGE_KEY)
+    .then((raw) => {
+      const stored = normalizeSessionTitleOverrides(parseJsonObject<unknown>(raw ?? undefined));
+      const sessionTitleOverrides = {
+        ...stored,
+        ...getState().sessionTitleOverrides,
+      };
+      const sessions = applySessionTitleOverrides(getState().sessions, sessionTitleOverrides);
+      setState({
+        sessionTitleOverrides,
+        sessions,
+        latestSessionId: sessions[0]?.codexSessionId ?? null,
+      });
+      sessionTitlesHydrated = true;
+    })
+    .catch((error) => {
+      sessionTitlesHydrated = true;
+      logError('AgentChatStore', 'session title hydration failed', error);
+    })
+    .finally(() => {
+      sessionTitlesHydratePromise = null;
+    });
+  return sessionTitlesHydratePromise;
+}
+
 function persistDismissedSessionIds(sessionIds: string[]): void {
   AsyncStorage.setItem(
     DISMISSED_SESSIONS_STORAGE_KEY,
@@ -399,6 +470,13 @@ function persistDismissedSessionIds(sessionIds: string[]): void {
   ).catch((error) => {
     logError('AgentChatStore', 'dismissed session persist failed', error);
   });
+}
+
+function persistSessionTitleOverrides(overrides: Record<string, string>): void {
+  AsyncStorage.setItem(SESSION_TITLES_STORAGE_KEY, JSON.stringify(overrides))
+    .catch((error) => {
+      logError('AgentChatStore', 'session title persist failed', error);
+    });
 }
 
 function parseNativeScouterPayload(payload: NativeScouterEventPayload): {
@@ -516,6 +594,34 @@ function normalizeCodexSessionId(sessionId: string | null | undefined): string {
   const trimmed = sessionId?.trim() ?? '';
   return /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/.exec(trimmed)?.[1]
     ?? trimmed;
+}
+
+function normalizeSessionTitle(title: string): string {
+  return title.trim().replace(/\s+/g, ' ').slice(0, MAX_SESSION_TITLE_LENGTH);
+}
+
+function normalizeSessionTitleOverrides(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const next: Record<string, string> = {};
+  for (const [sessionId, title] of Object.entries(value)) {
+    const normalizedSessionId = normalizeCodexSessionId(sessionId);
+    const normalizedTitle = typeof title === 'string' ? normalizeSessionTitle(title) : '';
+    if (normalizedSessionId && normalizedTitle) {
+      next[normalizedSessionId] = normalizedTitle;
+    }
+  }
+  return next;
+}
+
+function applySessionTitleOverrides(
+  sessions: AgentChatSession[],
+  overrides: Record<string, string>,
+): AgentChatSession[] {
+  if (Object.keys(overrides).length === 0) return sessions;
+  return sessions.map((session) => {
+    const title = overrides[normalizeCodexSessionId(session.codexSessionId)];
+    return title ? { ...session, projectName: title } : session;
+  });
 }
 
 function toAgentChatSession(session: ScouterSession, cwdOverride?: string | null): AgentChatSession {

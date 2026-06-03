@@ -368,9 +368,9 @@ patchCodex(libDir);
     //     auto-savepoint commits stop failing with "Author identity
     //     unknown" (bug #100).
     //  42: codex TUI wiring — codex() bash function routes bare/free-form
-    //     invocation to `codex_tui` (new LibExtractor entry, upstream
-    //     ratatui-based REPL) and known subcommands (exec/resume/review/
-    //     help/mcp/completion/login/logout) to `codex_exec` for 1-shot
+    //     invocation and `resume` to `codex_tui` (new LibExtractor entry,
+    //     upstream ratatui-based REPL) and known non-interactive subcommands
+    //     (exec/review/help/mcp/completion/login/logout) to `codex_exec` for 1-shot
     //     execution. Fixes bug #114 "codex-termux has no interactive mode"
     //     — the TUI binary was always shipped in the npm tarball but CI
     //     was only copying codex-exec.bin into jniLibs.
@@ -1039,7 +1039,7 @@ patchCodex(libDir);
     // 218: Let verified app-data Codex runtime updates take over by default,
     //      gated by .healthy + manifest + executable checks, with bundled APK
     //      Codex as the automatic fallback.
-    private const val BASHRC_VERSION = 221
+    private const val BASHRC_VERSION = 222
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -1606,7 +1606,16 @@ patchCodex(libDir);
             sb.appendLine("    echo \"codex: codex_exec binary missing at \$__exec\" >&2")
             sb.appendLine("    exit 127")
             sb.appendLine("    ;;")
-            sb.appendLine("  resume|review)")
+            sb.appendLine("  resume)")
+            sb.appendLine("    [ \"\$__runtime_ready\" = \"1\" ] && __tui=\"\$__runtime_tui\"")
+            sb.appendLine("    if [ -x \"\$__tui\" ]; then")
+            sb.appendLine("      __codex_bin_dir=\"\${__tui%/*}\"")
+            sb.appendLine("      SHELLY_LIB_DIR=\"\$SHELLY_LIB_DIR\" SHELLY_CODEX_EXEC_PATH=\"\$__tui\" SHELLY_CODEX_PROC_EXE_SHIM=1 SHELLY_CODEX_PROC_EXE_OPEN_SHIM=1 LD_PRELOAD=\"\$SHELLY_LIB_DIR/libexec_wrapper.so\" LD_LIBRARY_PATH=\"\$__codex_bin_dir:\$SHELLY_LIB_DIR\" exec /system/bin/linker64 \"\$__tui\" \"\$@\"")
+            sb.appendLine("    fi")
+            sb.appendLine("    echo \"codex: codex_tui binary missing at \$__tui\" >&2")
+            sb.appendLine("    exit 127")
+            sb.appendLine("    ;;")
+            sb.appendLine("  review)")
             sb.appendLine("    [ \"\$__runtime_ready\" = \"1\" ] && __exec=\"\$__runtime_exec\"")
             sb.appendLine("    if [ -x \"\$__exec\" ]; then")
             sb.appendLine("      __shelly_codex_prepare_exec_args \"\$@\"")
@@ -1971,9 +1980,10 @@ patchCodex(libDir);
             sb.appendLine("})();")
             sb.appendLine("__SHELLY_NODE_COMPAT_PRELOAD__")
             sb.appendLine("__shelly_chmod 600 \"\$__shelly_node_compat_preload\" 2>/dev/null || true")
-            // codex: route `codex` (no args / options / bare prompt) to the
-            // full ratatui TUI binary, and known `exec/resume/review/help`
-            // subcommands to the lighter 1-shot exec binary. Both ship in the
+            // codex: route `codex` (no args / options / bare prompt) and
+            // `codex resume` to the full ratatui TUI binary, and known
+            // non-interactive `exec/review/help` subcommands to the lighter
+            // 1-shot exec binary. Both ship in the
             // pinned codex-termux tarball but Shelly historically
             // only extracted codex_exec; codex_tui is added in v42+.
             // Errors out with guidance if a required binary is missing rather
@@ -2106,6 +2116,8 @@ patchCodex(libDir);
             sb.appendLine("  # auth via the separate codex-login pure-JS helper since the fork")
             sb.appendLine("  # compiled out device-auth. mcp/completion are hit through TUI")
             sb.appendLine("  # too since the fork's help output only exposes exec/resume/review.)")
+            sb.appendLine("  # `resume` must stay on the TUI binary; codex_exec treats it as a")
+            sb.appendLine("  # non-interactive command and errors with \"No prompt provided\".")
             sb.appendLine("  # _run already invokes /system/bin/linker64 \"\$@\", so we pass the")
             sb.appendLine("  # binary path as first arg (NOT prepending linker64 again).")
             sb.appendLine("  case \"\$__dispatch\" in")
@@ -2168,7 +2180,22 @@ patchCodex(libDir);
             sb.appendLine("        return 127")
             sb.appendLine("      fi")
             sb.appendLine("      ;;")
-            sb.appendLine("    resume|review)")
+            sb.appendLine("    resume)")
+            sb.appendLine("      local __chosen_tui=\"\$__tui\"")
+            sb.appendLine("      [ \"\$__runtime_ready\" = \"1\" ] && __chosen_tui=\"\$__runtime_tui\"")
+            sb.appendLine("      if [ -x \"\$__chosen_tui\" ]; then")
+            sb.appendLine("        __shelly_paste_tui_begin")
+            sb.appendLine("        local __chosen_tui_dir=\"\${__chosen_tui%/*}\"")
+            sb.appendLine("        SHELLY_LIB_DIR=\"$libDir\" SHELLY_LD_LIBRARY_PATH=\"\$__chosen_tui_dir:$libDir\" SHELLY_CODEX_EXEC_PATH=\"\$__chosen_tui\" SHELLY_CODEX_PROC_EXE_SHIM=1 SHELLY_CODEX_PROC_EXE_OPEN_SHIM=1 LD_PRELOAD=\"$libDir/libexec_wrapper.so\" _run \"\$__chosen_tui\" \"\$@\"")
+            sb.appendLine("        local __codex_tui_rc=\$?")
+            sb.appendLine("        __shelly_paste_tui_end")
+            sb.appendLine("        return \$__codex_tui_rc")
+            sb.appendLine("      else")
+            sb.appendLine("        echo \"codex: codex_tui binary missing at \$__tui — upgrade to APK v42+ or reinstall\" >&2")
+            sb.appendLine("        return 127")
+            sb.appendLine("      fi")
+            sb.appendLine("      ;;")
+            sb.appendLine("    review)")
             sb.appendLine("      local __chosen_exec=\"\$__exec\"")
             sb.appendLine("      [ \"\$__runtime_ready\" = \"1\" ] && __chosen_exec=\"\$__runtime_exec\"")
             sb.appendLine("      if [ -x \"\$__chosen_exec\" ]; then")

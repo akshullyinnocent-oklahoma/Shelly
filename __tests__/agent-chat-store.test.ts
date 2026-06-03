@@ -40,6 +40,7 @@ function resetAgentChatStore(): void {
     bindings: {},
     codexPtyLaunches: [],
     dismissedSessionIds: [],
+    sessionTitleOverrides: {},
     latestSessionId: null,
     loading: false,
     error: null,
@@ -547,6 +548,59 @@ describe('agent chat store', () => {
       expect.objectContaining({ codexSessionId: 'session-newer', bindingConfidence: 'reliable', ptySessionId: 'shelly-1' }),
       expect.objectContaining({ codexSessionId: 'session-older', bindingConfidence: 'none', ptySessionId: null }),
     ]);
+  });
+
+  it('renames Codex sessions and keeps the title across refresh', async () => {
+    const baseTime = 1_811_120_500_000;
+    mockGetScouterDebugInfo.mockResolvedValueOnce(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'rollout-2026-06-03T11-42-51-019e8b5c-bc3f-7582-88f6-e8a26ba24d66',
+        projectName: 'home',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime,
+        sessionStartAt: baseTime,
+        modelName: 'gpt-5.5',
+      }],
+      recentEvents: [],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+    useAgentChatStore.getState().renameSession(
+      'rollout-2026-06-03T11-42-51-019e8b5c-bc3f-7582-88f6-e8a26ba24d66',
+      'Shelly Dev',
+    );
+
+    expect(useAgentChatStore.getState().sessions[0]).toEqual(
+      expect.objectContaining({ projectName: 'Shelly Dev' }),
+    );
+    expect(mockAsyncStorageSetItem).toHaveBeenCalledWith(
+      'shelly_agent_chat_session_titles',
+      JSON.stringify({ '019e8b5c-bc3f-7582-88f6-e8a26ba24d66': 'Shelly Dev' }),
+    );
+
+    mockGetScouterDebugInfo.mockResolvedValueOnce(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: '019e8b5c-bc3f-7582-88f6-e8a26ba24d66',
+        projectName: 'home',
+        currentStatus: 'IDLE',
+        lastEventAt: baseTime + 1_000,
+        sessionStartAt: baseTime,
+        modelName: 'gpt-5.5',
+      }],
+      recentEvents: [],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+
+    expect(useAgentChatStore.getState().sessions[0]).toEqual(
+      expect.objectContaining({ projectName: 'Shelly Dev' }),
+    );
   });
 
   it('dismisses Codex sessions and keeps them hidden across refresh and live events', async () => {
