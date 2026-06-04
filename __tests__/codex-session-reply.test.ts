@@ -217,7 +217,7 @@ describe('codex session replies', () => {
     }), 'allow');
 
     expect(result.status).toBe('sent');
-    expect(mockFocusTerminalSession).toHaveBeenCalledWith('terminal-a');
+    expect(mockFocusTerminalSession).not.toHaveBeenCalled();
     expect(mockWriteToSession).toHaveBeenCalledWith('shelly-1', 'y\r');
   });
 
@@ -229,7 +229,7 @@ describe('codex session replies', () => {
     }), 'deny');
 
     expect(result.status).toBe('sent');
-    expect(mockFocusTerminalSession).toHaveBeenCalledWith('terminal-a');
+    expect(mockFocusTerminalSession).not.toHaveBeenCalled();
     expect(mockWriteToSession).toHaveBeenCalledWith('shelly-1', 'n\r');
   });
 

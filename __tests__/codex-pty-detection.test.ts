@@ -1,4 +1,9 @@
-import { detectCodexActiveTranscript, detectCodexPtyLaunchText, detectShellReadyText } from '@/lib/codex-pty-detection';
+import {
+  detectCodexActiveTranscript,
+  detectCodexApprovalPrompt,
+  detectCodexPtyLaunchText,
+  detectShellReadyText,
+} from '@/lib/codex-pty-detection';
 
 describe('codex pty detection', () => {
   it('detects the Codex banner and directory', () => {
@@ -56,6 +61,21 @@ describe('codex pty detection', () => {
     expect(detectShellReadyText([
       'Downloading...',
       'still running',
+    ].join('\n'))).toBe(false);
+  });
+
+  it('detects an active Codex approval prompt', () => {
+    expect(detectCodexApprovalPrompt([
+      'Codex needs approval to run this command:',
+      'pnpm check',
+      'Allow? y/n',
+    ].join('\n'))).toBe(true);
+  });
+
+  it('does not treat ordinary yes/no text as approval', () => {
+    expect(detectCodexApprovalPrompt([
+      'The answer can be yes or no depending on context.',
+      'gpt-5.5 default · /data/data/dev.shelly.terminal/files/home',
     ].join('\n'))).toBe(false);
   });
 });

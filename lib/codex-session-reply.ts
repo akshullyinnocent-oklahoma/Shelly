@@ -3,7 +3,6 @@ import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorMo
 import type { AgentChatSession } from '@/store/agent-chat-store';
 import { useTerminalStore } from '@/store/terminal-store';
 import type { TabSession } from '@/store/types';
-import { focusTerminalSession } from '@/lib/codex-session-resume';
 
 export type CodexReplyReadinessReason =
   | 'ready'
@@ -127,9 +126,6 @@ export async function sendCodexApproval(
   }
 
   try {
-    if (!focusTerminalSession(readiness.terminalSessionId)) {
-      return { status: 'blocked', reason: 'terminal_missing' };
-    }
     await TerminalEmulator.writeToSession(readiness.nativeSessionId, decision === 'allow' ? 'y\r' : 'n\r');
     return {
       status: 'sent',

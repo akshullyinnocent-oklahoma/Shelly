@@ -28,6 +28,10 @@ class ScouterWidgetPromptActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (handleApprovalAction(intent?.action)) {
+            finish()
+            return
+        }
         input = EditText(this).apply {
             hint = getString(R.string.scouter_widget_prompt_hint)
             setTextColor(COLOR_TEXT)
@@ -58,19 +62,6 @@ class ScouterWidgetPromptActivity : Activity() {
         promptDialog?.dismiss()
         promptDialog = null
         super.onDestroy()
-    }
-
-    private fun showUnavailableDialog(target: WidgetCodexTarget, store: ScouterStateStore) {
-        val messageId = target.messageResId()
-        store.recordWidgetPromptFailed(getString(messageId))
-        ScouterWidgetProvider.updateAll(this, force = true)
-
-        val dialog = Dialog(this)
-        promptDialog = dialog
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dialog.setContentView(createUnavailableContent(dialog, messageId, target.canResume()))
-        dialog.setOnCancelListener { finish() }
-        showStyledDialog(dialog, showKeyboard = false)
     }
 
     private fun showStyledDialog(dialog: Dialog, showKeyboard: Boolean) {
@@ -250,14 +241,14 @@ class ScouterWidgetPromptActivity : Activity() {
 
     private fun sendPrompt(prompt: String, dialog: Dialog): Boolean {
         val store = ScouterStateStore(this)
-        val target = findBoundReadyCodexTerminal(store)
+        val target = findBoundCodexTerminal(store)
         if (target !is WidgetCodexTarget.Ready) {
             if (target.canResume()) {
                 store.recordWidgetPromptPending(prompt)
                 ScouterWidgetProvider.updateAll(this, force = true)
                 Toast.makeText(this, R.string.scouter_widget_prompt_queued_resume, Toast.LENGTH_SHORT).show()
-                launchAgentChatResume()
-                return true
+                replaceWithUnavailableContent(dialog, target.messageResId(), showResume = true)
+                return false
             }
             val messageId = target.messageResId()
             store.recordWidgetPromptFailed(getString(messageId))
@@ -286,26 +277,61 @@ class ScouterWidgetPromptActivity : Activity() {
         })
     }
 
-    private fun findBoundReadyCodexTerminal(store: ScouterStateStore): WidgetCodexTarget {
+    private fun handleApprovalAction(action: String?): Boolean {
+        val decision = when (action) {
+            ACTION_APPROVAL_ALLOW -> "allow"
+            ACTION_APPROVAL_DENY -> "deny"
+            else -> return false
+        }
+        val store = ScouterStateStore(this)
+        val target = findBoundCodexTerminal(store)
+        if (target !is WidgetCodexTarget.ApprovalNeeded) {
+            store.recordWidgetPromptFailed(getString(R.string.scouter_widget_approval_not_ready))
+            ScouterWidgetProvider.updateAll(this, force = true)
+            Toast.makeText(this, R.string.scouter_widget_approval_not_ready, Toast.LENGTH_SHORT).show()
+            return true
+        }
+
+        runCatching {
+            target.session.write(if (decision == "allow") "y\r" else "n\r")
+        }.fold(onSuccess = {
+            store.recordWidgetApprovalDecision(decision)
+            ScouterWidgetProvider.updateAll(this, force = true)
+            Toast.makeText(
+                this,
+                if (decision == "allow") R.string.scouter_widget_approval_sent else R.string.scouter_widget_approval_denied,
+                Toast.LENGTH_SHORT
+            ).show()
+        }, onFailure = { error ->
+            store.recordWidgetPromptFailed(error.message ?: error.javaClass.simpleName)
+            ScouterWidgetProvider.updateAll(this, force = true)
+            Toast.makeText(this, R.string.scouter_widget_approval_not_ready, Toast.LENGTH_SHORT).show()
+        })
+        return true
+    }
+
+    private fun findBoundCodexTerminal(store: ScouterStateStore): WidgetCodexTarget {
         val binding = store.widgetCodexBinding() ?: return WidgetCodexTarget.Missing
-        if (isBoundCodexBusy(store, binding)) return WidgetCodexTarget.Busy
+        val status = boundCodexStatus(store, binding)
         val ptySessionId = binding.ptySessionId ?: return WidgetCodexTarget.Missing
         val session = TerminalSessionService.sessionRegistry[ptySessionId] ?: return WidgetCodexTarget.Missing
         if (!session.isAlive()) return WidgetCodexTarget.Stale
-        return if (isReadyCodexScreen(session.getScreenText())) {
-            WidgetCodexTarget.Ready(session)
-        } else {
-            WidgetCodexTarget.Stale
+        val screenText = session.getScreenText()
+        if (!isActiveCodexScreen(screenText)) return WidgetCodexTarget.Stale
+        if (status == ScouterStatus.WAITING_PERMISSION && isApprovalPromptScreen(screenText)) {
+            return WidgetCodexTarget.ApprovalNeeded(session)
         }
+        if (status in BUSY_STATUSES) return WidgetCodexTarget.Busy
+        return WidgetCodexTarget.Ready(session)
     }
 
-    private fun isBoundCodexBusy(store: ScouterStateStore, binding: ScouterWidgetCodexBinding): Boolean {
-        val codexSessionId = normalizeCodexSessionId(binding.codexSessionId) ?: return false
+    private fun boundCodexStatus(store: ScouterStateStore, binding: ScouterWidgetCodexBinding): ScouterStatus? {
+        val codexSessionId = normalizeCodexSessionId(binding.codexSessionId) ?: return null
         val snapshot = store.all().firstOrNull { snapshot ->
             snapshot.source == ScouterSource.CODEX &&
                 normalizeCodexSessionId(snapshot.sessionId) == codexSessionId
-        } ?: return false
-        return snapshot.currentStatus in BUSY_STATUSES
+        }
+        return snapshot?.currentStatus
     }
 
     private fun normalizeCodexSessionId(sessionId: String?): String? {
@@ -314,24 +340,42 @@ class ScouterWidgetPromptActivity : Activity() {
         return UUID_SUFFIX_RE.find(trimmed)?.groupValues?.getOrNull(1) ?: trimmed
     }
 
-    private fun isReadyCodexScreen(screenText: String): Boolean {
+    private fun isActiveCodexScreen(screenText: String): Boolean {
         if (screenText.isBlank()) return false
-        val tail = screenText
+        val lines = screenText
+            .lines()
+            .map { it.trimEnd() }
+        var lastCodexPrompt = -1
+        var lastShellPrompt = -1
+        lines.forEachIndexed { index, line ->
+            when {
+                line.contains("OpenAI Codex", ignoreCase = true) || CODEX_STATUS_RE.containsMatchIn(line) -> lastCodexPrompt = index
+                SHELL_PROMPT_RE.matches(line.trim()) -> lastShellPrompt = index
+            }
+        }
+        return lastCodexPrompt >= 0 && lastCodexPrompt > lastShellPrompt
+    }
+
+    private fun isApprovalPromptScreen(screenText: String): Boolean {
+        val recentLines = screenText
             .lines()
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .takeLast(8)
-        if (tail.isEmpty()) return false
-        val hasCodexHeader = screenText.contains("OpenAI Codex") || tail.any { it.contains("codex", ignoreCase = true) }
-        val hasCodexPromptStatus = tail.any { line ->
-            CODEX_STATUS_RE.containsMatchIn(line) ||
-                (line.contains(" default ") && line.contains("·") && line.contains("/"))
-        }
-        return hasCodexHeader && hasCodexPromptStatus
+        if (recentLines.isEmpty()) return false
+        val tail = recentLines.joinToString("\n")
+        val hasApprovalKeyword = APPROVAL_KEYWORD_RE.containsMatchIn(tail)
+        val hasChoice = recentLines.any { APPROVAL_CHOICE_RE.containsMatchIn(it) }
+        return hasApprovalKeyword && hasChoice
     }
 
     companion object {
-        private val CODEX_STATUS_RE = Regex("""^gpt-[A-Za-z0-9_.-]+\s+default\s+·""")
+        const val ACTION_APPROVAL_ALLOW = "expo.modules.terminalemulator.scouter.APPROVAL_ALLOW"
+        const val ACTION_APPROVAL_DENY = "expo.modules.terminalemulator.scouter.APPROVAL_DENY"
+        private val CODEX_STATUS_RE = Regex("""\b(?:gpt|o\d|codex)[A-Za-z0-9_.-]*\b.*[·•]\s*/""", RegexOption.IGNORE_CASE)
+        private val SHELL_PROMPT_RE = Regex("""^(?:[~\w./:@+-]+\s*)?[$#]\s*$""")
+        private val APPROVAL_KEYWORD_RE = Regex("""\b(?:approval|approve|permission|allow|deny|yes|no|proceed|continue)\b""", RegexOption.IGNORE_CASE)
+        private val APPROVAL_CHOICE_RE = Regex("""\b(?:y/n|yes/no|allow|deny|approve|reject)\b|[\[(]\s*[yY]\s*/\s*[nN]\s*[\])]""", RegexOption.IGNORE_CASE)
         private val UUID_SUFFIX_RE = Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
         private const val AGENT_CHAT_RESUME_URI = "shelly://agent-chat?compose=1"
         private val COLOR_PANEL = Color.rgb(3, 16, 22)
@@ -350,6 +394,7 @@ class ScouterWidgetPromptActivity : Activity() {
 
 private sealed class WidgetCodexTarget {
     data class Ready(val session: ShellyTerminalSession) : WidgetCodexTarget()
+    data class ApprovalNeeded(val session: ShellyTerminalSession) : WidgetCodexTarget()
     object Missing : WidgetCodexTarget()
     object Stale : WidgetCodexTarget()
     object Busy : WidgetCodexTarget()
@@ -357,6 +402,7 @@ private sealed class WidgetCodexTarget {
 
 private fun WidgetCodexTarget.messageResId(): Int = when (this) {
     is WidgetCodexTarget.Ready -> R.string.scouter_widget_prompt_sent
+    is WidgetCodexTarget.ApprovalNeeded -> R.string.scouter_widget_prompt_approval_needed
     WidgetCodexTarget.Missing -> R.string.scouter_widget_prompt_no_codex
     WidgetCodexTarget.Stale -> R.string.scouter_widget_prompt_stale_codex
     WidgetCodexTarget.Busy -> R.string.scouter_widget_prompt_busy
@@ -364,6 +410,7 @@ private fun WidgetCodexTarget.messageResId(): Int = when (this) {
 
 private fun WidgetCodexTarget.canResume(): Boolean = when (this) {
     is WidgetCodexTarget.Ready,
+    is WidgetCodexTarget.ApprovalNeeded,
     WidgetCodexTarget.Busy -> false
     WidgetCodexTarget.Missing,
     WidgetCodexTarget.Stale -> true

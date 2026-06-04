@@ -11,6 +11,14 @@
   <string name="scouter_widget_prompt_resume">Resume Codex</string>
   <string name="scouter_widget_prompt_empty">Prompt is empty</string>
   <string name="scouter_widget_prompt_sent">Sent to Codex</string>
+  <string name="scouter_widget_prompt_approval_needed">Codex is waiting for approval. Use OK or NO on the widget.</string>
+  <string name="scouter_widget_approval_sent">Approval sent to Codex</string>
+  <string name="scouter_widget_approval_denied">Denial sent to Codex</string>
+  <string name="scouter_widget_approval_not_ready">Codex approval is not ready</string>
+  <string name="scouter_widget_approval_allow">Allow Codex approval request</string>
+  <string name="scouter_widget_approval_deny">Deny Codex approval request</string>
+  <string name="scouter_widget_approval_allow_short">OK</string>
+  <string name="scouter_widget_approval_deny_short">NO</string>
   <string name="scouter_widget_prompt_queued_resume">Queued. Resume Codex to send.</string>
   <string name="scouter_widget_prompt_no_codex">Open or resume a Codex terminal first</string>
   <string name="scouter_widget_prompt_stale_codex">Bound Codex terminal is not ready</string>

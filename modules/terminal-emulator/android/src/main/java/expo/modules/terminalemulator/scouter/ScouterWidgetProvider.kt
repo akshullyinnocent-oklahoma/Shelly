@@ -143,6 +143,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
 
             val codex = latestFor(snapshots, ScouterSource.CODEX)
             val local = latestFor(snapshots, ScouterSource.LOCAL_LLM)
+            bindCodexApprovalActions(views, context, codex, conversation)
             bindRow(
                 views = views,
                 snapshot = codex,
@@ -245,6 +246,45 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 launchIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
+        }
+
+        private fun approvalPendingIntent(context: Context, allow: Boolean): PendingIntent {
+            val launchIntent = Intent(context, ScouterWidgetPromptActivity::class.java)
+                .setAction(
+                    if (allow) {
+                        ScouterWidgetPromptActivity.ACTION_APPROVAL_ALLOW
+                    } else {
+                        ScouterWidgetPromptActivity.ACTION_APPROVAL_DENY
+                    }
+                )
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            return PendingIntent.getActivity(
+                context,
+                if (allow) 9102 else 9103,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        private fun bindCodexApprovalActions(
+            views: RemoteViews,
+            context: Context,
+            codex: SessionSnapshot?,
+            conversation: ScouterWidgetConversation?
+        ) {
+            val lastApprovalAt = conversation?.lastApprovalAt ?: 0L
+            val latestPromptAt = maxOf(conversation?.widgetPromptAt ?: 0L, conversation?.lastPromptAt ?: 0L)
+            val hasApproval = codex?.currentStatus == ScouterStatus.WAITING_PERMISSION &&
+                !conversation?.lastApproval.isNullOrBlank() &&
+                lastApprovalAt >= (conversation?.lastAnswerAt ?: 0L) &&
+                lastApprovalAt >= latestPromptAt &&
+                lastApprovalAt > (conversation?.widgetStatusAt ?: 0L)
+            views.setViewVisibility(R.id.scouter_codex_allow, if (hasApproval) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.scouter_codex_deny, if (hasApproval) View.VISIBLE else View.GONE)
+            if (hasApproval) {
+                views.setOnClickPendingIntent(R.id.scouter_codex_allow, approvalPendingIntent(context, allow = true))
+                views.setOnClickPendingIntent(R.id.scouter_codex_deny, approvalPendingIntent(context, allow = false))
+            }
         }
 
         private fun displaySourceName(source: ScouterSource): String = when (source) {
@@ -357,8 +397,42 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val widgetPromptAt = conversation.widgetPromptAt ?: 0L
             val lastAnswerAt = conversation.lastAnswerAt ?: 0L
             val lastPromptAt = conversation.lastPromptAt ?: 0L
+            val lastApprovalAt = conversation.lastApprovalAt ?: 0L
+            val widgetStatusAt = conversation.widgetStatusAt ?: 0L
             val latestPromptAt = maxOf(widgetPromptAt, lastPromptAt)
             val answer = conversation.lastAnswer?.takeIf { it.isNotBlank() }
+            val approval = conversation.lastApproval?.takeIf { it.isNotBlank() }
+            if (
+                answer != null &&
+                lastAnswerAt >= latestPromptAt &&
+                lastAnswerAt > widgetStatusAt
+            ) {
+                return WidgetConversationPreview(
+                    "CODEX  ${shorten(answer.redactForScouter(), 128)}",
+                    Color.rgb(216, 255, 232)
+                )
+            }
+            if (
+                (conversation.widgetStatus == "approval_allow" || conversation.widgetStatus == "approval_deny") &&
+                widgetStatusAt >= latestPromptAt
+            ) {
+                val decision = if (conversation.widgetStatus == "approval_allow") "OK" else "NO"
+                return WidgetConversationPreview(
+                    "APPROVAL $decision sent",
+                    Color.rgb(184, 255, 208)
+                )
+            }
+            if (
+                approval != null &&
+                lastApprovalAt > lastAnswerAt &&
+                lastApprovalAt >= latestPromptAt &&
+                lastApprovalAt > widgetStatusAt
+            ) {
+                return WidgetConversationPreview(
+                    "APPROVE ${shorten(approval.redactForScouter(), 120)}",
+                    Color.rgb(255, 232, 128)
+                )
+            }
             if (answer != null && lastAnswerAt >= latestPromptAt) {
                 return WidgetConversationPreview(
                     "CODEX  ${shorten(answer.redactForScouter(), 128)}",

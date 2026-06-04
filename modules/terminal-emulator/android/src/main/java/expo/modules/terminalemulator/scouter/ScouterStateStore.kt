@@ -10,9 +10,12 @@ data class ScouterWidgetConversation(
     val lastPromptAt: Long?,
     val lastAnswer: String?,
     val lastAnswerAt: Long?,
+    val lastApproval: String?,
+    val lastApprovalAt: Long?,
     val widgetPrompt: String?,
     val widgetPromptAt: Long?,
     val widgetStatus: String?,
+    val widgetStatusAt: Long?,
     val widgetError: String?
 )
 
@@ -148,6 +151,16 @@ class ScouterStateStore(context: Context) {
         writeHelperState()
     }
 
+    fun recordWidgetApprovalDecision(decision: String) {
+        val normalized = if (decision == "deny") "deny" else "allow"
+        prefs.edit()
+            .putString(KEY_WIDGET_STATUS, "approval_$normalized")
+            .putLong(KEY_WIDGET_STATUS_AT, System.currentTimeMillis())
+            .remove(KEY_WIDGET_ERROR)
+            .commit()
+        writeHelperState()
+    }
+
     fun consumeWidgetPromptPending(
         codexSessionId: String?,
         ptySessionId: String?,
@@ -203,14 +216,24 @@ class ScouterStateStore(context: Context) {
             val lastAnswer = recent.lastOrNull { event ->
                 isCodexAnswerEvent(event)
             }
+            val lastApproval = recent.lastOrNull { event ->
+                isCodexApprovalEvent(event)
+            }
             return ScouterWidgetConversation(
                 lastPrompt = lastPrompt?.optString("lastMessage")?.ifBlank { null },
                 lastPromptAt = lastPrompt?.optLong("timestamp", 0L)?.takeIf { it > 0L },
                 lastAnswer = lastAnswer?.optString("lastMessage")?.ifBlank { null },
                 lastAnswerAt = lastAnswer?.optLong("timestamp", 0L)?.takeIf { it > 0L },
+                lastApproval = firstNonBlank(
+                    lastApproval?.optString("lastMessage"),
+                    lastApproval?.optString("commandSummary"),
+                    lastApproval?.optString("toolName")
+                ),
+                lastApprovalAt = lastApproval?.optLong("timestamp", 0L)?.takeIf { it > 0L },
                 widgetPrompt = prefs.getString(KEY_WIDGET_PROMPT, null)?.ifBlank { null },
                 widgetPromptAt = prefs.getLong(KEY_WIDGET_PROMPT_AT, 0L).takeIf { it > 0L },
                 widgetStatus = prefs.getString(KEY_WIDGET_STATUS, null)?.ifBlank { null },
+                widgetStatusAt = prefs.getLong(KEY_WIDGET_STATUS_AT, 0L).takeIf { it > 0L },
                 widgetError = prefs.getString(KEY_WIDGET_ERROR, null)?.ifBlank { null }
             )
         }
@@ -376,6 +399,32 @@ class ScouterStateStore(context: Context) {
             event.optString("derivedStatus") in WIDGET_ANSWER_STATUS_NAMES
     }
 
+    private fun isCodexApprovalEvent(event: ScouterEvent): Boolean {
+        return event.source == ScouterSource.CODEX &&
+            (
+                event.eventType == ScouterEventType.PERMISSION_REQUEST ||
+                    event.derivedStatus == ScouterStatus.WAITING_PERMISSION
+                ) &&
+            (
+                !event.lastMessage.isNullOrBlank() ||
+                    !event.commandSummary.isNullOrBlank() ||
+                    !event.toolName.isNullOrBlank()
+                )
+    }
+
+    private fun isCodexApprovalEvent(event: JSONObject): Boolean {
+        return event.optString("source") == ScouterSource.CODEX.name &&
+            (
+                event.optString("eventType") == ScouterEventType.PERMISSION_REQUEST.name ||
+                    event.optString("derivedStatus") == ScouterStatus.WAITING_PERMISSION.name
+                ) &&
+            (
+                event.optString("lastMessage").isNotBlank() ||
+                    event.optString("commandSummary").isNotBlank() ||
+                    event.optString("toolName").isNotBlank()
+                )
+    }
+
     private fun writeHelperState() {
         synchronized(lock) {
             writeHelperStateLocked(readAllMutable())
@@ -457,4 +506,8 @@ private fun pendingTargetMatches(
     return (!pendingPtySessionId.isNullOrBlank() && pendingPtySessionId == ptySessionId) ||
         (!pendingShellySessionId.isNullOrBlank() && pendingShellySessionId == shellySessionId) ||
         (!pendingCodexSessionId.isNullOrBlank() && pendingCodexSessionId == codexSessionId)
+}
+
+private fun firstNonBlank(vararg values: String?): String? {
+    return values.firstOrNull { !it.isNullOrBlank() }?.trim()
 }
