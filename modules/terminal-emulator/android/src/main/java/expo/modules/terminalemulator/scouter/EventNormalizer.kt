@@ -146,10 +146,10 @@ object EventNormalizer {
         return when {
             "session" in value && "start" in value -> ScouterEventType.SESSION_START
             "user" in value && "prompt" in value -> ScouterEventType.USER_PROMPT
+            "permission" in value || "approval" in value -> ScouterEventType.PERMISSION_REQUEST
             "pre" in value && "tool" in value -> ScouterEventType.PRE_TOOL_USE
             "post" in value && "tool" in value && "failure" in value -> ScouterEventType.POST_TOOL_USE_FAILURE
             "post" in value && "tool" in value -> ScouterEventType.POST_TOOL_USE
-            "permission" in value -> ScouterEventType.PERMISSION_REQUEST
             "notification" in value -> ScouterEventType.NOTIFICATION
             "compact" in value -> ScouterEventType.PRE_COMPACT
             "stop" in value || "complete" in value -> ScouterEventType.STOP

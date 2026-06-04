@@ -228,6 +228,76 @@ describe('agent chat store', () => {
     ]);
   });
 
+  it('converts Codex permission recent events into read-only approval cards', async () => {
+    const baseTime = 1_811_113_500_000;
+    mockGetScouterDebugInfo.mockResolvedValue(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'session-approval-event',
+        projectName: 'home',
+        currentStatus: 'THINKING',
+        currentTool: 'shell',
+        lastEventAt: baseTime,
+        sessionStartAt: baseTime,
+      }],
+      recentEvents: [{
+        eventId: 'event-approval-request',
+        source: 'CODEX',
+        sessionId: 'session-approval-event',
+        timestamp: baseTime + 1,
+        eventType: 'PERMISSION_REQUEST',
+        derivedStatus: 'WAITING_PERMISSION',
+        toolName: 'shell',
+        commandSummary: 'git push origin main',
+      }],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+
+    expect(useAgentChatStore.getState().events.filter((event) => event.kind === 'approval')).toEqual([
+      expect.objectContaining({
+        codexSessionId: 'session-approval-event',
+        role: 'system',
+        text: 'git push origin main',
+        status: 'waiting_input',
+        toolName: 'shell',
+      }),
+    ]);
+  });
+
+  it('converts waiting-permission session snapshots into read-only approval cards', async () => {
+    const baseTime = 1_811_113_750_000;
+    mockGetScouterDebugInfo.mockResolvedValue(JSON.stringify({
+      enabled: true,
+      jsonlWatcherRunning: true,
+      sessions: [{
+        source: 'CODEX',
+        sessionId: 'session-approval-snapshot',
+        projectName: 'home',
+        currentStatus: 'WAITING_PERMISSION',
+        currentTool: 'apply_patch',
+        lastEventAt: baseTime,
+        sessionStartAt: baseTime,
+        lastMessage: 'Apply patch to store/agent-chat-store.ts?',
+      }],
+      recentEvents: [],
+    }));
+
+    await useAgentChatStore.getState().refresh();
+
+    expect(useAgentChatStore.getState().events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'approval',
+        codexSessionId: 'session-approval-snapshot',
+        text: 'Apply patch to store/agent-chat-store.ts?',
+        status: 'waiting_input',
+        toolName: 'apply_patch',
+      }),
+    ]));
+  });
+
   it('ingests native Scouter events without waiting for polling refresh', () => {
     const baseTime = 1_811_114_000_000;
 

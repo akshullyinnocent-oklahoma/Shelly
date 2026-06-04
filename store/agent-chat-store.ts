@@ -1053,6 +1053,24 @@ function sessionToEvents(session: ScouterSession): AgentChatEvent[] {
 
   const currentStatus = (session.currentStatus ?? '').toUpperCase();
   const lastMessage = cleanScouterMessage(session.lastMessage);
+  if (currentStatus === 'WAITING_PERMISSION') {
+    const approvalText = approvalTextForEvent(toolName, null, lastMessage);
+    if (approvalText) {
+      events.push({
+        id: eventId(codexSessionId, 'approval', timestamp, approvalText),
+        source: 'codex',
+        codexSessionId,
+        role: 'system',
+        kind: 'approval',
+        text: approvalText,
+        status: 'waiting_input',
+        toolName: toolName || undefined,
+        timestamp: timestamp + 2,
+        rawEvent: session,
+      });
+    }
+  }
+
   if (lastMessage && currentStatus === 'IDLE') {
     events.push({
       id: eventId(codexSessionId, 'assistant_message', timestamp, lastMessage),
@@ -1117,6 +1135,21 @@ function scouterRecentEventToAgentChatEvent(event: ScouterRecentEvent): AgentCha
       kind: 'user_message',
       text: userMessage,
     }];
+  }
+
+  if (isApprovalScouterEvent(eventType, derivedStatus)) {
+    const approvalText = approvalTextForEvent(toolName, commandSummary, lastMessage);
+    if (approvalText) {
+      return [{
+        ...base,
+        id: base.id || eventId(codexSessionId, 'approval', timestamp, approvalText),
+        role: 'system',
+        kind: 'approval',
+        text: approvalText,
+        status: 'waiting_input',
+        toolName: toolName || undefined,
+      }];
+    }
   }
 
   if ((eventType === 'SNAPSHOT' || derivedStatus === 'IDLE' || derivedStatus === 'COMPLETED') && lastMessage) {
@@ -1255,9 +1288,27 @@ function messageContentKey(event: AgentChatEvent): string | null {
     && event.kind !== 'assistant_message'
     && event.kind !== 'tool_start'
     && event.kind !== 'tool_result'
+    && event.kind !== 'approval'
     && event.kind !== 'error'
   ) return null;
   return `${event.codexSessionId}:${event.kind}:${hashText(normalizeTimelineText(event.text))}`;
+}
+
+function isApprovalScouterEvent(eventType: string, derivedStatus: string): boolean {
+  return eventType === 'PERMISSION_REQUEST'
+    || eventType.includes('APPROVAL')
+    || derivedStatus === 'WAITING_PERMISSION';
+}
+
+function approvalTextForEvent(
+  toolName?: string | null,
+  commandSummary?: string | null,
+  lastMessage?: string | null,
+): string | null {
+  return commandSummary?.trim()
+    || lastMessage?.trim()
+    || toolName?.trim()
+    || null;
 }
 
 function cleanScouterMessage(message?: string | null): string | null {

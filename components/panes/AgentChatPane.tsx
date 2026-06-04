@@ -148,10 +148,10 @@ export default function AgentChatPane() {
   const replyReady = replyReadiness?.ready ?? false;
   const resumeWorking = Boolean(activeSession && resumeWorkingSessionId === activeSession.codexSessionId);
   const interruptWorking = Boolean(activeSession && interruptWorkingSessionId === activeSession.codexSessionId);
-  const interruptTargetKnown = replyReadiness?.ready === true || replyReadiness?.reason === 'busy';
+  const interruptVisible = interruptWorking || replyReadiness?.reason === 'busy';
   const interruptEnabled = Boolean(
     activeSession
-    && interruptTargetKnown
+    && interruptVisible
     && !resumeWorking
     && !interruptWorking,
   );
@@ -395,24 +395,26 @@ export default function AgentChatPane() {
               <MaterialIcons name="play-arrow" size={17} color={activeSession ? colors.accent : colors.inactive} />
             )}
           </Pressable>
-          <Pressable
-            style={[styles.iconButton, !interruptEnabled && styles.iconButtonDisabled]}
-            onPress={interruptSelectedSession}
-            disabled={!interruptEnabled}
-            accessibilityRole="button"
-            accessibilityLabel={t('agent_chat.interrupt_selected_a11y')}
-            hitSlop={6}
-          >
-            {interruptWorking ? (
-              <ActivityIndicator size="small" color={colors.warning} />
-            ) : (
-              <MaterialIcons
-                name="stop-circle"
-                size={16}
-                color={interruptEnabled ? colors.warning : colors.inactive}
-              />
-            )}
-          </Pressable>
+          {interruptVisible ? (
+            <Pressable
+              style={[styles.iconButton, !interruptEnabled && styles.iconButtonDisabled]}
+              onPress={interruptSelectedSession}
+              disabled={!interruptEnabled}
+              accessibilityRole="button"
+              accessibilityLabel={t('agent_chat.interrupt_selected_a11y')}
+              hitSlop={6}
+            >
+              {interruptWorking ? (
+                <ActivityIndicator size="small" color={colors.warning} />
+              ) : (
+                <MaterialIcons
+                  name="stop-circle"
+                  size={16}
+                  color={interruptEnabled ? colors.warning : colors.inactive}
+                />
+              )}
+            </Pressable>
+          ) : null}
           <Pressable
             style={styles.iconButton}
             onPress={() => void refresh()}
@@ -770,6 +772,21 @@ function AgentChatBubble({
           <Text style={styles.toolText} selectable>
             {t('agent_chat.tool_prefix', { tool: event.toolName || event.text })}
           </Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (event.kind === 'approval') {
+    return (
+      <View style={styles.systemRow}>
+        <View style={[styles.approvalBubble, maxWidth > 0 && { maxWidth }]}>
+          <MaterialIcons name="verified-user" size={12} color={colors.warning} />
+          <View style={styles.approvalContent}>
+            <Text style={styles.approvalTitle}>{t('agent_chat.approval_title')}</Text>
+            <Text style={styles.approvalText} selectable>{event.text}</Text>
+            <Text style={styles.approvalHint}>{t('agent_chat.approval_read_only_hint')}</Text>
+          </View>
         </View>
       </View>
     );
@@ -1363,6 +1380,42 @@ function makeStyles(colors: ThemeColorPalette) {
       fontFamily: F.family,
       fontSize: 8,
       lineHeight: 13,
+    },
+    approvalBubble: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 6,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: withAlpha(colors.warning, 0.44),
+      paddingHorizontal: 9,
+      paddingVertical: 7,
+      backgroundColor: withAlpha(colors.warning, 0.08),
+    },
+    approvalContent: {
+      flex: 1,
+      minWidth: 0,
+    },
+    approvalTitle: {
+      color: colors.warning,
+      fontFamily: F.family,
+      fontSize: 7,
+      fontWeight: '800',
+      lineHeight: 11,
+      marginBottom: 3,
+    },
+    approvalText: {
+      color: colors.foreground,
+      fontFamily: F.family,
+      fontSize: 8,
+      lineHeight: 13,
+    },
+    approvalHint: {
+      color: colors.muted,
+      fontFamily: F.family,
+      fontSize: 7,
+      lineHeight: 11,
+      marginTop: 4,
     },
     messageRowAssistant: {
       alignItems: 'flex-start',

@@ -152,6 +152,8 @@ class ScouterStateStore(context: Context) {
         if (event.eventType == ScouterEventType.PRE_TOOL_USE && !event.toolName.isNullOrBlank()) return true
         if (event.eventType == ScouterEventType.POST_TOOL_USE && (!event.toolName.isNullOrBlank() || !event.commandSummary.isNullOrBlank())) return true
         if (event.eventType == ScouterEventType.POST_TOOL_USE_FAILURE) return true
+        if (event.eventType == ScouterEventType.PERMISSION_REQUEST) return true
+        if (event.derivedStatus == ScouterStatus.WAITING_PERMISSION) return true
         if (event.derivedStatus == ScouterStatus.ERROR) return true
         return false
     }
