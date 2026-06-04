@@ -28,11 +28,15 @@ import {
   type CodexSessionResumeFailureReason,
 } from '@/lib/codex-session-resume';
 import {
+  getCodexApprovalReadiness,
   getCodexReplyReadiness,
+  sendCodexApproval,
   sendCodexReply,
+  type CodexApprovalDecision,
   type CodexReplyBlockedReason,
   type CodexReplyReadiness,
 } from '@/lib/codex-session-reply';
+import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
 import { useTranslation } from '@/lib/i18n';
 import { useTerminalStore } from '@/store/terminal-store';
 import { useTheme } from '@/hooks/use-theme';
@@ -56,6 +60,10 @@ type InterruptNotice =
 type ReplyNotice =
   | { status: 'sent'; sessionId: string; text: string; sentAt: number }
   | { status: 'observed'; sessionId: string; text: string; sentAt: number };
+
+type ApprovalNotice =
+  | { status: 'sent'; sessionId: string; decision: CodexApprovalDecision }
+  | { status: 'failed'; sessionId: string; reason: CodexReplyBlockedReason };
 
 type AgentNotice = {
   icon: string;
@@ -99,14 +107,18 @@ export default function AgentChatPane() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [replyReadiness, setReplyReadiness] = useState<CodexReplyReadiness | null>(null);
+  const [approvalReadiness, setApprovalReadiness] = useState<CodexReplyReadiness | null>(null);
   const [replyChecking, setReplyChecking] = useState(false);
   const [replySending, setReplySending] = useState(false);
   const [replyNotice, setReplyNotice] = useState<ReplyNotice | null>(null);
+  const [approvalNotice, setApprovalNotice] = useState<ApprovalNotice | null>(null);
+  const [approvalWorkingEventId, setApprovalWorkingEventId] = useState<string | null>(null);
   const [resumeNotice, setResumeNotice] = useState<ResumeNotice | null>(null);
   const [resumeWorkingSessionId, setResumeWorkingSessionId] = useState<string | null>(null);
   const [interruptNotice, setInterruptNotice] = useState<InterruptNotice | null>(null);
   const [interruptWorkingSessionId, setInterruptWorkingSessionId] = useState<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
+  const widgetPromptDrainRef = useRef(false);
 
   useEffect(() => {
     startPolling();
@@ -145,6 +157,10 @@ export default function AgentChatPane() {
     if (!sessionId) return [];
     return events.filter((event) => event.codexSessionId === sessionId && event.kind !== 'status');
   }, [activeSession?.codexSessionId, events]);
+  const latestApprovalEventId = useMemo(
+    () => [...visibleEvents].reverse().find((event) => event.kind === 'approval')?.id ?? null,
+    [visibleEvents],
+  );
   const hasTimelineEvents = visibleEvents.length > 0;
   const replyReady = replyReadiness?.ready ?? false;
   const resumeWorking = Boolean(activeSession && resumeWorkingSessionId === activeSession.codexSessionId);
@@ -161,6 +177,7 @@ export default function AgentChatPane() {
     setResumeNotice(null);
     setInterruptNotice(null);
     setReplyNotice(null);
+    setApprovalNotice(null);
   }, [activeSession?.codexSessionId]);
 
   useEffect(() => {
@@ -192,9 +209,18 @@ export default function AgentChatPane() {
   }, [interruptNotice]);
 
   useEffect(() => {
+    if (!approvalNotice) return;
+    const timeout = setTimeout(() => {
+      setApprovalNotice((current) => current === approvalNotice ? null : current);
+    }, 7_000);
+    return () => clearTimeout(timeout);
+  }, [approvalNotice]);
+
+  useEffect(() => {
     const session = activeSession;
     let cancelled = false;
     setReplyReadiness(null);
+    setApprovalReadiness(null);
     if (!session) {
       setReplyChecking(false);
       return () => {
@@ -202,12 +228,23 @@ export default function AgentChatPane() {
       };
     }
     setReplyChecking(true);
-    void getCodexReplyReadiness(session)
-      .then((readiness) => {
-        if (!cancelled) setReplyReadiness(readiness);
+    void Promise.all([
+      getCodexReplyReadiness(session),
+      (session.currentStatus ?? '').trim().toUpperCase() === 'WAITING_PERMISSION'
+        ? getCodexApprovalReadiness(session)
+        : Promise.resolve<CodexReplyReadiness | null>(null),
+    ])
+      .then(([reply, approval]) => {
+        if (!cancelled) {
+          setReplyReadiness(reply);
+          setApprovalReadiness(approval);
+        }
       })
       .catch(() => {
-        if (!cancelled) setReplyReadiness({ ready: false, reason: 'screen_unavailable' });
+        if (!cancelled) {
+          setReplyReadiness({ ready: false, reason: 'screen_unavailable' });
+          setApprovalReadiness({ ready: false, reason: 'screen_unavailable' });
+        }
       })
       .finally(() => {
         if (!cancelled) setReplyChecking(false);
@@ -227,17 +264,49 @@ export default function AgentChatPane() {
     terminalReadinessSignature,
   ]);
 
-  const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<AgentChatEvent>) => (
-      <AgentChatBubble
-        event={item}
-        maxWidth={bubbleMaxWidth}
-        colors={colors}
-        t={t}
-      />
-    ),
-    [bubbleMaxWidth, colors, t],
-  );
+  useEffect(() => {
+    if (!activeSession || !replyReadiness?.ready || widgetPromptDrainRef.current) return;
+    if (!TerminalEmulator.consumeScouterWidgetPendingPrompt) return;
+    widgetPromptDrainRef.current = true;
+    const session = activeSession;
+    let cancelled = false;
+    void TerminalEmulator.consumeScouterWidgetPendingPrompt(
+      session.codexSessionId,
+      session.ptySessionId ?? null,
+      session.shellySessionId ?? null,
+    )
+      .then(async (pending) => {
+        if (cancelled || !pending?.prompt?.trim()) return;
+        const result = await sendCodexReply(session, pending.prompt).catch(() => ({
+          status: 'failed' as const,
+          reason: 'screen_unavailable' as const,
+        }));
+        if (cancelled) return;
+        if (result.status === 'sent') {
+          await TerminalEmulator.markScouterWidgetPromptQueued?.(pending.prompt).catch(() => undefined);
+          setReplyNotice({
+            status: 'sent',
+            sessionId: session.codexSessionId,
+            text: normalizeReplyTextForMatch(pending.prompt),
+            sentAt: Date.now(),
+          });
+          setReplyReadiness(null);
+          setTimeout(() => void refresh(), 350);
+          setTimeout(() => void refresh(), 1_200);
+          return;
+        }
+        const message = result.status === 'failed'
+          ? t('agent_chat.reply_failed_body')
+          : t(replyBlockedReasonBodyKey(result.reason));
+        await TerminalEmulator.markScouterWidgetPromptFailed?.(message).catch(() => undefined);
+      })
+      .finally(() => {
+        widgetPromptDrainRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSession, refresh, replyReadiness?.ready, t]);
 
   const keyExtractor = useCallback((item: AgentChatEvent) => item.id, []);
   const resumeSelectedSession = useCallback(async () => {
@@ -357,6 +426,60 @@ export default function AgentChatPane() {
     Alert.alert(t('agent_chat.reply_not_ready_title'), t(bodyKey));
   }, [activeSession, draft, refresh, replySending, t]);
 
+  const handleApprovalDecision = useCallback(async (
+    event: AgentChatEvent,
+    decision: CodexApprovalDecision,
+  ) => {
+    if (!activeSession || approvalWorkingEventId || event.codexSessionId !== activeSession.codexSessionId) return;
+    const sessionId = activeSession.codexSessionId;
+    setApprovalWorkingEventId(event.id);
+    const result = await sendCodexApproval(activeSession, decision).catch(() => ({
+      status: 'failed' as const,
+      reason: 'screen_unavailable' as const,
+    }));
+    setApprovalWorkingEventId(null);
+    if (activeSessionIdRef.current !== sessionId) return;
+    if (result.status === 'sent') {
+      setApprovalNotice({ status: 'sent', sessionId, decision });
+      setReplyReadiness(null);
+      setTimeout(() => void refresh(), 300);
+      setTimeout(() => void refresh(), 1_200);
+      return;
+    }
+    setApprovalNotice({ status: 'failed', sessionId, reason: result.reason });
+    Alert.alert(t('agent_chat.approval_not_ready_title'), t(replyBlockedReasonBodyKey(result.reason)));
+  }, [activeSession, approvalWorkingEventId, refresh, t]);
+
+  const renderItem = useCallback(
+    ({ item }: ListRenderItemInfo<AgentChatEvent>) => (
+      <AgentChatBubble
+        event={item}
+        maxWidth={bubbleMaxWidth}
+        colors={colors}
+        t={t}
+        approvalEnabled={Boolean(
+          activeSession
+          && item.codexSessionId === activeSession.codexSessionId
+          && item.kind === 'approval'
+          && item.id === latestApprovalEventId
+          && (approvalReadiness?.ready ?? false)
+        )}
+        approvalWorking={approvalWorkingEventId === item.id}
+        onApprovalDecision={handleApprovalDecision}
+      />
+    ),
+    [
+      activeSession,
+      approvalReadiness?.ready,
+      approvalWorkingEventId,
+      bubbleMaxWidth,
+      colors,
+      handleApprovalDecision,
+      latestApprovalEventId,
+      t,
+    ],
+  );
+
   const notice = useMemo(
     () => buildAgentNotice({
       hasSession: Boolean(activeSession),
@@ -364,11 +487,12 @@ export default function AgentChatPane() {
       replyChecking,
       replyReadiness,
       interruptNotice,
+      approvalNotice,
       replyNotice,
       resumeNotice,
       t,
     }),
-    [activeSession, interruptNotice, replyChecking, replyNotice, replyReadiness, resumeNotice, t],
+    [activeSession, approvalNotice, interruptNotice, replyChecking, replyNotice, replyReadiness, resumeNotice, t],
   );
 
   return (
@@ -756,11 +880,17 @@ function AgentChatBubble({
   maxWidth,
   colors,
   t,
+  approvalEnabled,
+  approvalWorking,
+  onApprovalDecision,
 }: {
   event: AgentChatEvent;
   maxWidth: number;
   colors: ThemeColorPalette;
   t: (key: string, params?: Record<string, string | number>) => string;
+  approvalEnabled: boolean;
+  approvalWorking: boolean;
+  onApprovalDecision: (event: AgentChatEvent, decision: CodexApprovalDecision) => void;
 }) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -798,7 +928,47 @@ function AgentChatBubble({
           <View style={styles.approvalContent}>
             <Text style={styles.approvalTitle}>{t('agent_chat.approval_title')}</Text>
             <Text style={styles.approvalText} selectable>{event.text}</Text>
-            <Text style={styles.approvalHint}>{t('agent_chat.approval_read_only_hint')}</Text>
+            <Text style={styles.approvalHint}>
+              {t(approvalEnabled ? 'agent_chat.approval_action_hint' : 'agent_chat.approval_locked_hint')}
+            </Text>
+            <View style={styles.approvalActions}>
+              <Pressable
+                style={[
+                  styles.approvalActionButton,
+                  styles.approvalDenyButton,
+                  (!approvalEnabled || approvalWorking) && styles.approvalActionButtonDisabled,
+                ]}
+                disabled={!approvalEnabled || approvalWorking}
+                onPress={() => onApprovalDecision(event, 'deny')}
+                accessibilityRole="button"
+                accessibilityLabel={t('agent_chat.approval_deny_a11y')}
+                hitSlop={5}
+              >
+                <Text style={[styles.approvalActionText, styles.approvalDenyText]}>
+                  {t('agent_chat.approval_deny')}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.approvalActionButton,
+                  styles.approvalAllowButton,
+                  (!approvalEnabled || approvalWorking) && styles.approvalActionButtonDisabled,
+                ]}
+                disabled={!approvalEnabled || approvalWorking}
+                onPress={() => onApprovalDecision(event, 'allow')}
+                accessibilityRole="button"
+                accessibilityLabel={t('agent_chat.approval_allow_a11y')}
+                hitSlop={5}
+              >
+                {approvalWorking ? (
+                  <ActivityIndicator size="small" color={colors.warning} />
+                ) : (
+                  <Text style={[styles.approvalActionText, styles.approvalAllowText]}>
+                    {t('agent_chat.approval_allow')}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
           </View>
         </View>
       </View>
@@ -973,6 +1143,7 @@ function buildAgentNotice({
   replyChecking,
   replyReadiness,
   interruptNotice,
+  approvalNotice,
   replyNotice,
   resumeNotice,
   t,
@@ -982,6 +1153,7 @@ function buildAgentNotice({
   replyChecking: boolean;
   replyReadiness: CodexReplyReadiness | null;
   interruptNotice: InterruptNotice | null;
+  approvalNotice: ApprovalNotice | null;
   replyNotice: ReplyNotice | null;
   resumeNotice: ResumeNotice | null;
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -989,6 +1161,7 @@ function buildAgentNotice({
   if (!hasSession) return null;
   const scopedResumeNotice = resumeNotice?.sessionId === sessionId ? resumeNotice : null;
   const scopedInterruptNotice = interruptNotice?.sessionId === sessionId ? interruptNotice : null;
+  const scopedApprovalNotice = approvalNotice?.sessionId === sessionId ? approvalNotice : null;
   const scopedReplyNotice = replyNotice?.sessionId === sessionId ? replyNotice : null;
   if (scopedResumeNotice?.status === 'pending') {
     return {
@@ -1022,6 +1195,22 @@ function buildAgentNotice({
     return {
       icon: 'error-outline',
       text: t(interruptFailureBodyKey(scopedInterruptNotice.reason)),
+      tone: 'error',
+    };
+  }
+  if (scopedApprovalNotice?.status === 'sent') {
+    return {
+      icon: scopedApprovalNotice.decision === 'allow' ? 'verified-user' : 'block',
+      text: t(scopedApprovalNotice.decision === 'allow'
+        ? 'agent_chat.approval_notice_allowed'
+        : 'agent_chat.approval_notice_denied'),
+      tone: 'success',
+    };
+  }
+  if (scopedApprovalNotice?.status === 'failed') {
+    return {
+      icon: 'error-outline',
+      text: t(replyBlockedReasonBodyKey(scopedApprovalNotice.reason)),
       tone: 'error',
     };
   }
@@ -1096,6 +1285,8 @@ function replyBlockedReasonBodyKey(reason: CodexReplyBlockedReason): string {
       return 'agent_chat.reply_status_screen_unavailable';
     case 'not_codex_terminal':
       return 'agent_chat.reply_status_not_codex_terminal';
+    case 'no_approval_prompt':
+      return 'agent_chat.reply_status_no_approval_prompt';
     default:
       return 'agent_chat.reply_not_ready_body';
   }
@@ -1429,6 +1620,45 @@ function makeStyles(colors: ThemeColorPalette) {
       fontSize: 7,
       lineHeight: 11,
       marginTop: 4,
+    },
+    approvalActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 6,
+      marginTop: 7,
+    },
+    approvalActionButton: {
+      minWidth: 48,
+      height: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 5,
+      borderWidth: 1,
+      paddingHorizontal: 8,
+    },
+    approvalActionButtonDisabled: {
+      opacity: 0.45,
+    },
+    approvalAllowButton: {
+      borderColor: withAlpha(colors.success, 0.62),
+      backgroundColor: withAlpha(colors.success, 0.13),
+    },
+    approvalDenyButton: {
+      borderColor: withAlpha(colors.error, 0.52),
+      backgroundColor: withAlpha(colors.error, 0.1),
+    },
+    approvalActionText: {
+      fontFamily: F.family,
+      fontSize: 7,
+      fontWeight: '800',
+      lineHeight: 10,
+      letterSpacing: 0,
+    },
+    approvalAllowText: {
+      color: colors.success,
+    },
+    approvalDenyText: {
+      color: colors.error,
     },
     messageRowAssistant: {
       alignItems: 'flex-start',

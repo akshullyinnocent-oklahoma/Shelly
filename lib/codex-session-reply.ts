@@ -1,8 +1,9 @@
-import { detectCodexActiveTranscript } from '@/lib/codex-pty-detection';
+import { detectCodexActiveTranscript, detectCodexApprovalPrompt } from '@/lib/codex-pty-detection';
 import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
 import type { AgentChatSession } from '@/store/agent-chat-store';
 import { useTerminalStore } from '@/store/terminal-store';
 import type { TabSession } from '@/store/types';
+import { focusTerminalSession } from '@/lib/codex-session-resume';
 
 export type CodexReplyReadinessReason =
   | 'ready'
@@ -14,7 +15,8 @@ export type CodexReplyReadinessReason =
   | 'native_exited'
   | 'busy'
   | 'screen_unavailable'
-  | 'not_codex_terminal';
+  | 'not_codex_terminal'
+  | 'no_approval_prompt';
 
 export type CodexReplyBlockedReason = Exclude<CodexReplyReadinessReason, 'ready'>;
 
@@ -45,10 +47,103 @@ export type CodexReplySendResult =
       reason: CodexReplyBlockedReason;
     };
 
+export type CodexApprovalDecision = 'allow' | 'deny';
+
 const BUSY_CODEX_STATUSES = new Set(['THINKING', 'TOOL_RUNNING', 'WAITING_PERMISSION', 'ERROR']);
+const APPROVAL_CODEX_STATUS = 'WAITING_PERMISSION';
 
 export async function getCodexReplyReadiness(
   session: AgentChatSession | null | undefined,
+): Promise<CodexReplyReadiness> {
+  const readiness = await getBoundCodexTerminalReadiness(session);
+  if (!readiness.ready) return readiness;
+
+  if (BUSY_CODEX_STATUSES.has((session.currentStatus ?? '').trim().toUpperCase())) {
+    return {
+      ready: false,
+      reason: 'busy',
+      terminalSessionId: readiness.terminalSessionId,
+      nativeSessionId: readiness.nativeSessionId,
+    };
+  }
+
+  return readiness;
+}
+
+export async function getCodexApprovalReadiness(
+  session: AgentChatSession | null | undefined,
+): Promise<CodexReplyReadiness> {
+  const readiness = await getBoundCodexTerminalReadiness(session);
+  if (!readiness.ready) return readiness;
+
+  if ((session.currentStatus ?? '').trim().toUpperCase() !== APPROVAL_CODEX_STATUS) {
+    return {
+      ready: false,
+      reason: 'busy',
+      terminalSessionId: readiness.terminalSessionId,
+      nativeSessionId: readiness.nativeSessionId,
+    };
+  }
+
+  return getBoundCodexTerminalReadiness(session, { requireApprovalPrompt: true });
+}
+
+export async function sendCodexReply(
+  session: AgentChatSession | null | undefined,
+  text: string,
+): Promise<CodexReplySendResult> {
+  const message = normalizeReplyText(text);
+  if (!message.trim()) return { status: 'blocked', reason: 'empty_message' };
+
+  const readiness = await getCodexReplyReadiness(session);
+  if (readiness.ready === false) {
+    return { status: 'blocked', reason: readiness.reason };
+  }
+
+  try {
+    if (message.includes('\n')) {
+      await TerminalEmulator.pasteToSession(readiness.nativeSessionId, message);
+      await TerminalEmulator.writeToSession(readiness.nativeSessionId, '\r');
+    } else {
+      await TerminalEmulator.writeToSession(readiness.nativeSessionId, `${message}\r`);
+    }
+    return {
+      status: 'sent',
+      terminalSessionId: readiness.terminalSessionId,
+      nativeSessionId: readiness.nativeSessionId,
+    };
+  } catch {
+    return { status: 'failed', reason: 'screen_unavailable' };
+  }
+}
+
+export async function sendCodexApproval(
+  session: AgentChatSession | null | undefined,
+  decision: CodexApprovalDecision,
+): Promise<CodexReplySendResult> {
+  const readiness = await getCodexApprovalReadiness(session);
+  if (readiness.ready === false) {
+    return { status: 'blocked', reason: readiness.reason };
+  }
+
+  try {
+    if (!focusTerminalSession(readiness.terminalSessionId)) {
+      return { status: 'blocked', reason: 'terminal_missing' };
+    }
+    await TerminalEmulator.writeToSession(readiness.nativeSessionId, decision === 'allow' ? 'y\r' : 'n\r');
+    return {
+      status: 'sent',
+      terminalSessionId: readiness.terminalSessionId,
+      nativeSessionId: readiness.nativeSessionId,
+    };
+  } catch {
+    return { status: 'failed', reason: 'screen_unavailable' };
+  }
+}
+
+async function getBoundCodexTerminalReadiness(
+  session: AgentChatSession | null | undefined,
+  options: { requireApprovalPrompt?: boolean } = {},
 ): Promise<CodexReplyReadiness> {
   if (!session) return { ready: false, reason: 'no_session' };
   if (session.bindingConfidence !== 'reliable') {
@@ -93,11 +188,10 @@ export async function getCodexReplyReadiness(
       nativeSessionId: terminalSession.nativeSessionId,
     };
   }
-
-  if (BUSY_CODEX_STATUSES.has((session.currentStatus ?? '').trim().toUpperCase())) {
+  if (options.requireApprovalPrompt && !detectCodexApprovalPrompt(screenText)) {
     return {
       ready: false,
-      reason: 'busy',
+      reason: 'no_approval_prompt',
       terminalSessionId: terminalSession.id,
       nativeSessionId: terminalSession.nativeSessionId,
     };
@@ -109,35 +203,6 @@ export async function getCodexReplyReadiness(
     terminalSessionId: terminalSession.id,
     nativeSessionId: terminalSession.nativeSessionId,
   };
-}
-
-export async function sendCodexReply(
-  session: AgentChatSession | null | undefined,
-  text: string,
-): Promise<CodexReplySendResult> {
-  const message = normalizeReplyText(text);
-  if (!message.trim()) return { status: 'blocked', reason: 'empty_message' };
-
-  const readiness = await getCodexReplyReadiness(session);
-  if (readiness.ready === false) {
-    return { status: 'blocked', reason: readiness.reason };
-  }
-
-  try {
-    if (message.includes('\n')) {
-      await TerminalEmulator.pasteToSession(readiness.nativeSessionId, message);
-      await TerminalEmulator.writeToSession(readiness.nativeSessionId, '\r');
-    } else {
-      await TerminalEmulator.writeToSession(readiness.nativeSessionId, `${message}\r`);
-    }
-    return {
-      status: 'sent',
-      terminalSessionId: readiness.terminalSessionId,
-      nativeSessionId: readiness.nativeSessionId,
-    };
-  } catch {
-    return { status: 'failed', reason: 'screen_unavailable' };
-  }
 }
 
 function findBoundTerminalSession(session: AgentChatSession): TabSession | undefined {

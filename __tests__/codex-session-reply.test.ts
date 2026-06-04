@@ -10,6 +10,7 @@ const mockIsSessionAlive = jest.fn();
 const mockGetScreenText = jest.fn();
 const mockWriteToSession = jest.fn();
 const mockPasteToSession = jest.fn();
+const mockFocusTerminalSession = jest.fn();
 
 jest.mock('@/store/terminal-store', () => ({
   useTerminalStore: {
@@ -36,12 +37,22 @@ jest.mock('@/modules/terminal-emulator/src/TerminalEmulatorModule', () => ({
   },
 }));
 
-import { getCodexReplyReadiness, sendCodexReply } from '@/lib/codex-session-reply';
+jest.mock('@/lib/codex-session-resume', () => ({
+  focusTerminalSession: (sessionId: string) => mockFocusTerminalSession(sessionId),
+}));
+
+import { getCodexApprovalReadiness, getCodexReplyReadiness, sendCodexApproval, sendCodexReply } from '@/lib/codex-session-reply';
 
 const ACTIVE_CODEX_SCREEN = [
   '>_ OpenAI Codex (v0.135.0)',
   'directory: /data/data/dev.shelly.terminal/files/home',
   'gpt-5.5 default · /data/data/dev.shelly.terminal/files/home',
+].join('\n');
+
+const APPROVAL_CODEX_SCREEN = [
+  ACTIVE_CODEX_SCREEN,
+  'Approval requested',
+  'Allow this command? yes/no',
 ].join('\n');
 
 function terminalSession(
@@ -94,6 +105,8 @@ function resetMocks(): void {
   mockWriteToSession.mockResolvedValue(undefined);
   mockPasteToSession.mockReset();
   mockPasteToSession.mockResolvedValue(undefined);
+  mockFocusTerminalSession.mockReset();
+  mockFocusTerminalSession.mockReturnValue(true);
 }
 
 describe('codex session replies', () => {
@@ -161,6 +174,61 @@ describe('codex session replies', () => {
     }), 'next task');
 
     expect(result).toEqual({ status: 'blocked', reason: 'busy' });
+    expect(mockWriteToSession).not.toHaveBeenCalled();
+  });
+
+  it('allows approval decisions only while Codex is waiting for permission', async () => {
+    mockGetScreenText.mockResolvedValue(APPROVAL_CODEX_SCREEN);
+
+    const readiness = await getCodexApprovalReadiness(codexSession({
+      currentStatus: 'WAITING_PERMISSION',
+    }));
+
+    expect(readiness).toEqual({
+      ready: true,
+      reason: 'ready',
+      terminalSessionId: 'terminal-a',
+      nativeSessionId: 'shelly-1',
+    });
+  });
+
+  it('sends allow approval through the bound native PTY', async () => {
+    mockGetScreenText.mockResolvedValue(APPROVAL_CODEX_SCREEN);
+
+    const result = await sendCodexApproval(codexSession({
+      currentStatus: 'WAITING_PERMISSION',
+    }), 'allow');
+
+    expect(result.status).toBe('sent');
+    expect(mockFocusTerminalSession).toHaveBeenCalledWith('terminal-a');
+    expect(mockWriteToSession).toHaveBeenCalledWith('shelly-1', 'y\r');
+  });
+
+  it('sends deny approval through the bound native PTY', async () => {
+    mockGetScreenText.mockResolvedValue(APPROVAL_CODEX_SCREEN);
+
+    const result = await sendCodexApproval(codexSession({
+      currentStatus: 'WAITING_PERMISSION',
+    }), 'deny');
+
+    expect(result.status).toBe('sent');
+    expect(mockFocusTerminalSession).toHaveBeenCalledWith('terminal-a');
+    expect(mockWriteToSession).toHaveBeenCalledWith('shelly-1', 'n\r');
+  });
+
+  it('blocks approval decisions when Codex is not waiting for permission', async () => {
+    const result = await sendCodexApproval(codexSession(), 'allow');
+
+    expect(result).toEqual({ status: 'blocked', reason: 'busy' });
+    expect(mockWriteToSession).not.toHaveBeenCalled();
+  });
+
+  it('blocks stale approval status when the terminal does not show an approval prompt', async () => {
+    const result = await sendCodexApproval(codexSession({
+      currentStatus: 'WAITING_PERMISSION',
+    }), 'allow');
+
+    expect(result).toEqual({ status: 'blocked', reason: 'no_approval_prompt' });
     expect(mockWriteToSession).not.toHaveBeenCalled();
   });
 

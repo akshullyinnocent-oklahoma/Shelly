@@ -28,13 +28,6 @@ class ScouterWidgetPromptActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val store = ScouterStateStore(this)
-        val initialTarget = findBoundReadyCodexTerminal(store)
-        if (initialTarget !is WidgetCodexTarget.Ready) {
-            showUnavailableDialog(initialTarget, store)
-            return
-        }
-
         input = EditText(this).apply {
             hint = getString(R.string.scouter_widget_prompt_hint)
             setTextColor(COLOR_TEXT)
@@ -259,6 +252,13 @@ class ScouterWidgetPromptActivity : Activity() {
         val store = ScouterStateStore(this)
         val target = findBoundReadyCodexTerminal(store)
         if (target !is WidgetCodexTarget.Ready) {
+            if (target.canResume()) {
+                store.recordWidgetPromptPending(prompt)
+                ScouterWidgetProvider.updateAll(this, force = true)
+                Toast.makeText(this, R.string.scouter_widget_prompt_queued_resume, Toast.LENGTH_SHORT).show()
+                launchAgentChatResume()
+                return true
+            }
             val messageId = target.messageResId()
             store.recordWidgetPromptFailed(getString(messageId))
             ScouterWidgetProvider.updateAll(this, force = true)

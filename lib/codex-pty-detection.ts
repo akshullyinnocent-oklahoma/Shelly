@@ -34,6 +34,20 @@ export function detectCodexActiveTranscript(output: string): boolean {
   return lastCodexPrompt >= 0 && lastCodexPrompt > lastShellPrompt;
 }
 
+export function detectCodexApprovalPrompt(output: string): boolean {
+  const text = stripTerminalControl(output);
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const recentLines = lines.slice(-8);
+  const tail = recentLines.join('\n');
+  if (!tail) return false;
+  const hasApprovalKeyword = /\b(?:approval|approve|permission|allow|deny|yes|no)\b/i.test(tail);
+  const hasChoice = recentLines.some((line) => /\b(?:y\/n|yes\/no|allow|deny|approve|reject)\b/i.test(line));
+  return hasApprovalKeyword && hasChoice;
+}
+
 export function detectShellReadyText(output: string): boolean {
   const text = stripTerminalControl(output);
   const lines = text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);

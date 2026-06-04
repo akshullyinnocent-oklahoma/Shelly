@@ -367,7 +367,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             }
             val prompt = if (widgetPromptAt >= lastPromptAt) conversation.widgetPrompt else conversation.lastPrompt
             if (!prompt.isNullOrBlank()) {
-                val label = if (conversation.widgetStatus == "queued" && widgetPromptAt > lastAnswerAt) {
+                val label = if (conversation.widgetStatus in WAITING_WIDGET_STATUSES && widgetPromptAt > lastAnswerAt) {
                     "WAIT   "
                 } else {
                     "YOU    "
@@ -568,5 +568,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
 
         private const val TAG = "ScouterWidget"
         private const val STALE_AFTER_MS = 10 * 60 * 1000L
+        private val WAITING_WIDGET_STATUSES = setOf("pending_terminal", "sending", "queued")
     }
 }

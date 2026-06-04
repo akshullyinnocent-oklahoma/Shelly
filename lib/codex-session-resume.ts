@@ -153,7 +153,7 @@ function terminalSessionHasAnySlot(sessionId: string): boolean {
   return useMultiPaneStore.getState().slots.some((slot) => slot?.tab === 'terminal' && slot.sessionId === sessionId);
 }
 
-function focusTerminalSession(sessionId: string): boolean {
+export function focusTerminalSession(sessionId: string): boolean {
   const terminalState = useTerminalStore.getState();
   if (!terminalState.sessions.some((session) => session.id === sessionId)) return false;
 

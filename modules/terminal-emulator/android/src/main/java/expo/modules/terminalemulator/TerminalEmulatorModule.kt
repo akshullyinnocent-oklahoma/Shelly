@@ -755,6 +755,41 @@ class TerminalEmulatorModule : Module() {
             null
         }
 
+        AsyncFunction("consumeScouterWidgetPendingPrompt") {
+            codexSessionId: String?,
+            ptySessionId: String?,
+            shellySessionId: String? ->
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).consumeWidgetPromptPending(
+                codexSessionId,
+                ptySessionId,
+                shellySessionId
+            )?.let { pending ->
+                mapOf(
+                    "prompt" to pending.prompt,
+                    "queuedAt" to pending.queuedAt,
+                    "codexSessionId" to pending.codexSessionId,
+                    "ptySessionId" to pending.ptySessionId,
+                    "shellySessionId" to pending.shellySessionId,
+                )
+            }
+        }
+
+        AsyncFunction("markScouterWidgetPromptQueued") { prompt: String ->
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).recordWidgetPromptQueued(prompt)
+            null
+        }
+
+        AsyncFunction("markScouterWidgetPromptFailed") { message: String ->
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).recordWidgetPromptFailed(message)
+            null
+        }
+
         // Phase 0: execve verification test
         AsyncFunction("testExecve") {
             val context = appContext.reactContext ?: return@AsyncFunction mapOf("success" to false, "error" to "no context")

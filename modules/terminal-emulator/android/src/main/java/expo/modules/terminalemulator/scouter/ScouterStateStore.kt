@@ -24,6 +24,14 @@ data class ScouterWidgetCodexBinding(
     val updatedAt: Long
 )
 
+data class ScouterWidgetPendingPrompt(
+    val prompt: String,
+    val queuedAt: Long,
+    val codexSessionId: String?,
+    val ptySessionId: String?,
+    val shellySessionId: String?
+)
+
 class ScouterStateStore(context: Context) {
     private val prefs = context.getSharedPreferences("scouter_state", Context.MODE_PRIVATE)
     private val helperStateFile = File(context.filesDir, "home/.scouter-state.json")
@@ -115,6 +123,22 @@ class ScouterStateStore(context: Context) {
         writeHelperState()
     }
 
+    fun recordWidgetPromptPending(prompt: String) {
+        val now = System.currentTimeMillis()
+        val binding = widgetCodexBinding()
+        prefs.edit()
+            .putString(KEY_WIDGET_PROMPT, prompt.take(MAX_WIDGET_TEXT_LENGTH))
+            .putLong(KEY_WIDGET_PROMPT_AT, now)
+            .putString(KEY_WIDGET_STATUS, WIDGET_STATUS_PENDING_TERMINAL)
+            .putLong(KEY_WIDGET_STATUS_AT, now)
+            .putString(KEY_WIDGET_PENDING_CODEX_SESSION_ID, binding?.codexSessionId?.takeIf { it.isNotBlank() })
+            .putString(KEY_WIDGET_PENDING_PTY_SESSION_ID, binding?.ptySessionId?.takeIf { it.isNotBlank() })
+            .putString(KEY_WIDGET_PENDING_SHELLY_SESSION_ID, binding?.shellySessionId?.takeIf { it.isNotBlank() })
+            .remove(KEY_WIDGET_ERROR)
+            .commit()
+        writeHelperState()
+    }
+
     fun recordWidgetPromptFailed(message: String) {
         prefs.edit()
             .putString(KEY_WIDGET_STATUS, "failed")
@@ -122,6 +146,50 @@ class ScouterStateStore(context: Context) {
             .putString(KEY_WIDGET_ERROR, message.take(MAX_WIDGET_TEXT_LENGTH))
             .commit()
         writeHelperState()
+    }
+
+    fun consumeWidgetPromptPending(
+        codexSessionId: String?,
+        ptySessionId: String?,
+        shellySessionId: String?
+    ): ScouterWidgetPendingPrompt? {
+        synchronized(lock) {
+            val status = prefs.getString(KEY_WIDGET_STATUS, null)
+            val statusAt = prefs.getLong(KEY_WIDGET_STATUS_AT, 0L)
+            val now = System.currentTimeMillis()
+            val retrySending = status == WIDGET_STATUS_SENDING &&
+                (statusAt <= 0L || now - statusAt > WIDGET_SENDING_RETRY_AFTER_MS)
+            if (status != WIDGET_STATUS_PENDING_TERMINAL && !retrySending) return null
+            val prompt = prefs.getString(KEY_WIDGET_PROMPT, null)?.ifBlank { null } ?: return null
+            val queuedAt = prefs.getLong(KEY_WIDGET_PROMPT_AT, 0L).takeIf { it > 0L } ?: now
+            val pendingCodexSessionId = prefs.getString(KEY_WIDGET_PENDING_CODEX_SESSION_ID, null)?.ifBlank { null }
+            val pendingPtySessionId = prefs.getString(KEY_WIDGET_PENDING_PTY_SESSION_ID, null)?.ifBlank { null }
+            val pendingShellySessionId = prefs.getString(KEY_WIDGET_PENDING_SHELLY_SESSION_ID, null)?.ifBlank { null }
+            if (!pendingTargetMatches(
+                    pendingCodexSessionId,
+                    pendingPtySessionId,
+                    pendingShellySessionId,
+                    codexSessionId,
+                    ptySessionId,
+                    shellySessionId
+                )
+            ) {
+                return null
+            }
+            prefs.edit()
+                .putString(KEY_WIDGET_STATUS, WIDGET_STATUS_SENDING)
+                .putLong(KEY_WIDGET_STATUS_AT, now)
+                .remove(KEY_WIDGET_ERROR)
+                .commit()
+            writeHelperStateLocked(readAllMutable())
+            return ScouterWidgetPendingPrompt(
+                prompt,
+                queuedAt,
+                pendingCodexSessionId,
+                pendingPtySessionId,
+                pendingShellySessionId
+            )
+        }
     }
 
     fun widgetConversation(): ScouterWidgetConversation {
@@ -270,7 +338,7 @@ class ScouterStateStore(context: Context) {
                 .commit()
         }
         if (!isCodexAnswerEvent(event)) return
-        if (widgetStatus != "queued") return
+        if (widgetStatus !in WIDGET_AWAITING_ANSWER_STATUSES) return
         val widgetPromptAt = prefs.getLong(KEY_WIDGET_PROMPT_AT, 0L)
         val cutoff = maxOf(widgetPromptAt, widgetStatusAt)
         if (cutoff <= 0L || event.timestamp < cutoff) return
@@ -355,6 +423,12 @@ class ScouterStateStore(context: Context) {
         private const val KEY_WIDGET_SHELLY_SESSION_ID = "widget_shelly_session_id"
         private const val KEY_WIDGET_CWD = "widget_cwd"
         private const val KEY_WIDGET_BINDING_AT = "widget_binding_at"
+        private const val KEY_WIDGET_PENDING_CODEX_SESSION_ID = "widget_pending_codex_session_id"
+        private const val KEY_WIDGET_PENDING_PTY_SESSION_ID = "widget_pending_pty_session_id"
+        private const val KEY_WIDGET_PENDING_SHELLY_SESSION_ID = "widget_pending_shelly_session_id"
+        private const val WIDGET_STATUS_PENDING_TERMINAL = "pending_terminal"
+        private const val WIDGET_STATUS_SENDING = "sending"
+        private const val WIDGET_SENDING_RETRY_AFTER_MS = 90_000L
         private const val MAX_RECENT_EVENTS = 120
         private const val MAX_WIDGET_TEXT_LENGTH = 500
         private val WIDGET_ANSWER_STATUSES = setOf(
@@ -362,5 +436,25 @@ class ScouterStateStore(context: Context) {
             ScouterStatus.COMPLETED
         )
         private val WIDGET_ANSWER_STATUS_NAMES = WIDGET_ANSWER_STATUSES.map { it.name }.toSet()
+        private val WIDGET_AWAITING_ANSWER_STATUSES = setOf("queued", WIDGET_STATUS_SENDING)
     }
+}
+
+private fun pendingTargetMatches(
+    pendingCodexSessionId: String?,
+    pendingPtySessionId: String?,
+    pendingShellySessionId: String?,
+    codexSessionId: String?,
+    ptySessionId: String?,
+    shellySessionId: String?
+): Boolean {
+    if (pendingPtySessionId.isNullOrBlank() &&
+        pendingShellySessionId.isNullOrBlank() &&
+        pendingCodexSessionId.isNullOrBlank()
+    ) {
+        return true
+    }
+    return (!pendingPtySessionId.isNullOrBlank() && pendingPtySessionId == ptySessionId) ||
+        (!pendingShellySessionId.isNullOrBlank() && pendingShellySessionId == shellySessionId) ||
+        (!pendingCodexSessionId.isNullOrBlank() && pendingCodexSessionId == codexSessionId)
 }
