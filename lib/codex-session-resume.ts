@@ -37,10 +37,12 @@ export async function resumeCodexSession(
   let failureReason: CodexSessionResumeFailureReason = 'no_terminal';
   const hasTerminalPane = visibleSlotEntries().some(({ slot }) => slot.tab === 'terminal');
 
-  if (hasTerminalPane) {
+  targetSessionId = await pickFallbackTerminalSessionId();
+
+  if (!targetSessionId && hasTerminalPane) {
     targetSessionId = createTerminalSessionForFocusedPane();
     if (!targetSessionId) failureReason = 'terminal_cap';
-  } else {
+  } else if (!targetSessionId) {
     const beforeIds = new Set(useTerminalStore.getState().sessions.map((terminalSession) => terminalSession.id));
     const addResult = options.addTerminalPane('terminal', { silent: true });
     if (addResult) {
@@ -49,7 +51,6 @@ export async function resumeCodexSession(
       targetSessionId = findNewTerminalSessionId(beforeIds);
     }
   }
-  targetSessionId = targetSessionId ?? await pickFallbackTerminalSessionId();
 
   if (!targetSessionId) {
     return {
@@ -63,8 +64,11 @@ export async function resumeCodexSession(
   const command = cwd
     ? `cd ${shellQuote(cwd)} && ${resumeCommand}\n`
     : `${resumeCommand}\n`;
-  useTerminalStore.getState().insertCommand(command, targetSessionId, { durable: true });
   focusTerminalSession(targetSessionId);
+  const wroteDirectly = await writeResumeCommandToTerminal(targetSessionId, command);
+  if (!wroteDirectly) {
+    useTerminalStore.getState().insertCommand(command, targetSessionId, { durable: true });
+  }
   return { status: 'queued', sessionId: targetSessionId };
 }
 
@@ -128,11 +132,20 @@ async function pickFallbackTerminalSessionId(): Promise<string | undefined> {
   }
 
   const activeSession = terminalSessions.find((session) => session.id === useTerminalStore.getState().activeSessionId);
-  if (activeSession && await isResumeQueueSafeTerminalSession(activeSession) && focusTerminalSession(activeSession.id)) {
+  if (
+    activeSession
+    && terminalSessionHasAnySlot(activeSession.id)
+    && await isResumeQueueSafeTerminalSession(activeSession)
+    && focusTerminalSession(activeSession.id)
+  ) {
     return activeSession.id;
   }
 
   return undefined;
+}
+
+function terminalSessionHasAnySlot(sessionId: string): boolean {
+  return useMultiPaneStore.getState().slots.some((slot) => slot?.tab === 'terminal' && slot.sessionId === sessionId);
 }
 
 function focusTerminalSession(sessionId: string): boolean {
@@ -229,6 +242,19 @@ async function isNativeSessionAlive(session: TabSession): Promise<boolean> {
     markTerminalSessionExited(session.id);
   }
   return alive;
+}
+
+async function writeResumeCommandToTerminal(sessionId: string, command: string): Promise<boolean> {
+  const session = useTerminalStore.getState().sessions.find((candidate) => candidate.id === sessionId);
+  if (!session) return false;
+  if (session.sessionStatus !== 'alive' || !session.isAlive) return false;
+  if (!await isNativeSessionAlive(session)) return false;
+  try {
+    await TerminalEmulator.writeToSession(session.nativeSessionId, command);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readTerminalScreen(session: TabSession): Promise<string | null> {
