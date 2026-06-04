@@ -15,6 +15,10 @@ import { execCommand } from '@/hooks/use-native-exec';
 import { useSettingsStore } from './settings-store';
 import { logInfo, logError } from '@/lib/debug-logger';
 import { getHomePath } from '@/lib/home-path';
+import {
+  getReservedNativeSessionIds,
+  reserveNativeSessionIdIfCreating,
+} from '@/lib/terminal-native-session-reservations';
 import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
 
 // ─── Multi-session pool ────────────────────────────────────────────────
@@ -40,6 +44,7 @@ type InsertCommandOptions = {
 
 function allocateSessionName(sessions: TabSession[]): string | null {
   const used = new Set(sessions.map((s) => s.nativeSessionId));
+  for (const id of getReservedNativeSessionIds()) used.add(id);
   for (const name of SESSION_NAMES) {
     if (!used.has(name)) return name;
   }
@@ -238,6 +243,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   removeSession: (id: string) => {
     const { sessions, activeSessionId } = get();
     if (sessions.length <= 1) return;
+    const removedSession = sessions.find((s) => s.id === id);
+    if (removedSession) {
+      reserveNativeSessionIdIfCreating(removedSession.id, removedSession.nativeSessionId);
+    }
     logInfo('TerminalStore', 'Session removed: ' + id);
     const newSessions = sessions.filter((s) => s.id !== id);
     const newActive = activeSessionId === id ? newSessions[0].id : activeSessionId;

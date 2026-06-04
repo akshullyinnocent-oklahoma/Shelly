@@ -52,6 +52,15 @@ import { parseAgentCommand, createAgent, installAgent, runAgentNow, stopAgent } 
 import { suggestTool } from '@/lib/agent-tool-router';
 import { runFirstLaunchSetup } from '@/lib/first-launch-setup';
 import { logInfo, logLifecycle } from '@/lib/debug-logger';
+import {
+  abandonNativeSessionCreateIfTimedOut,
+  beginNativeSessionCreate,
+  endNativeSessionCreate,
+  isNativeSessionCreateAttemptCurrent,
+  isNativeSessionCreateInFlight,
+  isNativeSessionCreateTimedOut,
+  markNativeSessionCreateTimedOut,
+} from '@/lib/terminal-native-session-reservations';
 import { colors as C } from '@/theme.config';
 import { KEY_BAR_HEIGHT } from '@/lib/layout-constants';
 
@@ -61,6 +70,15 @@ logInfo('Terminal', 'module loaded');
 
 type ConnectionState = 'connecting' | 'connected' | 'error';
 
+const NATIVE_SESSION_CREATE_TIMEOUT_MS = 15_000;
+
+class NativeSessionCreateTimeoutError extends Error {
+  constructor(nativeSessionId: string) {
+    super(`Native terminal session ${nativeSessionId} did not start within ${NATIVE_SESSION_CREATE_TIMEOUT_MS / 1000}s`);
+    this.name = 'NativeSessionCreateTimeoutError';
+  }
+}
+
 function sessionStatusToConnectionState(status: SessionStatus | undefined): ConnectionState {
   switch (status) {
     case 'alive': return 'connected';
@@ -69,6 +87,22 @@ function sessionStatusToConnectionState(status: SessionStatus | undefined): Conn
     case 'exited':
     default: return 'error';
   }
+}
+
+function withNativeSessionCreateTimeout<T>(promise: Promise<T>, nativeSessionId: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new NativeSessionCreateTimeoutError(nativeSessionId));
+    }, NATIVE_SESSION_CREATE_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function isNativeSessionCreateTimeout(error: unknown): boolean {
+  return error instanceof NativeSessionCreateTimeoutError;
 }
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -126,8 +160,6 @@ export default function TerminalScreen() {
 
   // Mutex: prevent concurrent ensureNativeSessions / createNativeSession calls
   const sessionMutexRef = useRef(false);
-  // Track which sessions are currently being created (prevent double-creation)
-  const creatingSessions = useRef(new Set<string>());
 
   // Voice dialog mode state
   const [voiceChatVisible, setVoiceChatVisible] = useState(false);
@@ -189,88 +221,165 @@ export default function TerminalScreen() {
     logInfo('Terminal', 'handleEditSubmit: AI edit not yet routed to AI pane');
   }, []);
 
+  const abandonTimedOutCreate = useCallback((session: TabSession): TabSession => {
+    if (!abandonNativeSessionCreateIfTimedOut(session.id, session.nativeSessionId)) return session;
+
+    const nextNativeSessionId = `${session.tmuxSession || session.nativeSessionId}-${generateId()}`;
+    logInfo(
+      'Terminal',
+      `abandonTimedOutCreate: ${session.nativeSessionId} -> ${nextNativeSessionId}`,
+    );
+
+    const nextSession: TabSession = {
+      ...session,
+      activeCli: null,
+      nativeSessionId: nextNativeSessionId,
+      sessionStatus: 'starting',
+      isAlive: false,
+    };
+    useTerminalStore.setState((state) => ({
+      sessions: state.sessions.map((s) => (s.id === session.id ? nextSession : s)),
+    }));
+    return nextSession;
+  }, []);
+
   // Create a native session via JNI forkpty (no TCP, no pty-helper)
   const createNativeSession = useCallback(async (session: TabSession) => {
     logInfo('Terminal', 'createNativeSession called for: ' + session.nativeSessionId);
-    if (creatingSessions.current.has(session.id)) {
+    const storeSession = useTerminalStore.getState().sessions.find((s) => s.id === session.id);
+    if (storeSession?.nativeSessionId !== session.nativeSessionId) {
+      logInfo('Terminal', 'createNativeSession: stale request ignored for ' + session.nativeSessionId);
+      return;
+    }
+    const attemptId = generateId();
+    if (!beginNativeSessionCreate(session.id, session.nativeSessionId, attemptId)) {
       logInfo('Terminal', 'createNativeSession: already in progress for ' + session.nativeSessionId);
       return;
     }
-    creatingSessions.current.add(session.id);
 
-    try {
-      // Create session via JNI forkpty. If a live session with the same id
-      // already exists in the Service-owned registry (Case B — the foreground
-      // service kept the forked PTY child alive across app background / RN
-      // reload), the native side returns resumed=true and we skip the Case C
-      // transcript replay below.
-      const createResult = await TerminalEmulator.createSession({
-        sessionId: session.nativeSessionId,
-        rows: 24,
-        cols: 80,
-      });
-      const resumedLive = createResult?.resumed === true;
-      if (resumedLive) {
-        logInfo('Terminal', 'createNativeSession: resumed live session ' + session.nativeSessionId);
+    const isCurrentAttempt = () => (
+      isNativeSessionCreateAttemptCurrent(session.id, session.nativeSessionId, attemptId)
+    );
+    const isStoreSessionCurrent = () => {
+      const currentSession = useTerminalStore.getState().sessions.find((s) => s.id === session.id);
+      return currentSession?.nativeSessionId === session.nativeSessionId && isCurrentAttempt();
+    };
+    const destroyIfStale = async (phase: string) => {
+      if (isStoreSessionCurrent()) return false;
+      logInfo('Terminal', `createNativeSession: stale ${phase} ignored for ${session.nativeSessionId}`);
+      try { await TerminalEmulator.destroySession(session.nativeSessionId); } catch {}
+      return true;
+    };
+
+    const finishCreate = async () => {
+      try {
+        // Create session via JNI forkpty. If a live session with the same id
+        // already exists in the Service-owned registry (Case B — the foreground
+        // service kept the forked PTY child alive across app background / RN
+        // reload), the native side returns resumed=true and we skip the Case C
+        // transcript replay below.
+        const createResult = await TerminalEmulator.createSession({
+          sessionId: session.nativeSessionId,
+          rows: 24,
+          cols: 80,
+        }) as { resumed?: boolean } | undefined;
+        if (await destroyIfStale('create')) return;
+        const resumedLive = createResult?.resumed === true;
+        if (resumedLive) {
+          logInfo('Terminal', 'createNativeSession: resumed live session ' + session.nativeSessionId);
+        }
+
+        // Start foreground service to prevent task-kill (may fail if Service class missing)
+        try { await TerminalEmulator.startSessionService(); } catch {}
+        if (await destroyIfStale('service start')) return;
+
+        // Update session status
+        let markedAlive = false;
+        useTerminalStore.setState((state) => ({
+          sessions: state.sessions.map((s) => {
+            if (s.id !== session.id || s.nativeSessionId !== session.nativeSessionId) return s;
+            markedAlive = true;
+            return {
+              ...s,
+              activeCli: resumedLive ? s.activeCli : null,
+              sessionStatus: 'alive' as const,
+              isAlive: true,
+            };
+          }),
+        }));
+        if (!markedAlive || await destroyIfStale('alive mark')) return;
+
+        // bug #65: Case C fallback — only when the native side did NOT resume a
+        // live session (i.e. the process was killed and forked afresh). Replay
+        // the previous transcript snapshot into the fresh emulator so the user
+        // sees their last-session history on startup. Visual-only; the shell
+        // itself is new. When resumedLive is true the real interactive state
+        // (vim, agent CLIs, REPLs) is still alive and replay would only
+        // double-print history, so we skip it.
+        if (!resumedLive && session.transcriptSnapshot && session.transcriptSnapshot.length > 0) {
+          try {
+            if (await destroyIfStale('transcript replay start')) return;
+            const header = '\r\n\x1b[2m── previous session (restored) ──\x1b[0m\r\n';
+            const footer = '\r\n\x1b[2m── end of restored history — fresh shell below ──\x1b[0m\r\n';
+            // The native emulator consumes bytes via writeToEmulator (no shell involvement)
+            await TerminalEmulator.writeToEmulator(session.nativeSessionId, header);
+            if (await destroyIfStale('transcript replay header')) return;
+            // Normalise newlines to CRLF so the emulator wraps rows correctly
+            const normalised = session.transcriptSnapshot.replace(/\r?\n/g, '\r\n');
+            await TerminalEmulator.writeToEmulator(session.nativeSessionId, normalised);
+            if (await destroyIfStale('transcript replay body')) return;
+            await TerminalEmulator.writeToEmulator(session.nativeSessionId, footer);
+            if (await destroyIfStale('transcript replay footer')) return;
+          } catch (e) {
+            logInfo('Terminal', 'transcript replay skipped: ' + String(e));
+          }
+        }
+
+        // First-launch setup: run CLI install commands directly on the live terminal
+        if (await destroyIfStale('first launch setup')) return;
+        runFirstLaunchSetup(session.nativeSessionId);
+      } catch (err: any) {
+        console.error('[Terminal] createNativeSession failed:', err);
+        if (!isStoreSessionCurrent()) {
+          logInfo('Terminal', 'createNativeSession: stale failure ignored for ' + session.nativeSessionId);
+          return;
+        }
+        if (!isNativeSessionCreateTimedOut(session.id, session.nativeSessionId)) {
+          Alert.alert('Terminal Error', String(err?.message || err));
+        }
+        useTerminalStore.setState((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === session.id && s.nativeSessionId === session.nativeSessionId
+              ? { ...s, activeCli: null, sessionStatus: 'exited' as const, isAlive: false }
+              : s
+          ),
+        }));
+      } finally {
+        endNativeSessionCreate(session.id, session.nativeSessionId, attemptId);
       }
+    };
 
-      // Start foreground service to prevent task-kill (may fail if Service class missing)
-      try { await TerminalEmulator.startSessionService(); } catch {}
-
-      // Update session status
+    const createPromise = finishCreate();
+    try {
+      await withNativeSessionCreateTimeout(createPromise, session.nativeSessionId);
+    } catch (err) {
+      if (!isNativeSessionCreateTimeout(err)) throw err;
+      if (!markNativeSessionCreateTimedOut(session.id, session.nativeSessionId, attemptId)) return;
+      logInfo('Terminal', 'createNativeSession timed out for: ' + session.nativeSessionId);
       useTerminalStore.setState((state) => ({
         sessions: state.sessions.map((s) =>
-          s.id === session.id
-            ? {
-                ...s,
-                activeCli: resumedLive ? s.activeCli : null,
-                sessionStatus: 'alive' as const,
-                isAlive: true,
-              }
+          s.id === session.id && s.nativeSessionId === session.nativeSessionId
+            ? { ...s, activeCli: null, sessionStatus: 'exited' as const, isAlive: false }
             : s
         ),
       }));
-
-      // bug #65: Case C fallback — only when the native side did NOT resume a
-      // live session (i.e. the process was killed and forked afresh). Replay
-      // the previous transcript snapshot into the fresh emulator so the user
-      // sees their last-session history on startup. Visual-only; the shell
-      // itself is new. When resumedLive is true the real interactive state
-      // (vim, agent CLIs, REPLs) is still alive and replay would only
-      // double-print history, so we skip it.
-      if (!resumedLive && session.transcriptSnapshot && session.transcriptSnapshot.length > 0) {
-        try {
-          const header = '\r\n\x1b[2m── previous session (restored) ──\x1b[0m\r\n';
-          const footer = '\r\n\x1b[2m── end of restored history — fresh shell below ──\x1b[0m\r\n';
-          // The native emulator consumes bytes via writeToEmulator (no shell involvement)
-          await TerminalEmulator.writeToEmulator(session.nativeSessionId, header);
-          // Normalise newlines to CRLF so the emulator wraps rows correctly
-          const normalised = session.transcriptSnapshot.replace(/\r?\n/g, '\r\n');
-          await TerminalEmulator.writeToEmulator(session.nativeSessionId, normalised);
-          await TerminalEmulator.writeToEmulator(session.nativeSessionId, footer);
-        } catch (e) {
-          logInfo('Terminal', 'transcript replay skipped: ' + String(e));
-        }
-      }
-
-      // First-launch setup: run CLI install commands directly on the live terminal
-      runFirstLaunchSetup(session.nativeSessionId);
-    } catch (err: any) {
-      console.error('[Terminal] createNativeSession failed:', err);
-      Alert.alert('Terminal Error', String(err?.message || err));
-      useTerminalStore.setState((state) => ({
-        sessions: state.sessions.map((s) =>
-          s.id === session.id ? { ...s, activeCli: null, sessionStatus: 'exited' as const, isAlive: false } : s
-        ),
-      }));
-    } finally {
-      creatingSessions.current.delete(session.id);
     }
   }, []);
 
   // Recover a session: destroy and re-create
   const recoverSession = useCallback(async (session: TabSession) => {
-    if (creatingSessions.current.has(session.id)) {
+    const targetSession = abandonTimedOutCreate(session);
+    if (isNativeSessionCreateInFlight(targetSession.id)) {
       console.log('[Terminal] recoverSession: already in progress for', session.nativeSessionId);
       return;
     }
@@ -278,25 +387,29 @@ export default function TerminalScreen() {
 
     useTerminalStore.setState((state) => ({
       sessions: state.sessions.map((s) =>
-        s.id === session.id ? { ...s, sessionStatus: 'recovering' as const } : s
+        s.id === targetSession.id ? { ...s, sessionStatus: 'recovering' as const } : s
       ),
     }));
 
-    try { await TerminalEmulator.destroySession(session.nativeSessionId); } catch {}
-    await createNativeSession(session);
+    try { await TerminalEmulator.destroySession(targetSession.nativeSessionId); } catch {}
+    await createNativeSession(targetSession);
 
     setIsRecovering(false);
-  }, [createNativeSession]);
+  }, [abandonTimedOutCreate, createNativeSession]);
 
   // Reset a session: destroy, clear state, start fresh
   const resetSession = useCallback(async (session: TabSession) => {
-    creatingSessions.current.delete(session.id);
-    try { await TerminalEmulator.destroySession(session.nativeSessionId); } catch {}
+    const targetSession = abandonTimedOutCreate(session);
+    if (isNativeSessionCreateInFlight(targetSession.id)) {
+      logInfo('Terminal', 'resetSession: already in progress for ' + targetSession.nativeSessionId);
+      return;
+    }
+    try { await TerminalEmulator.destroySession(targetSession.nativeSessionId); } catch {}
 
-    useTerminalStore.getState().clearSession(session.id);
+    useTerminalStore.getState().clearSession(targetSession.id);
 
-    await createNativeSession(session);
-  }, [createNativeSession]);
+    await createNativeSession(targetSession);
+  }, [abandonTimedOutCreate, createNativeSession]);
 
   // Ensure native sessions exist. Called on mount and foreground resume.
   // Reads `sessions` via getState() rather than via the closure to keep
@@ -335,14 +448,13 @@ export default function TerminalScreen() {
           console.log('[Terminal] ensureNativeSessions: session not alive, creating:', session.nativeSessionId);
           await createNativeSession(session);
         } else if (session.sessionStatus === 'exited') {
-          console.log('[Terminal] ensureNativeSessions: session exited, recovering:', session.nativeSessionId);
-          await recoverSession(session);
+          logInfo('Terminal', 'ensureNativeSessions: session exited; waiting for explicit reload: ' + session.nativeSessionId);
         }
       }
     } finally {
       sessionMutexRef.current = false;
     }
-  }, [createNativeSession, recoverSession]);
+  }, [createNativeSession]);
 
   // Run when terminal sessions are mounted or rehydrated. APK installs /
   // process restarts can restore persisted sessions after the first render;
@@ -909,7 +1021,7 @@ export default function TerminalScreen() {
         <View style={[StyleSheet.absoluteFill, { backgroundColor: terminalPaneBg, justifyContent: 'center', alignItems: 'center', zIndex: 10 }]}>
           <ActivityIndicator size="small" color={C.accent} />
           <Text style={{ color: C.text3, fontFamily: 'JetBrainsMono_400Regular', fontSize: 11, marginTop: 8 }}>
-            Starting terminal...
+            {t('terminal.connecting_terminal')}
           </Text>
         </View>
       )}

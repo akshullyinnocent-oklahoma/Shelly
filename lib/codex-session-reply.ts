@@ -207,14 +207,15 @@ async function getBoundCodexTerminalReadiness(
 
 function findBoundTerminalSession(session: AgentChatSession): TabSession | undefined {
   const terminalSessions = useTerminalStore.getState().sessions;
-  const ptySessionId = session.ptySessionId?.trim();
-  if (ptySessionId) {
-    return terminalSessions.find((candidate) => candidate.nativeSessionId === ptySessionId);
-  }
-
   const shellySessionId = session.shellySessionId?.trim();
-  if (!shellySessionId) return undefined;
-  return terminalSessions.find((candidate) => candidate.id === shellySessionId);
+  const shellyMatch = shellySessionId
+    ? terminalSessions.find((candidate) => candidate.id === shellySessionId)
+    : undefined;
+  if (shellyMatch) return shellyMatch;
+
+  const ptySessionId = session.ptySessionId?.trim();
+  if (!ptySessionId) return undefined;
+  return terminalSessions.find((candidate) => candidate.nativeSessionId === ptySessionId);
 }
 
 async function isNativeSessionAlive(session: TabSession): Promise<boolean> {
