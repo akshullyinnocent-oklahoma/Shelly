@@ -108,9 +108,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private fun updateWidgets(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val store = ScouterStateStore(context)
             val snapshots = if (store.isEnabled()) store.all() else emptyList()
+            val conversation = if (store.isEnabled()) store.widgetConversation() else null
             val load = lightweightLoad()
             ids.forEach { id ->
-                runCatching { manager.updateAppWidget(id, render(context, snapshots, load)) }
+                runCatching { manager.updateAppWidget(id, render(context, snapshots, conversation, load)) }
                     .onFailure { Log.w(TAG, "Scouter widget update failed for id=$id", it) }
             }
         }
@@ -129,10 +130,15 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private fun render(context: Context, snapshots: List<SessionSnapshot>, load: ScouterSystemLoad): RemoteViews {
+        private fun render(
+            context: Context,
+            snapshots: List<SessionSnapshot>,
+            conversation: ScouterWidgetConversation?,
+            load: ScouterSystemLoad
+        ): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.scouter_widget_medium)
             launchPendingIntent(context)?.let { views.setOnClickPendingIntent(R.id.scouter_widget_root, it) }
-            agentChatPendingIntent(context)?.let { views.setOnClickPendingIntent(R.id.scouter_codex_ask, it) }
+            promptPendingIntent(context)?.let { views.setOnClickPendingIntent(R.id.scouter_codex_ask, it) }
 
             val codex = latestFor(snapshots, ScouterSource.CODEX)
             val local = latestFor(snapshots, ScouterSource.LOCAL_LLM)
@@ -147,10 +153,11 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 emptyTitle = "AGENT: CODEX",
                 emptyBadge = "CX",
                 emptyDetail = "STATE  WAIT [..] no Codex session",
-                emptyMetrics = listOf(
+                emptyMetrics = widgetConversationLine(conversation) ?: listOf(
                     "CTX [..........] --% · TOK --",
                     "FLOW in -- / out -- · CACHE -- · RATE --"
-                ).joinToString("\n")
+                ).joinToString("\n"),
+                conversation = conversation
             )
             bindRow(
                 views = views,
@@ -166,7 +173,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 emptyMetrics = listOf(
                     "WAVE ........ · TPS --",
                     "PING --ms · PROBE 8080/11434"
-                ).joinToString("\n")
+                ).joinToString("\n"),
+                conversation = null
             )
             val latestAt = listOfNotNull(codex?.lastEventAt, local?.lastEventAt).maxOrNull()
             views.setTextViewText(
@@ -187,7 +195,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             emptyTitle: String,
             emptyBadge: String,
             emptyDetail: String,
-            emptyMetrics: String
+            emptyMetrics: String,
+            conversation: ScouterWidgetConversation?
         ) {
             if (snapshot == null) {
                 views.setTextViewText(titleId, emptyTitle)
@@ -208,7 +217,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             views.setTextViewText(titleId, title.redactForScouter())
             views.setTextViewText(badgeId, snapshot.source.badge())
             views.setTextViewText(detailId, statusLine(snapshot, project, stale).redactForScouter())
-            views.setTextViewText(metricsId, metricsLine(snapshot))
+            views.setTextViewText(metricsId, metricsLine(snapshot, conversation))
             views.setInt(dotId, "setColorFilter", colorForStatus(snapshot.currentStatus, stale))
         }
 
@@ -228,9 +237,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private fun agentChatPendingIntent(context: Context): PendingIntent? {
-            val launchIntent = Intent(Intent.ACTION_VIEW, Uri.parse("shelly://agent-chat?compose=1"))
-                .setPackage(context.packageName)
+        private fun promptPendingIntent(context: Context): PendingIntent? {
+            val launchIntent = Intent(context, ScouterWidgetPromptActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             return PendingIntent.getActivity(
                 context,
@@ -286,11 +294,15 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             }
         }
 
-        private fun metricsLine(snapshot: SessionSnapshot): String {
-            return if (snapshot.source == ScouterSource.LOCAL_LLM) localMetrics(snapshot) else codexMetrics(snapshot)
+        private fun metricsLine(snapshot: SessionSnapshot, conversation: ScouterWidgetConversation?): String {
+            return if (snapshot.source == ScouterSource.LOCAL_LLM) {
+                localMetrics(snapshot)
+            } else {
+                codexMetrics(snapshot, conversation)
+            }
         }
 
-        private fun codexMetrics(snapshot: SessionSnapshot): String {
+        private fun codexMetrics(snapshot: SessionSnapshot, conversation: ScouterWidgetConversation?): String {
             val lines = mutableListOf<String>()
             val contextParts = mutableListOf<String>()
             contextParts += contextGauge(snapshot)
@@ -316,8 +328,31 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             }
             lines += flowParts.joinToString(" · ")
             if (needsDedicatedRateLimitLine(snapshot)) lines += rateLimitLine(snapshot)
+            widgetConversationLine(conversation)?.let { lines += it }
 
             return lines.filter { it.isNotBlank() }.joinToString("\n")
+        }
+
+        private fun widgetConversationLine(conversation: ScouterWidgetConversation?): String? {
+            if (conversation == null) return null
+            conversation.widgetError?.let { return "ASK failed · ${shorten(it.redactForScouter(), 44)}" }
+            val widgetPromptAt = conversation.widgetPromptAt ?: 0L
+            val lastAnswerAt = conversation.lastAnswerAt ?: 0L
+            val lastPromptAt = conversation.lastPromptAt ?: 0L
+            val prompt = conversation.widgetPrompt ?: conversation.lastPrompt
+            if (prompt != null && widgetPromptAt > lastAnswerAt) {
+                val status = when (conversation.widgetStatus) {
+                    "queued" -> "ASK sent"
+                    else -> "Q"
+                }
+                return "$status · ${shorten(prompt.redactForScouter(), 44)}"
+            }
+            val answer = conversation.lastAnswer?.takeIf { it.isNotBlank() }
+            if (answer != null && lastAnswerAt >= lastPromptAt) {
+                return "A ${shorten(answer.redactForScouter(), 50)}"
+            }
+            if (prompt != null) return "Q · ${shorten(prompt.redactForScouter(), 44)}"
+            return null
         }
 
         private fun needsDedicatedRateLimitLine(snapshot: SessionSnapshot): Boolean {

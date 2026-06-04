@@ -5,6 +5,25 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class ScouterWidgetConversation(
+    val lastPrompt: String?,
+    val lastPromptAt: Long?,
+    val lastAnswer: String?,
+    val lastAnswerAt: Long?,
+    val widgetPrompt: String?,
+    val widgetPromptAt: Long?,
+    val widgetStatus: String?,
+    val widgetError: String?
+)
+
+data class ScouterWidgetCodexBinding(
+    val codexSessionId: String?,
+    val ptySessionId: String?,
+    val shellySessionId: String?,
+    val cwd: String?,
+    val updatedAt: Long
+)
+
 class ScouterStateStore(context: Context) {
     private val prefs = context.getSharedPreferences("scouter_state", Context.MODE_PRIVATE)
     private val helperStateFile = File(context.filesDir, "home/.scouter-state.json")
@@ -80,6 +99,100 @@ class ScouterStateStore(context: Context) {
             put("recentEvents", JSONArray().also { arr ->
                 recentEvents.forEach { arr.put(it) }
             })
+        }
+    }
+
+    fun recordWidgetPromptQueued(prompt: String) {
+        val now = System.currentTimeMillis()
+        prefs.edit()
+            .putString(KEY_WIDGET_PROMPT, prompt.take(MAX_WIDGET_TEXT_LENGTH))
+            .putLong(KEY_WIDGET_PROMPT_AT, now)
+            .putString(KEY_WIDGET_STATUS, "queued")
+            .remove(KEY_WIDGET_ERROR)
+            .commit()
+        writeHelperState()
+    }
+
+    fun recordWidgetPromptFailed(message: String) {
+        prefs.edit()
+            .putString(KEY_WIDGET_STATUS, "failed")
+            .putString(KEY_WIDGET_ERROR, message.take(MAX_WIDGET_TEXT_LENGTH))
+            .commit()
+        writeHelperState()
+    }
+
+    fun widgetConversation(): ScouterWidgetConversation {
+        synchronized(lock) {
+            val recent = readRecentEventJsons().sortedBy { it.optLong("timestamp", 0L) }
+            val lastPrompt = recent.lastOrNull { event ->
+                event.optString("source") == ScouterSource.CODEX.name &&
+                    event.optString("eventType") == ScouterEventType.USER_PROMPT.name &&
+                    event.optString("lastMessage").isNotBlank()
+            }
+            val lastAnswer = recent.lastOrNull { event ->
+                event.optString("source") == ScouterSource.CODEX.name &&
+                    event.optString("lastMessage").isNotBlank() &&
+                    event.optString("eventType") != ScouterEventType.USER_PROMPT.name &&
+                    event.optString("derivedStatus") in setOf(
+                        ScouterStatus.IDLE.name,
+                        ScouterStatus.COMPLETED.name
+                    )
+            }
+            return ScouterWidgetConversation(
+                lastPrompt = lastPrompt?.optString("lastMessage")?.ifBlank { null },
+                lastPromptAt = lastPrompt?.optLong("timestamp", 0L)?.takeIf { it > 0L },
+                lastAnswer = lastAnswer?.optString("lastMessage")?.ifBlank { null },
+                lastAnswerAt = lastAnswer?.optLong("timestamp", 0L)?.takeIf { it > 0L },
+                widgetPrompt = prefs.getString(KEY_WIDGET_PROMPT, null)?.ifBlank { null },
+                widgetPromptAt = prefs.getLong(KEY_WIDGET_PROMPT_AT, 0L).takeIf { it > 0L },
+                widgetStatus = prefs.getString(KEY_WIDGET_STATUS, null)?.ifBlank { null },
+                widgetError = prefs.getString(KEY_WIDGET_ERROR, null)?.ifBlank { null }
+            )
+        }
+    }
+
+    fun setWidgetCodexBinding(
+        codexSessionId: String?,
+        ptySessionId: String?,
+        shellySessionId: String?,
+        cwd: String?
+    ) {
+        if (ptySessionId.isNullOrBlank()) {
+            clearWidgetCodexBinding()
+            return
+        }
+        prefs.edit()
+            .putString(KEY_WIDGET_CODEX_SESSION_ID, codexSessionId?.takeIf { it.isNotBlank() })
+            .putString(KEY_WIDGET_PTY_SESSION_ID, ptySessionId)
+            .putString(KEY_WIDGET_SHELLY_SESSION_ID, shellySessionId?.takeIf { it.isNotBlank() })
+            .putString(KEY_WIDGET_CWD, cwd?.takeIf { it.isNotBlank() })
+            .putLong(KEY_WIDGET_BINDING_AT, System.currentTimeMillis())
+            .commit()
+        writeHelperState()
+    }
+
+    fun clearWidgetCodexBinding() {
+        prefs.edit()
+            .remove(KEY_WIDGET_CODEX_SESSION_ID)
+            .remove(KEY_WIDGET_PTY_SESSION_ID)
+            .remove(KEY_WIDGET_SHELLY_SESSION_ID)
+            .remove(KEY_WIDGET_CWD)
+            .remove(KEY_WIDGET_BINDING_AT)
+            .commit()
+        writeHelperState()
+    }
+
+    fun widgetCodexBinding(): ScouterWidgetCodexBinding? {
+        synchronized(lock) {
+            val ptySessionId = prefs.getString(KEY_WIDGET_PTY_SESSION_ID, null)?.ifBlank { null }
+                ?: return null
+            return ScouterWidgetCodexBinding(
+                codexSessionId = prefs.getString(KEY_WIDGET_CODEX_SESSION_ID, null)?.ifBlank { null },
+                ptySessionId = ptySessionId,
+                shellySessionId = prefs.getString(KEY_WIDGET_SHELLY_SESSION_ID, null)?.ifBlank { null },
+                cwd = prefs.getString(KEY_WIDGET_CWD, null)?.ifBlank { null },
+                updatedAt = prefs.getLong(KEY_WIDGET_BINDING_AT, 0L)
+            )
         }
     }
 
@@ -195,6 +308,16 @@ class ScouterStateStore(context: Context) {
         private const val KEY_PORT = "runtime_port"
         private const val KEY_SNAPSHOTS = "snapshots"
         private const val KEY_RECENT_EVENTS = "recent_events"
+        private const val KEY_WIDGET_PROMPT = "widget_prompt"
+        private const val KEY_WIDGET_PROMPT_AT = "widget_prompt_at"
+        private const val KEY_WIDGET_STATUS = "widget_status"
+        private const val KEY_WIDGET_ERROR = "widget_error"
+        private const val KEY_WIDGET_CODEX_SESSION_ID = "widget_codex_session_id"
+        private const val KEY_WIDGET_PTY_SESSION_ID = "widget_pty_session_id"
+        private const val KEY_WIDGET_SHELLY_SESSION_ID = "widget_shelly_session_id"
+        private const val KEY_WIDGET_CWD = "widget_cwd"
+        private const val KEY_WIDGET_BINDING_AT = "widget_binding_at"
         private const val MAX_RECENT_EVENTS = 120
+        private const val MAX_WIDGET_TEXT_LENGTH = 500
     }
 }

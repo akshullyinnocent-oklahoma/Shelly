@@ -62,6 +62,12 @@ declare class TerminalEmulatorModuleType extends NativeModule {
   getScouterDebugInfo(): Promise<string>;
   refreshScouter?(): Promise<string>;
   getScouterHookTemplate(source: 'cc' | 'codex' | string): Promise<string>;
+  setScouterCodexBinding?(binding: {
+    codexSessionId: string;
+    ptySessionId?: string | null;
+    shellySessionId?: string | null;
+    cwd?: string | null;
+  }): Promise<void>;
   addListener(eventName: string, listener: (event: any) => void): { remove(): void };
 }
 

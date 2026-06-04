@@ -233,6 +233,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       error: null,
       lastUpdatedAt: parsed.emittedAt ?? Date.now(),
     });
+    persistLatestWidgetCodexBinding(boundSessions);
   },
 
   recordCodexPtyCandidate: (candidate) => {
@@ -252,6 +253,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       ),
       events: applyBindingsToEvents(get().events, bindings),
     });
+    persistLatestWidgetCodexBinding(get().sessions);
   },
 
   bindCodexSessionToPty: (sessionId, candidate) => {
@@ -293,6 +295,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       latestSessionId: sessions[0]?.codexSessionId ?? null,
       lastUpdatedAt: Date.now(),
     });
+    persistLatestWidgetCodexBinding(sessions);
   },
 
   dismissSession: (sessionId) => {
@@ -396,6 +399,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         error: null,
         lastUpdatedAt: Date.now(),
       });
+      persistLatestWidgetCodexBinding(boundSessions);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       set({ loading: false, error: message, lastUpdatedAt: Date.now() });
@@ -447,6 +451,31 @@ function stopLiveSubscription(): void {
   } catch (error) {
     logError('AgentChatStore', 'live event unsubscribe failed', error);
   }
+}
+
+function persistLatestWidgetCodexBinding(sessions: AgentChatSession[]): void {
+  const session = sessions.find((candidate) => (
+    candidate.bindingConfidence === 'reliable' && Boolean(candidate.ptySessionId?.trim())
+  ));
+  if (!session?.ptySessionId) {
+    TerminalEmulator.setScouterCodexBinding?.({
+      codexSessionId: '',
+      ptySessionId: null,
+      shellySessionId: null,
+      cwd: null,
+    }).catch((error) => {
+      logError('AgentChatStore', 'Failed to clear Scouter Codex binding for widget', error);
+    });
+    return;
+  }
+  TerminalEmulator.setScouterCodexBinding?.({
+    codexSessionId: session.codexSessionId,
+    ptySessionId: session.ptySessionId,
+    shellySessionId: session.shellySessionId ?? null,
+    cwd: session.cwd ?? null,
+  }).catch((error) => {
+    logError('AgentChatStore', 'Failed to persist Scouter Codex binding for widget', error);
+  });
 }
 
 async function hydrateDismissedSessionIds(

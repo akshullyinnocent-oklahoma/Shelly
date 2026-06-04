@@ -18,6 +18,7 @@ import androidx.core.content.FileProvider
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.terminalemulator.scouter.ScouterLifecycleService
+import expo.modules.terminalemulator.scouter.ScouterStateStore
 
 class TerminalEmulatorModule : Module() {
 
@@ -740,6 +741,18 @@ class TerminalEmulatorModule : Module() {
             val context = appContext.reactContext
                 ?: throw IllegalStateException("React context unavailable")
             ScouterLifecycleService.get(context).hookTemplate(source).toString(2)
+        }
+
+        AsyncFunction("setScouterCodexBinding") { binding: Map<String, Any?> ->
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).setWidgetCodexBinding(
+                codexSessionId = binding["codexSessionId"] as? String,
+                ptySessionId = binding["ptySessionId"] as? String,
+                shellySessionId = binding["shellySessionId"] as? String,
+                cwd = binding["cwd"] as? String,
+            )
+            null
         }
 
         // Phase 0: execve verification test
