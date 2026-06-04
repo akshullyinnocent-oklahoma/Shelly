@@ -155,12 +155,29 @@ describe('codex session replies', () => {
     expect(mockPasteToSession).not.toHaveBeenCalled();
   });
 
-  it('does not use a stale Shelly terminal id when the native PTY id has changed', async () => {
+  it('uses the current native PTY when the bound Shelly terminal id is stable', async () => {
     mockTerminalState.sessions = [terminalSession('terminal-a', 'shelly-recreated')];
 
     const result = await sendCodexReply(codexSession({
       ptySessionId: 'shelly-1',
       shellySessionId: 'terminal-a',
+    }), 'do it');
+
+    expect(result).toEqual({
+      status: 'sent',
+      terminalSessionId: 'terminal-a',
+      nativeSessionId: 'shelly-recreated',
+    });
+    expect(mockWriteToSession).toHaveBeenCalledWith('shelly-recreated', 'do it\r');
+    expect(mockPasteToSession).not.toHaveBeenCalled();
+  });
+
+  it('does not use a stale native PTY id without a Shelly terminal binding', async () => {
+    mockTerminalState.sessions = [terminalSession('terminal-a', 'shelly-recreated')];
+
+    const result = await sendCodexReply(codexSession({
+      ptySessionId: 'shelly-1',
+      shellySessionId: undefined,
     }), 'do it');
 
     expect(result).toEqual({ status: 'blocked', reason: 'terminal_missing' });
