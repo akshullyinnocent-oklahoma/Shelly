@@ -26,6 +26,13 @@ class ScouterWidgetPromptActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val store = ScouterStateStore(this)
+        val initialTarget = findBoundReadyCodexTerminal(store)
+        if (initialTarget !is WidgetCodexTarget.Ready) {
+            showUnavailableDialog(initialTarget, store)
+            return
+        }
+
         input = EditText(this).apply {
             hint = getString(R.string.scouter_widget_prompt_hint)
             setTextColor(COLOR_TEXT)
@@ -45,17 +52,7 @@ class ScouterWidgetPromptActivity : Activity() {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         dialog.setContentView(createPromptContent(dialog))
         dialog.setOnCancelListener { finish() }
-        dialog.show()
-        dialog.window?.apply {
-            setBackgroundDrawableResource(android.R.color.transparent)
-            setDimAmount(0.72f)
-            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setLayout(
-                (resources.displayMetrics.widthPixels * 0.82f).toInt(),
-                WindowManager.LayoutParams.WRAP_CONTENT
-            )
-            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
-        }
+        showStyledDialog(dialog, showKeyboard = true)
 
         input.requestFocus()
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
@@ -68,16 +65,41 @@ class ScouterWidgetPromptActivity : Activity() {
         super.onDestroy()
     }
 
+    private fun showUnavailableDialog(target: WidgetCodexTarget, store: ScouterStateStore) {
+        val messageId = target.messageResId()
+        store.recordWidgetPromptFailed(getString(messageId))
+        ScouterWidgetProvider.updateAll(this, force = true)
+
+        val dialog = Dialog(this)
+        promptDialog = dialog
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(createUnavailableContent(dialog, messageId))
+        dialog.setOnCancelListener { finish() }
+        showStyledDialog(dialog, showKeyboard = false)
+    }
+
+    private fun showStyledDialog(dialog: Dialog, showKeyboard: Boolean) {
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setDimAmount(0.72f)
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setLayout(
+                (resources.displayMetrics.widthPixels * 0.82f).toInt(),
+                WindowManager.LayoutParams.WRAP_CONTENT
+            )
+            val softInputMode = if (showKeyboard) {
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+            } else {
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+            }
+            setSoftInputMode(softInputMode)
+        }
+    }
+
     private fun createPromptContent(dialog: Dialog): LinearLayout {
         val density = resources.displayMetrics.density
         fun dp(value: Int): Int = (value * density).toInt()
-
-        val panelBackground = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(8).toFloat()
-            setColor(COLOR_PANEL)
-            setStroke(dp(1), COLOR_BORDER)
-        }
 
         val title = TextView(this).apply {
             text = getString(R.string.scouter_widget_prompt_title)
@@ -96,9 +118,10 @@ class ScouterWidgetPromptActivity : Activity() {
                 Toast.makeText(this, R.string.scouter_widget_prompt_empty, Toast.LENGTH_SHORT).show()
                 return@actionText
             }
-            sendPrompt(prompt)
-            dialog.dismiss()
-            finish()
+            if (sendPrompt(prompt, dialog)) {
+                dialog.dismiss()
+                finish()
+            }
         }
 
         val actions = LinearLayout(this).apply {
@@ -110,7 +133,7 @@ class ScouterWidgetPromptActivity : Activity() {
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = panelBackground
+            background = panelBackground(dp)
             setPadding(dp(22), dp(22), dp(22), dp(16))
             addView(title, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -131,6 +154,62 @@ class ScouterWidgetPromptActivity : Activity() {
         }
     }
 
+    private fun createUnavailableContent(dialog: Dialog, messageId: Int): LinearLayout {
+        val density = resources.displayMetrics.density
+        fun dp(value: Int): Int = (value * density).toInt()
+
+        val title = TextView(this).apply {
+            text = getString(R.string.scouter_widget_prompt_title)
+            setTextColor(COLOR_TEXT)
+            textSize = 20f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+        val message = TextView(this).apply {
+            text = getString(messageId)
+            setTextColor(COLOR_MUTED)
+            textSize = 15f
+            setLineSpacing(dp(2).toFloat(), 1.0f)
+        }
+        val close = actionText(R.string.scouter_widget_prompt_close) {
+            dialog.dismiss()
+            finish()
+        }
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            addView(close)
+        }
+
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = panelBackground(dp)
+            setPadding(dp(22), dp(22), dp(22), dp(16))
+            addView(title, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(message, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(18)
+            })
+            addView(actions, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(18)
+            })
+        }
+    }
+
+    private fun panelBackground(dp: (Int) -> Int): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(8).toFloat()
+        setColor(COLOR_PANEL)
+        setStroke(dp(1), COLOR_BORDER)
+    }
+
     private fun actionText(labelRes: Int, onClick: () -> Unit): TextView {
         val density = resources.displayMetrics.density
         fun dp(value: Int): Int = (value * density).toInt()
@@ -147,33 +226,43 @@ class ScouterWidgetPromptActivity : Activity() {
         }
     }
 
-    private fun sendPrompt(prompt: String) {
+    private fun replaceWithUnavailableContent(dialog: Dialog, messageId: Int) {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(input.windowToken, 0)
+        input.clearFocus()
+        dialog.setContentView(createUnavailableContent(dialog, messageId))
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+    }
+
+    private fun sendPrompt(prompt: String, dialog: Dialog): Boolean {
         val store = ScouterStateStore(this)
         val target = findBoundReadyCodexTerminal(store)
         if (target !is WidgetCodexTarget.Ready) {
             val messageId = target.messageResId()
             store.recordWidgetPromptFailed(getString(messageId))
             ScouterWidgetProvider.updateAll(this, force = true)
-            Toast.makeText(this, messageId, Toast.LENGTH_SHORT).show()
-            return
+            replaceWithUnavailableContent(dialog, messageId)
+            return false
         }
 
-        runCatching {
+        return runCatching {
             if (prompt.contains('\n')) {
                 target.session.paste(prompt)
                 target.session.write("\r")
             } else {
                 target.session.write("$prompt\r")
             }
-        }.onSuccess {
+        }.fold(onSuccess = {
             store.recordWidgetPromptQueued(prompt)
             ScouterWidgetProvider.updateAll(this, force = true)
             Toast.makeText(this, R.string.scouter_widget_prompt_sent, Toast.LENGTH_SHORT).show()
-        }.onFailure { error ->
+            true
+        }, onFailure = { error ->
             store.recordWidgetPromptFailed(error.message ?: error.javaClass.simpleName)
             ScouterWidgetProvider.updateAll(this, force = true)
             Toast.makeText(this, R.string.scouter_widget_prompt_no_codex, Toast.LENGTH_SHORT).show()
-        }
+            false
+        })
     }
 
     private fun findBoundReadyCodexTerminal(store: ScouterStateStore): WidgetCodexTarget {
