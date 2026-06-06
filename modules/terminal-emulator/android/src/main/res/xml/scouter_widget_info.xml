@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Full phone width (span the launcher columns), height driven by content.
+     targetCellWidth is clamped down to the grid width by the launcher, so a
+     high value yields a full-width widget on 4/5-column home screens. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-  android:minWidth="250dp"
-  android:minHeight="110dp"
-  android:targetCellWidth="4"
-  android:targetCellHeight="2"
+  android:minWidth="320dp"
+  android:minHeight="150dp"
+  android:targetCellWidth="5"
+  android:targetCellHeight="3"
   android:updatePeriodMillis="0"
   android:initialLayout="@layout/scouter_widget_medium"
   android:resizeMode="horizontal|vertical"
   android:widgetCategory="home_screen" />
-

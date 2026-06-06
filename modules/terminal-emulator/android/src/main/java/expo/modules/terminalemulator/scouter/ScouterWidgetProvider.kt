@@ -353,6 +353,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 lastApprovalAt > (conversation?.widgetStatusAt ?: 0L)
             views.setViewVisibility(R.id.scouter_codex_allow, if (hasApproval) View.VISIBLE else View.GONE)
             views.setViewVisibility(R.id.scouter_codex_deny, if (hasApproval) View.VISIBLE else View.GONE)
+            // While an approval is pending the ALLOW/DENY pills take over the
+            // bottom row; hide the ASK pill so they don't stack (G2: urgent
+            // action comes forward).
+            views.setViewVisibility(R.id.scouter_codex_ask, if (hasApproval) View.GONE else View.VISIBLE)
             if (hasApproval) {
                 views.setOnClickPendingIntent(R.id.scouter_codex_allow, approvalPendingIntent(context, allow = true))
                 views.setOnClickPendingIntent(R.id.scouter_codex_deny, approvalPendingIntent(context, allow = false))
