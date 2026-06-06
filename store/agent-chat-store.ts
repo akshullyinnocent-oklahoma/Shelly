@@ -168,6 +168,13 @@ const MAX_DISMISSED_SESSIONS = 200;
 const MAX_SESSION_TITLE_LENGTH = 48;
 const REFRESH_MS = 5_000;
 const DEDUPE_WINDOW_MS = 2_000;
+// User/assistant messages can legitimately repeat (e.g. "yes"/"continue"), so
+// they are deduped only when an identical copy falls inside this window — the
+// case where the optimistic widget echo and the JSONL transcript copy of the
+// SAME send arrive close together. Identical text sent further apart is an
+// intentional re-send and must be kept (a windowless set silently dropped it).
+// Matches the widget echo match window in AgentChatPane.
+const MESSAGE_DEDUPE_WINDOW_MS = 30_000;
 const BINDING_MATCH_WINDOW_MS = 15 * 60_000;
 const RESUME_BINDING_RESERVATION_MS = 5 * 60_000;
 const PTY_LAUNCH_TTL_MS = 2 * 60 * 60_000;
@@ -1358,8 +1365,8 @@ function isWidgetConversationRawEvent(rawEvent: unknown): rawEvent is { source: 
 
 function dedupeTimelineEvents(events: AgentChatEvent[]): AgentChatEvent[] {
   const recentByContent = new Map<string, AgentChatEvent>();
-  const seenUsersBySession = new Map<string, Set<string>>();
-  const seenAssistantsBySession = new Map<string, Set<string>>();
+  const seenUsersBySession = new Map<string, Map<string, number>>();
+  const seenAssistantsBySession = new Map<string, Map<string, number>>();
   const latestStatusBySession = new Map<string, AgentChatEvent>();
   const kept: AgentChatEvent[] = [];
   for (const event of [...events].sort((a, b) => a.timestamp - b.timestamp)) {
@@ -1373,14 +1380,17 @@ function dedupeTimelineEvents(events: AgentChatEvent[]): AgentChatEvent[] {
     }
     const key = messageContentKey(event);
     if (key && event.kind === 'user_message') {
-      const seenUsers = getSeenMessageSet(seenUsersBySession, event.codexSessionId);
-      if (seenUsers.has(key)) continue;
-      seenUsers.add(key);
+      const seenUsers = getSeenTimestampMap(seenUsersBySession, event.codexSessionId);
+      const previousTs = seenUsers.get(key);
+      // Events are sorted ascending, so the delta is always >= 0.
+      if (previousTs !== undefined && event.timestamp - previousTs <= MESSAGE_DEDUPE_WINDOW_MS) continue;
+      seenUsers.set(key, event.timestamp);
       seenAssistantsBySession.delete(event.codexSessionId);
     } else if (key && event.kind === 'assistant_message') {
-      const seenAssistants = getSeenMessageSet(seenAssistantsBySession, event.codexSessionId);
-      if (seenAssistants.has(key)) continue;
-      seenAssistants.add(key);
+      const seenAssistants = getSeenTimestampMap(seenAssistantsBySession, event.codexSessionId);
+      const previousTs = seenAssistants.get(key);
+      if (previousTs !== undefined && event.timestamp - previousTs <= MESSAGE_DEDUPE_WINDOW_MS) continue;
+      seenAssistants.set(key, event.timestamp);
       seenUsersBySession.delete(event.codexSessionId);
     } else if (key) {
       const previous = recentByContent.get(key);
@@ -1397,10 +1407,10 @@ function dedupeTimelineEvents(events: AgentChatEvent[]): AgentChatEvent[] {
   ].sort((a, b) => a.timestamp - b.timestamp);
 }
 
-function getSeenMessageSet(map: Map<string, Set<string>>, sessionId: string): Set<string> {
+function getSeenTimestampMap(map: Map<string, Map<string, number>>, sessionId: string): Map<string, number> {
   const existing = map.get(sessionId);
   if (existing) return existing;
-  const created = new Set<string>();
+  const created = new Map<string, number>();
   map.set(sessionId, created);
   return created;
 }

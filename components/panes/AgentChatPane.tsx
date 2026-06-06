@@ -47,6 +47,9 @@ import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
 
 const MAX_VISIBLE_SESSION_TABS = 4;
+const LOCAL_REPLY_EVENT_TTL_MS = 10 * 60 * 1000;
+const LOCAL_REPLY_EVENT_MATCH_WINDOW_MS = 30 * 1000;
+const MAX_LOCAL_REPLY_EVENTS = 24;
 
 type ResumeNotice =
   | { status: 'pending'; sessionId: string }
@@ -138,6 +141,7 @@ export default function AgentChatPane() {
   const [replyChecking, setReplyChecking] = useState(false);
   const [replySending, setReplySending] = useState(false);
   const [replyNotice, setReplyNotice] = useState<ReplyNotice | null>(null);
+  const [localReplyEvents, setLocalReplyEvents] = useState<AgentChatEvent[]>([]);
   const [approvalNotice, setApprovalNotice] = useState<ApprovalNotice | null>(null);
   const [approvalWorkingEventId, setApprovalWorkingEventId] = useState<string | null>(null);
   const [resumeNotice, setResumeNotice] = useState<ResumeNotice | null>(null);
@@ -184,12 +188,17 @@ export default function AgentChatPane() {
     if (!sessionId) return [];
     return events.filter((event) => event.codexSessionId === sessionId && event.kind !== 'status');
   }, [activeSession?.codexSessionId, events]);
-  const latestVisibleEventId = visibleEvents[visibleEvents.length - 1]?.id ?? null;
+  const timelineEvents = useMemo(() => {
+    const sessionId = activeSession?.codexSessionId;
+    if (!sessionId) return [];
+    return mergeVisibleAndLocalReplyEvents(visibleEvents, localReplyEvents, sessionId);
+  }, [activeSession?.codexSessionId, localReplyEvents, visibleEvents]);
+  const latestTimelineEventId = timelineEvents[timelineEvents.length - 1]?.id ?? null;
   const latestApprovalEventId = useMemo(
     () => [...visibleEvents].reverse().find((event) => event.kind === 'approval')?.id ?? null,
     [visibleEvents],
   );
-  const hasTimelineEvents = visibleEvents.length > 0;
+  const hasTimelineEvents = timelineEvents.length > 0;
   const replyReady = replyReadiness?.ready ?? false;
   const resumeWorking = Boolean(activeSession && resumeWorkingSessionId === activeSession.codexSessionId);
   const interruptWorking = Boolean(activeSession && interruptWorkingSessionId === activeSession.codexSessionId);
@@ -211,7 +220,7 @@ export default function AgentChatPane() {
   }, []);
 
   useEffect(() => {
-    if (!latestVisibleEventId) return;
+    if (!latestTimelineEventId) return;
     const frame = requestAnimationFrame(() => {
       listRef.current?.scrollToEnd({ animated: false });
     });
@@ -222,7 +231,7 @@ export default function AgentChatPane() {
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
-  }, [activeSession?.codexSessionId, latestVisibleEventId]);
+  }, [activeSession?.codexSessionId, latestTimelineEventId]);
 
   useEffect(() => {
     setResumeNotice(null);
@@ -233,15 +242,29 @@ export default function AgentChatPane() {
 
   useEffect(() => {
     if (!replyNotice || replyNotice.status !== 'sent') return;
-    const observed = visibleEvents.some((event) => (
-      event.role === 'user'
-      && normalizeReplyTextForMatch(event.text) === normalizeReplyTextForMatch(replyNotice.text)
-      && event.timestamp >= replyNotice.sentAt - 30_000
+    const observed = visibleEvents.some((event) => isObservedReplyTextEvent(
+      replyNotice.sessionId,
+      replyNotice.text,
+      replyNotice.sentAt,
+      event,
     ));
     if (observed) {
       setReplyNotice({ ...replyNotice, status: 'observed' });
     }
   }, [replyNotice, visibleEvents]);
+
+  useEffect(() => {
+    if (!activeSession?.codexSessionId || visibleEvents.length === 0) return;
+    setLocalReplyEvents((current) => removeObservedLocalReplyEvents(
+      current,
+      visibleEvents,
+      activeSession.codexSessionId,
+    ));
+  }, [activeSession?.codexSessionId, visibleEvents]);
+
+  useEffect(() => {
+    setLocalReplyEvents((current) => pruneLocalReplyEvents(current));
+  }, [activeSession?.codexSessionId, agentChatLastUpdatedAt]);
 
   useEffect(() => {
     if (!replyNotice) return;
@@ -401,7 +424,8 @@ export default function AgentChatPane() {
   const sendReply = useCallback(async () => {
     if (!activeSession || replySending || !draft.trim()) return;
     const sessionId = activeSession.codexSessionId;
-    const sentText = normalizeReplyTextForMatch(draft);
+    const sentText = normalizeReplyTextForDisplay(draft);
+    const sentAt = Date.now();
     setReplySending(true);
     const result = await sendCodexReply(activeSession, draft).catch(() => ({
       status: 'failed' as const,
@@ -410,15 +434,20 @@ export default function AgentChatPane() {
     setReplySending(false);
     if (result.status === 'sent') {
       setDraft('');
+      setLocalReplyEvents((current) => pruneLocalReplyEvents([
+        ...current,
+        buildLocalReplyEvent(sessionId, sentText, sentAt),
+      ]));
       setReplyNotice({
         status: 'sent',
         sessionId,
         text: sentText,
-        sentAt: Date.now(),
+        sentAt,
       });
       setReplyReadiness(null);
       setTimeout(() => void refresh(), 350);
       setTimeout(() => void refresh(), 1_200);
+      setTimeout(() => void refresh(), 2_500);
       return;
     }
     setReplyReadiness({ ready: false, reason: result.reason });
@@ -582,8 +611,8 @@ export default function AgentChatPane() {
         <FlatList
           ref={listRef}
           style={styles.list}
-          data={visibleEvents}
-          extraData={`${activeSession?.codexSessionId ?? ''}:${latestVisibleEventId ?? ''}:${visibleEvents.length}`}
+          data={timelineEvents}
+          extraData={`${activeSession?.codexSessionId ?? ''}:${latestTimelineEventId ?? ''}:${timelineEvents.length}`}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContent}
@@ -1099,8 +1128,105 @@ function shortSessionId(sessionId: string): string {
   return sessionId.slice(0, 8);
 }
 
-function normalizeReplyTextForMatch(value: string): string {
+function normalizeReplyTextForDisplay(value: string): string {
   return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd();
+}
+
+function normalizeReplyTextForMatch(value: string): string {
+  return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().replace(/\s+/g, ' ');
+}
+
+function buildLocalReplyEvent(
+  sessionId: string,
+  text: string,
+  timestamp: number,
+): AgentChatEvent {
+  return {
+    id: `local-reply:${sessionId}:${timestamp}`,
+    source: 'codex',
+    codexSessionId: sessionId,
+    role: 'user',
+    kind: 'user_message',
+    text,
+    timestamp,
+    rawEvent: { localReply: true },
+  };
+}
+
+function mergeVisibleAndLocalReplyEvents(
+  visibleEvents: AgentChatEvent[],
+  localReplyEvents: AgentChatEvent[],
+  sessionId: string,
+): AgentChatEvent[] {
+  const pendingLocalEvents = localReplyEvents.filter((localEvent) => (
+    localEvent.codexSessionId === sessionId
+    && !visibleEvents.some((event) => isObservedLocalReplyEvent(localEvent, event))
+  ));
+  if (pendingLocalEvents.length === 0) return visibleEvents;
+  return [...visibleEvents, ...pendingLocalEvents].sort((a, b) => {
+    const timeDiff = a.timestamp - b.timestamp;
+    if (timeDiff !== 0) return timeDiff;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function removeObservedLocalReplyEvents(
+  localReplyEvents: AgentChatEvent[],
+  visibleEvents: AgentChatEvent[],
+  sessionId: string,
+): AgentChatEvent[] {
+  let removed = false;
+  const nextEvents = localReplyEvents.filter((localEvent) => {
+    if (localEvent.codexSessionId !== sessionId) return true;
+    const observed = visibleEvents.some((event) => isObservedLocalReplyEvent(localEvent, event));
+    if (observed) removed = true;
+    return !observed;
+  });
+  if (!removed) return localReplyEvents;
+  return pruneLocalReplyEvents(nextEvents);
+}
+
+function pruneLocalReplyEvents(
+  localReplyEvents: AgentChatEvent[],
+  now = Date.now(),
+): AgentChatEvent[] {
+  const cutoff = now - LOCAL_REPLY_EVENT_TTL_MS;
+  const prunedEvents = localReplyEvents
+    .filter((event) => event.timestamp >= cutoff)
+    .slice(-MAX_LOCAL_REPLY_EVENTS);
+  if (
+    prunedEvents.length === localReplyEvents.length
+    && prunedEvents.every((event, index) => event === localReplyEvents[index])
+  ) {
+    return localReplyEvents;
+  }
+  return prunedEvents;
+}
+
+function isObservedLocalReplyEvent(localEvent: AgentChatEvent, event: AgentChatEvent): boolean {
+  return isObservedReplyTextEvent(
+    localEvent.codexSessionId,
+    localEvent.text,
+    localEvent.timestamp,
+    event,
+  );
+}
+
+function isObservedReplyTextEvent(
+  sessionId: string,
+  text: string,
+  sentAt: number,
+  event: AgentChatEvent,
+): boolean {
+  const elapsed = event.timestamp - sentAt;
+  return (
+    event.codexSessionId === sessionId
+    && event.role === 'user'
+    && event.kind === 'user_message'
+    && elapsed >= 0
+    && elapsed <= LOCAL_REPLY_EVENT_MATCH_WINDOW_MS
+    && normalizeReplyTextForMatch(event.text) === normalizeReplyTextForMatch(text)
+  );
 }
 
 function compactSessionTabs(

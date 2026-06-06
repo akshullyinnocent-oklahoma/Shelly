@@ -1195,7 +1195,7 @@ const ja: Record<string, string> = {
   'agent_chat.resume_notice_focused': '接続済みのCodexターミナルにフォーカスしました。',
   'agent_chat.interrupt_notice_pending': '接続先のCodexターミナルを中断しています...',
   'agent_chat.interrupt_notice_sent': '接続先のCodexターミナルへ中断を送信しました。',
-  'agent_chat.reply_notice_sent': '返信をターミナルへ送信しました。Codexログへの反映を待っています...',
+  'agent_chat.reply_notice_sent': '返信をターミナルへ送信しました。Codexの応答を待っています...',
   'agent_chat.reply_notice_observed': '返信がCodexログに反映されました。',
   'agent_chat.reply_status_checking': '接続先のCodexターミナルを確認しています...',
   'agent_chat.reply_status_ready': '接続済みのCodexターミナルへ返信できます。',

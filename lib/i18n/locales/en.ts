@@ -1196,7 +1196,7 @@ const en: Record<string, string> = {
   'agent_chat.resume_notice_focused': 'Bound Codex terminal focused.',
   'agent_chat.interrupt_notice_pending': 'Interrupting the bound Codex terminal...',
   'agent_chat.interrupt_notice_sent': 'Interrupt sent to the bound Codex terminal.',
-  'agent_chat.reply_notice_sent': 'Reply sent to Terminal. Waiting for Codex to record it...',
+  'agent_chat.reply_notice_sent': 'Reply sent to Terminal. Waiting for Codex to respond...',
   'agent_chat.reply_notice_observed': 'Reply appeared in the Codex log.',
   'agent_chat.reply_status_checking': 'Checking the bound Codex terminal...',
   'agent_chat.reply_status_ready': 'Ready to send replies to the bound Codex terminal.',
