@@ -200,6 +200,14 @@ public final class TerminalRow {
         mStyle[columnToSet] = style;
 
         final int newCodePointDisplayWidth = WcWidth.width(codePoint);
+        if (newCodePointDisplayWidth == 2 && columnToSet == mColumns - 1) {
+            // A wide glyph cannot occupy the final column. TerminalEmulator
+            // normally wraps before reaching this state, but resize/race
+            // edges can still route one here. Do not throw: a thrown
+            // exception makes TerminalSession drop the whole output chunk.
+            setChar(columnToSet, ' ', style);
+            return;
+        }
         // For wide characters (CJK), also set style on the second column they occupy
         if (newCodePointDisplayWidth == 2 && columnToSet + 1 < mStyle.length) {
             mStyle[columnToSet + 1] = style;
@@ -311,7 +319,7 @@ public final class TerminalRow {
             ++mSpaceUsed;
         } else if (oldCodePointDisplayWidth == 1 && newCodePointDisplayWidth == 2) {
             if (columnToSet == mColumns - 1) {
-                throw new IllegalArgumentException("Cannot put wide character in last column");
+                return;
             } else if (columnToSet == mColumns - 2) {
                 // Truncate the line to the second part of this wide char:
                 mSpaceUsed = (short) newNextColumnIndex;

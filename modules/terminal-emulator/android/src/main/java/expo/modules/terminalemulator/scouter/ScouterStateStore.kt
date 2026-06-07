@@ -45,7 +45,7 @@ data class ScouterWidgetPendingPromptTarget(
 class ScouterStateStore(context: Context) {
     private val prefs = context.getSharedPreferences("scouter_state", Context.MODE_PRIVATE)
     private val helperStateFile = File(context.filesDir, "home/.scouter-state.json")
-    private val lock = Any()
+    private val lock = STORE_LOCK
 
     fun isEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false)
 
@@ -530,8 +530,9 @@ class ScouterStateStore(context: Context) {
                 recentEvents.forEach { arr.put(it) }
             })
         }
-        helperStateFile.parentFile?.mkdirs()
-        val tmp = File(helperStateFile.parentFile, helperStateFile.name + ".tmp")
+        val parent = helperStateFile.parentFile ?: return
+        parent.mkdirs()
+        val tmp = File(parent, "${helperStateFile.name}.${android.os.Process.myTid()}.${System.nanoTime()}.tmp")
         tmp.writeText(json.toString(2))
         if (!tmp.renameTo(helperStateFile)) {
             tmp.copyTo(helperStateFile, overwrite = true)
@@ -540,6 +541,7 @@ class ScouterStateStore(context: Context) {
     }
 
     companion object {
+        private val STORE_LOCK = Any()
         private const val KEY_ENABLED = "enabled"
         private const val KEY_TOKEN = "session_token"
         private const val KEY_PORT = "runtime_port"

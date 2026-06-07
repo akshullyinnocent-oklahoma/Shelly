@@ -9,6 +9,7 @@ import android.text.InputType
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.Window
@@ -280,18 +281,17 @@ class ScouterWidgetPromptActivity : Activity() {
         }
 
         return runCatching {
-            if (prompt.contains('\n')) {
-                target.session.paste(prompt)
-                target.session.write("\r")
-            } else {
-                target.session.write("$prompt\r")
-            }
+            Log.i(TAG, "Submitting widget prompt to Codex terminal session=${target.session.sessionId} length=${prompt.length}")
+            target.session.write("\u0015")
+            target.session.paste(prompt)
+            target.session.write("\r")
         }.fold(onSuccess = {
             store.recordWidgetPromptQueued(prompt)
             ScouterWidgetProvider.updateAll(this, force = true)
             Toast.makeText(this, R.string.scouter_widget_prompt_sent, Toast.LENGTH_SHORT).show()
             true
         }, onFailure = { error ->
+            Log.w(TAG, "Failed to submit widget prompt to Codex terminal", error)
             store.recordWidgetPromptFailed(error.message ?: error.javaClass.simpleName)
             ScouterWidgetProvider.updateAll(this, force = true)
             Toast.makeText(this, R.string.scouter_widget_prompt_no_codex, Toast.LENGTH_SHORT).show()
@@ -346,6 +346,7 @@ class ScouterWidgetPromptActivity : Activity() {
         if (status == ScouterStatus.WAITING_PERMISSION && isApprovalPromptScreen(screenText)) {
             return WidgetCodexTarget.ApprovalNeeded(session)
         }
+        if (status in BUSY_CODEX_STATUSES) return WidgetCodexTarget.Busy
         return WidgetCodexTarget.Ready(session)
     }
 
@@ -401,7 +402,14 @@ class ScouterWidgetPromptActivity : Activity() {
         private val APPROVAL_KEYWORD_RE = Regex("""\b(?:approval|approve|permission|allow|deny|yes|no|proceed|continue)\b""", RegexOption.IGNORE_CASE)
         private val APPROVAL_CHOICE_RE = Regex("""\b(?:y/n|yes/no|allow|deny|approve|reject)\b|[\[(]\s*[yY]\s*/\s*[nN]\s*[\])]""", RegexOption.IGNORE_CASE)
         private val UUID_SUFFIX_RE = Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
+        private val BUSY_CODEX_STATUSES = setOf(
+            ScouterStatus.THINKING,
+            ScouterStatus.TOOL_RUNNING,
+            ScouterStatus.WAITING_PERMISSION,
+            ScouterStatus.ERROR
+        )
         private const val AGENT_CHAT_RESUME_URI = "shelly:///agent-chat?compose=1&source=widget&drainWidgetPrompt=1&returnHome=1"
+        private const val TAG = "ScouterWidgetPrompt"
         private val COLOR_PANEL = Color.rgb(3, 16, 22)
         private val COLOR_BORDER = Color.rgb(0, 157, 209)
         private val COLOR_ACCENT = Color.rgb(48, 213, 255)
