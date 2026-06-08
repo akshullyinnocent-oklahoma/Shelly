@@ -114,32 +114,38 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private fun updateWidgets(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val store = ScouterStateStore(context)
             val snapshots = if (store.isEnabled()) store.all() else emptyList()
-            val conversation = if (store.isEnabled()) store.widgetConversation() else null
+            val binding = if (store.isEnabled()) store.widgetCodexBinding() else null
+            val conversation = if (store.isEnabled()) store.widgetConversation(binding?.codexSessionId) else null
             val load = lightweightLoad()
             scheduleWaitExpiryRefresh(context, conversation)
             ids.forEach { id ->
-                runCatching { manager.updateAppWidget(id, render(context, snapshots, conversation, load)) }
+                runCatching { manager.updateAppWidget(id, render(context, snapshots, binding, conversation, load)) }
                     .onFailure { Log.w(TAG, "Scouter widget update failed for id=$id", it) }
             }
         }
 
         private fun scheduleWaitExpiryRefresh(context: Context, conversation: ScouterWidgetConversation?) {
             val status = conversation?.widgetStatus
-            if (status !in WAITING_WIDGET_STATUSES) {
-                cancelWaitExpiryRefresh(context)
-                return
-            }
             val statusAt = conversation?.widgetStatusAt
             if (statusAt == null) {
                 cancelWaitExpiryRefresh(context)
                 return
             }
-            val elapsed = System.currentTimeMillis() - statusAt
-            if (elapsed < 0L || elapsed > WIDGET_WAIT_DISPLAY_TIMEOUT_MS) {
+            val displayMs = when {
+                status in WAITING_WIDGET_STATUSES -> WIDGET_WAIT_DISPLAY_TIMEOUT_MS
+                status == "approval_allow" || status == "approval_deny" -> WIDGET_APPROVAL_SENT_DISPLAY_MS
+                else -> null
+            }
+            if (displayMs == null) {
                 cancelWaitExpiryRefresh(context)
                 return
             }
-            val delayMs = WIDGET_WAIT_DISPLAY_TIMEOUT_MS - elapsed + WAIT_EXPIRY_REFRESH_SLOP_MS
+            val elapsed = System.currentTimeMillis() - statusAt
+            if (elapsed < 0L || elapsed > displayMs) {
+                cancelWaitExpiryRefresh(context)
+                return
+            }
+            val delayMs = displayMs - elapsed + WAIT_EXPIRY_REFRESH_SLOP_MS
             val dueAt = System.currentTimeMillis() + delayMs
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val pendingIntent = waitExpiryRefreshPendingIntent(context)
@@ -196,6 +202,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private fun render(
             context: Context,
             snapshots: List<SessionSnapshot>,
+            binding: ScouterWidgetCodexBinding?,
             conversation: ScouterWidgetConversation?,
             load: ScouterSystemLoad
         ): RemoteViews {
@@ -203,9 +210,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             launchPendingIntent(context)?.let { views.setOnClickPendingIntent(R.id.scouter_widget_root, it) }
             promptPendingIntent(context)?.let { views.setOnClickPendingIntent(R.id.scouter_codex_ask, it) }
 
-            val codex = latestFor(snapshots, ScouterSource.CODEX)
+            val boundCodex = latestCodexForBinding(snapshots, binding)
+            val codex = boundCodex ?: latestFor(snapshots, ScouterSource.CODEX)
             val local = latestFor(snapshots, ScouterSource.LOCAL_LLM)
-            bindCodexApprovalActions(views, context, codex, conversation)
+            bindCodexApprovalActions(views, context, binding, boundCodex, conversation)
             bindRow(
                 views = views,
                 snapshot = codex,
@@ -222,7 +230,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                     "FLOW in -- / out -- · CACHE -- · RATE --"
                 ).joinToString("\n")
             )
-            bindCodexConversation(views, conversation)
+            bindCodexConversation(views, boundCodex, conversation)
             bindRow(
                 views = views,
                 snapshot = local,
@@ -287,6 +295,16 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             return snapshots.filter { it.source == source }.maxByOrNull { it.lastEventAt }
         }
 
+        private fun latestCodexForBinding(
+            snapshots: List<SessionSnapshot>,
+            binding: ScouterWidgetCodexBinding?
+        ): SessionSnapshot? {
+            val target = normalizeCodexSessionId(binding?.codexSessionId) ?: return null
+            return snapshots
+                .filter { it.source == ScouterSource.CODEX && normalizeCodexSessionId(it.sessionId) == target }
+                .maxByOrNull { it.lastEventAt }
+        }
+
         private fun launchPendingIntent(context: Context): PendingIntent? {
             val launchIntent = Intent(Intent.ACTION_VIEW, Uri.parse("shelly://scouter"))
                 .setPackage(context.packageName)
@@ -315,7 +333,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private fun approvalPendingIntent(context: Context, allow: Boolean): PendingIntent {
+        private fun approvalPendingIntent(
+            context: Context,
+            allow: Boolean,
+            binding: ScouterWidgetCodexBinding?,
+            codex: SessionSnapshot?,
+            approvalAt: Long?,
+            approvalText: String?
+        ): PendingIntent {
             val launchIntent = Intent(context, ScouterWidgetPromptActivity::class.java)
                 .setAction(
                     if (allow) {
@@ -324,6 +349,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                         ScouterWidgetPromptActivity.ACTION_APPROVAL_DENY
                     }
                 )
+                .putExtra(ScouterWidgetPromptActivity.EXTRA_CODEX_SESSION_ID, codex?.sessionId ?: binding?.codexSessionId)
+                .putExtra(ScouterWidgetPromptActivity.EXTRA_PTY_SESSION_ID, binding?.ptySessionId)
+                .putExtra(ScouterWidgetPromptActivity.EXTRA_APPROVAL_AT, approvalAt ?: 0L)
+                .putExtra(ScouterWidgetPromptActivity.EXTRA_APPROVAL_TEXT, approvalText)
                 .addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TASK or
@@ -341,16 +370,21 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private fun bindCodexApprovalActions(
             views: RemoteViews,
             context: Context,
+            binding: ScouterWidgetCodexBinding?,
             codex: SessionSnapshot?,
             conversation: ScouterWidgetConversation?
         ) {
             val lastApprovalAt = conversation?.lastApprovalAt ?: 0L
-            val latestPromptAt = maxOf(conversation?.widgetPromptAt ?: 0L, conversation?.lastPromptAt ?: 0L)
-            val hasApproval = codex?.currentStatus == ScouterStatus.WAITING_PERMISSION &&
+            val widgetStatusAt = conversation?.widgetStatusAt ?: 0L
+            val decisionAfterApproval = ScouterStateStore.approvalDecisionFromStatus(conversation?.widgetStatus) != null &&
+                (lastApprovalAt <= 0L || widgetStatusAt >= lastApprovalAt)
+            val hasApproval = !binding?.codexSessionId.isNullOrBlank() &&
+                !binding?.ptySessionId.isNullOrBlank() &&
+                codex?.currentStatus == ScouterStatus.WAITING_PERMISSION &&
+                !isStale(codex) &&
+                lastApprovalAt > 0L &&
                 !conversation?.lastApproval.isNullOrBlank() &&
-                lastApprovalAt >= (conversation?.lastAnswerAt ?: 0L) &&
-                lastApprovalAt >= latestPromptAt &&
-                lastApprovalAt > (conversation?.widgetStatusAt ?: 0L)
+                !decisionAfterApproval
             views.setViewVisibility(R.id.scouter_codex_allow, if (hasApproval) View.VISIBLE else View.GONE)
             views.setViewVisibility(R.id.scouter_codex_deny, if (hasApproval) View.VISIBLE else View.GONE)
             // While an approval is pending the ALLOW/DENY pills take over the
@@ -358,8 +392,28 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             // action comes forward).
             views.setViewVisibility(R.id.scouter_codex_ask, if (hasApproval) View.GONE else View.VISIBLE)
             if (hasApproval) {
-                views.setOnClickPendingIntent(R.id.scouter_codex_allow, approvalPendingIntent(context, allow = true))
-                views.setOnClickPendingIntent(R.id.scouter_codex_deny, approvalPendingIntent(context, allow = false))
+                views.setOnClickPendingIntent(
+                    R.id.scouter_codex_allow,
+                    approvalPendingIntent(
+                        context,
+                        allow = true,
+                        binding = binding,
+                        codex = codex,
+                        approvalAt = lastApprovalAt,
+                        approvalText = conversation?.lastApproval
+                    )
+                )
+                views.setOnClickPendingIntent(
+                    R.id.scouter_codex_deny,
+                    approvalPendingIntent(
+                        context,
+                        allow = false,
+                        binding = binding,
+                        codex = codex,
+                        approvalAt = lastApprovalAt,
+                        approvalText = conversation?.lastApproval
+                    )
+                )
             }
         }
 
@@ -393,7 +447,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                     val action = tool?.let { "Running $it" } ?: "Running tool"
                     file?.let { "$action on $it" } ?: "$action in $project"
                 }
-                ScouterStatus.WAITING_PERMISSION -> "Waiting permission"
+                ScouterStatus.WAITING_PERMISSION -> "Permission needed"
                 ScouterStatus.COMPLETED -> "Completed in $project"
                 ScouterStatus.ERROR -> "Error in $project"
             }
@@ -449,9 +503,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
 
         private fun bindCodexConversation(
             views: RemoteViews,
+            codex: SessionSnapshot?,
             conversation: ScouterWidgetConversation?
         ) {
-            val preview = widgetConversationPreview(conversation)
+            val preview = widgetConversationPreview(codex, conversation)
             if (preview == null) {
                 views.setViewVisibility(R.id.scouter_codex_conversation, View.GONE)
                 views.setTextViewText(R.id.scouter_codex_conversation, "")
@@ -462,14 +517,20 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             views.setTextViewText(R.id.scouter_codex_conversation, preview.text)
         }
 
-        private fun widgetConversationPreview(conversation: ScouterWidgetConversation?): WidgetConversationPreview? {
-            if (conversation == null) return null
-            conversation.widgetError?.takeIf { it.isNotBlank() }?.let {
-                return WidgetConversationPreview(
-                    "ASK ERROR  ${shorten(it.redactForScouter(), 96)}",
-                    Color.rgb(255, 176, 96)
-                )
+        private fun widgetConversationPreview(
+            codex: SessionSnapshot?,
+            conversation: ScouterWidgetConversation?
+        ): WidgetConversationPreview? {
+            if (conversation == null) {
+                if (codex?.currentStatus == ScouterStatus.WAITING_PERMISSION && !isStale(codex)) {
+                    return WidgetConversationPreview(
+                        "PERMIT Codex permission requested",
+                        Color.rgb(255, 232, 128)
+                    )
+                }
+                return null
             }
+            val isApprovalFailure = conversation.widgetStatus == ScouterStateStore.approvalFailedStatus()
             val widgetPromptAt = conversation.widgetPromptAt ?: 0L
             val lastAnswerAt = conversation.lastAnswerAt ?: 0L
             val lastPromptAt = conversation.lastPromptAt ?: 0L
@@ -478,6 +539,55 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val latestPromptAt = maxOf(widgetPromptAt, lastPromptAt)
             val answer = conversation.lastAnswer?.takeIf { it.isNotBlank() }
             val approval = conversation.lastApproval?.takeIf { it.isNotBlank() }
+            val approvalDecision = ScouterStateStore.approvalDecisionFromStatus(conversation.widgetStatus)
+            val isApprovalPending = conversation.widgetStatus?.startsWith("approval_pending_") == true
+            val isApprovalSending = conversation.widgetStatus?.startsWith("approval_sending_") == true
+            if (
+                approvalDecision != null &&
+                isApprovalPending
+            ) {
+                return WidgetConversationPreview(
+                    "APPROVAL ${approvalDecisionLabel(approvalDecision)} queued",
+                    Color.rgb(255, 232, 128)
+                )
+            }
+            if (
+                approvalDecision != null &&
+                isApprovalSending
+            ) {
+                return WidgetConversationPreview(
+                    "APPROVAL ${approvalDecisionLabel(approvalDecision)} sending",
+                    Color.rgb(255, 232, 128)
+                )
+            }
+            val approvalDecisionAfterEvent = approvalDecision != null &&
+                !isApprovalPending &&
+                !isApprovalSending &&
+                (lastApprovalAt <= 0L || widgetStatusAt >= lastApprovalAt)
+            if (approvalDecisionAfterEvent) {
+                val ageMs = System.currentTimeMillis() - widgetStatusAt
+                if (ageMs <= WIDGET_APPROVAL_SENT_DISPLAY_MS) {
+                    return WidgetConversationPreview(
+                        "APPROVAL ${approvalDecisionLabel(approvalDecision)} sent",
+                        Color.rgb(184, 255, 208)
+                    )
+                }
+            }
+            val liveApproval = codex?.currentStatus == ScouterStatus.WAITING_PERMISSION && !isStale(codex)
+            if (liveApproval && !approvalDecisionAfterEvent) {
+                val text = approval ?: "Codex permission requested"
+                return WidgetConversationPreview(
+                    "PERMIT ${shorten(text.redactForScouter(), 120)}",
+                    Color.rgb(255, 232, 128)
+                )
+            }
+            conversation.widgetError?.takeIf { it.isNotBlank() }?.let {
+                val label = if (isApprovalFailure) "APPROVAL ERROR" else "ASK ERROR"
+                return WidgetConversationPreview(
+                    "$label  ${shorten(it.redactForScouter(), 96)}",
+                    Color.rgb(255, 176, 96)
+                )
+            }
             if (
                 answer != null &&
                 lastAnswerAt >= latestPromptAt &&
@@ -486,27 +596,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 return WidgetConversationPreview(
                     "CODEX  ${shorten(answer.redactForScouter(), 128)}",
                     Color.rgb(216, 255, 232)
-                )
-            }
-            if (
-                (conversation.widgetStatus == "approval_allow" || conversation.widgetStatus == "approval_deny") &&
-                widgetStatusAt >= latestPromptAt
-            ) {
-                val decision = if (conversation.widgetStatus == "approval_allow") "OK" else "NO"
-                return WidgetConversationPreview(
-                    "APPROVAL $decision sent",
-                    Color.rgb(184, 255, 208)
-                )
-            }
-            if (
-                approval != null &&
-                lastApprovalAt > lastAnswerAt &&
-                lastApprovalAt >= latestPromptAt &&
-                lastApprovalAt > widgetStatusAt
-            ) {
-                return WidgetConversationPreview(
-                    "APPROVE ${shorten(approval.redactForScouter(), 120)}",
-                    Color.rgb(255, 232, 128)
                 )
             }
             if (answer != null && lastAnswerAt >= latestPromptAt) {
@@ -532,6 +621,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 Color.rgb(184, 255, 208)
             )
         }
+
+        private fun approvalDecisionLabel(decision: String): String = if (decision == "deny") "NO" else "OK"
 
         private fun isActiveWidgetWait(
             conversation: ScouterWidgetConversation,
@@ -710,6 +801,12 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             return if (sessionId.length > 10) sessionId.take(8) else sessionId
         }
 
+        private fun normalizeCodexSessionId(sessionId: String?): String? {
+            val trimmed = sessionId?.trim().orEmpty()
+            if (trimmed.isBlank()) return null
+            return CODEX_SESSION_UUID_SUFFIX_RE.find(trimmed)?.groupValues?.getOrNull(1) ?: trimmed
+        }
+
         private fun shorten(value: String, max: Int): String {
             val cleaned = value.replace(Regex("\\s+"), " ").trim()
             return if (cleaned.length > max) cleaned.take(max - 1) + "…" else cleaned
@@ -733,7 +830,17 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             "expo.modules.terminalemulator.scouter.WIDGET_WAIT_EXPIRY_REFRESH"
         private const val STALE_AFTER_MS = 10 * 60 * 1000L
         private const val WIDGET_WAIT_DISPLAY_TIMEOUT_MS = 2 * 60 * 1000L
+        private const val WIDGET_APPROVAL_SENT_DISPLAY_MS = 12 * 1000L
         private const val WAIT_EXPIRY_REFRESH_SLOP_MS = 350L
-        private val WAITING_WIDGET_STATUSES = setOf("pending_terminal", "sending")
+        private val CODEX_SESSION_UUID_SUFFIX_RE =
+            Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
+        private val WAITING_WIDGET_STATUSES = setOf(
+            "pending_terminal",
+            "sending",
+            ScouterStateStore.approvalPendingStatus("allow"),
+            ScouterStateStore.approvalPendingStatus("deny"),
+            ScouterStateStore.approvalSendingStatus("allow"),
+            ScouterStateStore.approvalSendingStatus("deny")
+        )
     }
 }

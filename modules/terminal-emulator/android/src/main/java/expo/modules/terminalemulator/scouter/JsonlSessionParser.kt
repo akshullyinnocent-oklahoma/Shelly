@@ -151,7 +151,7 @@ class JsonlSessionParser(
                 isScouterRateLimitText(payload.optString("stderr")) ||
                 (hasErrorValue && rateLimitMessage != null)
             )
-        val isApproval = isCodexApprovalPayload(payloadType, toolName)
+        val isApproval = isCodexApprovalPayload(payload, payloadType, toolName)
         val approvalSummary = if (isApproval) approvalSummaryFromPayload(payload, message, toolName) else null
         val status = when {
             hasExplicitRateLimitError -> ScouterStatus.ERROR
@@ -250,7 +250,7 @@ class JsonlSessionParser(
             message,
             toolName
         )
-        val isApproval = isCodexApprovalPayload(payloadType, toolName)
+        val isApproval = isCodexApprovalPayload(payload, payloadType, toolName)
         val approvalSummary = if (isApproval) approvalSummaryFromPayload(payload, message, toolName) else null
         val status = when {
             isApproval -> ScouterStatus.WAITING_PERMISSION
@@ -350,11 +350,46 @@ class JsonlSessionParser(
         return "user_message" in payloadType || (payloadType == "message" && role == "user")
     }
 
-    private fun isCodexApprovalPayload(vararg values: String?): Boolean {
+    private fun isCodexApprovalPayload(
+        payload: JSONObject,
+        payloadType: String,
+        toolName: String?
+    ): Boolean {
+        val approval = payload.optJSONObject("approval")
+            ?: payload.optJSONObject("approval_request")
+            ?: payload.optJSONObject("approvalRequest")
+            ?: payload.optJSONObject("permission")
+        if (approval != null) return true
+        return isCodexApprovalSignal(
+            payloadType,
+            toolName,
+            payload.optString("type"),
+            payload.optString("event"),
+            payload.optString("kind"),
+            payload.optString("status"),
+            payload.optString("approval_status"),
+            payload.optString("approvalStatus")
+        )
+    }
+
+    private fun isCodexApprovalSignal(vararg values: String?): Boolean {
         return values.any { value ->
             val normalized = value?.lowercase() ?: return@any false
-            "approval" in normalized || "permission" in normalized
+            if (isNegativeApprovalText(normalized)) return@any false
+            "approval_request" in normalized ||
+                "permission_request" in normalized ||
+                "requires_approval" in normalized ||
+                "pending_approval" in normalized ||
+                "waiting_permission" in normalized
         }
+    }
+
+    private fun isNegativeApprovalText(value: String): Boolean {
+        return "does not require approval" in value ||
+            "doesn't require approval" in value ||
+            "no approval required" in value ||
+            "approval not required" in value ||
+            "without approval" in value
     }
 
     private fun approvalSummaryFromPayload(payload: JSONObject, message: String?, toolName: String?): String? {

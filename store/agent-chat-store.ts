@@ -477,9 +477,11 @@ function stopLiveSubscription(): void {
 }
 
 function persistLatestWidgetCodexBinding(sessions: AgentChatSession[]): void {
-  const session = sessions.find((candidate) => (
-    candidate.bindingConfidence === 'reliable' && Boolean(candidate.ptySessionId?.trim())
-  ));
+  const session = sessions
+    .filter((candidate) => (
+      candidate.bindingConfidence === 'reliable' && Boolean(candidate.ptySessionId?.trim())
+    ))
+    .sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0))[0];
   if (!session?.ptySessionId) {
     TerminalEmulator.setScouterCodexBinding?.({
       codexSessionId: '',

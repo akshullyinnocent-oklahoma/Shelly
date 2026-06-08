@@ -43,8 +43,11 @@ export function detectCodexApprovalPrompt(output: string): boolean {
   const recentLines = lines.slice(-8);
   const tail = recentLines.join('\n');
   if (!tail) return false;
-  const hasApprovalKeyword = /\b(?:approval|approve|permission|allow|deny|yes|no)\b/i.test(tail);
-  const hasChoice = recentLines.some((line) => /\b(?:y\/n|yes\/no|allow|deny|approve|reject)\b/i.test(line));
+  const hasApprovalKeyword = /\b(?:approval|approve|permission|allow|deny)\b/i.test(tail);
+  const hasChoice = recentLines.some((line) =>
+    /\b(?:y\/n|yes\/no|allow|deny|approve|reject)\b/i.test(line)
+      || /^\s*(?:[^A-Za-z0-9\s]\s*)?(?:\d+[\).]\s*)?(?:yes|no|y|n)\b(?:\s*[,):.-]|\s*$)/i.test(line)
+  );
   return hasApprovalKeyword && hasChoice;
 }
 

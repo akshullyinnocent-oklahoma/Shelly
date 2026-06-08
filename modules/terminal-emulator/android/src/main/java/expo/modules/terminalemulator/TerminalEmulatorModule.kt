@@ -789,10 +789,67 @@ class TerminalEmulatorModule : Module() {
             }
         }
 
+        AsyncFunction("consumeScouterWidgetPendingApproval") {
+            codexSessionId: String?,
+            ptySessionId: String?,
+            shellySessionId: String? ->
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).consumeWidgetApprovalPending(
+                codexSessionId,
+                ptySessionId,
+                shellySessionId
+            )?.let { pending ->
+                mapOf(
+                    "decision" to pending.decision,
+                    "queuedAt" to pending.queuedAt,
+                    "approvalAt" to pending.approvalAt,
+                    "approvalText" to pending.approvalText,
+                    "codexSessionId" to pending.codexSessionId,
+                    "ptySessionId" to pending.ptySessionId,
+                    "shellySessionId" to pending.shellySessionId,
+                )
+            }
+        }
+
+        AsyncFunction("getScouterWidgetPendingApprovalTarget") {
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).widgetPendingApprovalTarget()?.let { target ->
+                mapOf(
+                    "queuedAt" to target.queuedAt,
+                    "codexSessionId" to target.codexSessionId,
+                    "ptySessionId" to target.ptySessionId,
+                    "shellySessionId" to target.shellySessionId,
+                )
+            }
+        }
+
         AsyncFunction("markScouterWidgetPromptQueued") { prompt: String ->
             val context = appContext.reactContext
                 ?: throw IllegalStateException("React context unavailable")
             ScouterStateStore(context).recordWidgetPromptQueued(prompt)
+            null
+        }
+
+        AsyncFunction("markScouterWidgetApprovalDecision") { decision: String ->
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).recordWidgetApprovalDecision(decision)
+            null
+        }
+
+        AsyncFunction("markScouterWidgetApprovalFailed") { message: String ->
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).recordWidgetApprovalFailed(message)
+            null
+        }
+
+        AsyncFunction("markScouterWidgetApprovalResolved") {
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).recordWidgetApprovalResolved()
             null
         }
 

@@ -85,7 +85,29 @@ declare class TerminalEmulatorModuleType extends NativeModule {
     ptySessionId?: string | null;
     shellySessionId?: string | null;
   } | null>;
+  consumeScouterWidgetPendingApproval?(
+    codexSessionId?: string | null,
+    ptySessionId?: string | null,
+    shellySessionId?: string | null,
+  ): Promise<{
+    decision: 'allow' | 'deny';
+    queuedAt: number;
+    approvalAt?: number | null;
+    approvalText?: string | null;
+    codexSessionId?: string | null;
+    ptySessionId?: string | null;
+    shellySessionId?: string | null;
+  } | null>;
+  getScouterWidgetPendingApprovalTarget?(): Promise<{
+    queuedAt: number;
+    codexSessionId?: string | null;
+    ptySessionId?: string | null;
+    shellySessionId?: string | null;
+  } | null>;
   markScouterWidgetPromptQueued?(prompt: string): Promise<void>;
+  markScouterWidgetApprovalDecision?(decision: 'allow' | 'deny'): Promise<void>;
+  markScouterWidgetApprovalFailed?(message: string): Promise<void>;
+  markScouterWidgetApprovalResolved?(): Promise<void>;
   markScouterWidgetPromptFailed?(message: string): Promise<void>;
   returnToHome?(): Promise<void>;
   addListener(eventName: string, listener: (event: any) => void): { remove(): void };
