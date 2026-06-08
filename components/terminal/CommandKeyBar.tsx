@@ -124,6 +124,7 @@ export function CommandKeyBar({ sendKey, sendText, sendPaste, pasteFromClipboard
   const { settings } = useTerminalStore();
   const visualPreset =
     settings.uiFont === 'orange' ? 'orange'
+      : settings.uiFont === 'scouter-green' ? 'green'
       : settings.uiFont === 'purple' || settings.uiFont === 'shelly' || settings.uiFont === 'modal' ? 'purple'
         : 'blue';
   const presetColors = themePresets[settings.uiFont as ThemePresetId]?.colors;
@@ -161,6 +162,17 @@ export function CommandKeyBar({ sendKey, sendText, sendPaste, pasteFromClipboard
           backgroundColor: withAlpha(accent, 0.06),
           borderColor: withAlpha(accent, 0.46),
           borderRadius: 3,
+        },
+        textColor: accent,
+        iconColor: accent,
+      };
+    }
+    if (visualPreset === 'green') {
+      return {
+        key: {
+          backgroundColor: withAlpha(accent, 0.07),
+          borderColor: withAlpha(accent, 0.46),
+          borderRadius: 2,
         },
         textColor: accent,
         iconColor: accent,

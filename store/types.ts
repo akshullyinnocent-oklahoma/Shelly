@@ -427,6 +427,7 @@ export type AppSettings = {
     | 'blue'
     | 'orange'
     | 'purple'
+    | 'scouter-green'
     | 'shelly'
     | 'blackline'
     | 'modal'

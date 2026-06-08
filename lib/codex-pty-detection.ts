@@ -51,6 +51,27 @@ export function detectCodexApprovalPrompt(output: string): boolean {
   return hasApprovalKeyword && hasChoice;
 }
 
+export function detectCodexInteractivePrompt(output: string): boolean {
+  const text = stripTerminalControl(output);
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const recentLines = lines.slice(-12);
+  const tail = recentLines.join('\n');
+  if (!tail) return false;
+
+  const hasInteractiveKeyword = /(?:Approaching rate limits|Switch to\b.*\bmodel\b|Keep current model|Press enter to confirm|esc to go back|rate limit reminders|select an option|choose an option)/i.test(tail);
+  const numberedChoices = recentLines.filter((line) =>
+    /^\s*(?:[\u003e\u203a\u276f]\s*)?\d+[\).]\s+\S/.test(line)
+  ).length;
+  const hasFocusedChoice = recentLines.some((line) =>
+    /^\s*(?:[\u003e\u203a\u276f]\s*)\d+[\).]\s+\S/.test(line)
+  );
+
+  return hasInteractiveKeyword && (numberedChoices >= 2 || hasFocusedChoice);
+}
+
 export function detectShellReadyText(output: string): boolean {
   const text = stripTerminalControl(output);
   const lines = text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
@@ -84,7 +105,9 @@ function normalizeDetectedPath(path: string): string {
 
 function stripTerminalControl(value: string): string {
   return value
+    .replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g, '')
+    .replace(/\u001bP[\s\S]*?\u001b\\/g, '')
     .replace(ANSI_ESCAPE, '')
-    .replace(/\r/g, '\n')
-    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '');
+    .replace(/\bR?(?:10|11|12);rgb:[0-9a-fA-F/]+(?:;[0-9:;]*)?/g, '')
+    .replace(/\r/g, '\n');
 }

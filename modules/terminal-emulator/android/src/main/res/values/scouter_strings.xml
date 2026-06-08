@@ -12,6 +12,7 @@
   <string name="scouter_widget_prompt_empty">Prompt is empty</string>
   <string name="scouter_widget_prompt_sent">Sent to Codex</string>
   <string name="scouter_widget_prompt_approval_needed">Codex is waiting for approval. Use OK or NO on the widget.</string>
+  <string name="scouter_widget_prompt_interactive">Codex is waiting for a terminal choice</string>
   <string name="scouter_widget_approval_sent">Approval sent to Codex</string>
   <string name="scouter_widget_approval_denied">Denial sent to Codex</string>
   <string name="scouter_widget_approval_queued_resume">Approval queued. Resuming Codex...</string>

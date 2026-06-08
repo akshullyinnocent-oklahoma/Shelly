@@ -108,6 +108,7 @@ export type ThemePresetId =
   | 'blue'
   | 'orange'
   | 'purple'
+  | 'scouter-green'
   // Legacy persisted ids only. They are not exposed in the UI.
   | 'shelly'
   | 'blackline'
@@ -211,6 +212,62 @@ export const shellyPalette: Palette = {
   // Diff borders — neon lime / neon red to match add/errorText
   diffAddBorder:    '#39FF14',
   diffRemoveBorder: '#FF3366',
+};
+
+// ── Scouter Green — monochrome app chrome, syntax stays independent. ───────
+// This preset intentionally keeps every UI-facing semantic/accent token in the
+// same green family. Code syntax highlighting and ANSI parsing use separate
+// palettes, so command/code colour can still carry meaning while the Shelly
+// chrome reads like a single HUD layer.
+export const scouterGreenPalette: Palette = {
+  bgDeep:     '#000000',
+  bgSurface:  '#000000',
+  bgSidebar:  '#000000',
+  border:     '#0B5F24',
+
+  accent:        '#12B53E',
+  accentGreen:   '#39FF14',
+  accentBlue:    '#57C47A',
+  accentSky:     '#B8FFD0',
+  accentPurple:  '#57C47A',
+  accentPink:    '#7DFF9F',
+  accentAmber:   '#A8FF78',
+  accentCode:    '#57C47A',
+  warning:       '#A8FF78',
+
+  text1:      '#D8FFE2',
+  text2:      '#7DFF9F',
+  text3:      '#2B8A45',
+
+  errorText:  '#7DFF9F',
+  errorBg:    'rgba(18,181,62,0.14)',
+  addText:    '#39FF14',
+  addBg:      'rgba(57,255,20,0.14)',
+
+  btnPrimaryBg:     '#12B53E',
+  btnPrimaryText:   '#000000',
+  btnSecondaryBg:   '#031108',
+  btnSecondaryText: '#D8FFE2',
+
+  badgeRunningBg:   'rgba(168,255,120,0.16)',
+  badgeRunningText: '#A8FF78',
+  badgeLinkedBg:    'rgba(57,255,20,0.16)',
+  badgeLinkedText:  '#39FF14',
+  badgeConnectBg:   '#000000',
+  badgeConnectText: '#2B8A45',
+
+  layoutActiveBg:     '#12B53E',
+  layoutActiveText:   '#000000',
+  layoutInactiveBg:   '#000000',
+  layoutInactiveText: '#2B8A45',
+
+  crtBadgeBg:   '#000000',
+  crtBadgeText: '#12B53E',
+
+  autoSaveBg: '#000000',
+
+  diffAddBorder:    '#39FF14',
+  diffRemoveBorder: '#7DFF9F',
 };
 
 // ── Blue palette — cool chrome with amber warnings.
@@ -831,6 +888,7 @@ export const themePresets: Record<ThemePresetId, ThemePreset> = {
   blue:         { id: 'blue',         font: 'JetBrainsMono_400Regular', colors: bluePalette },
   orange:       { id: 'orange',       font: 'JetBrainsMono_400Regular', colors: orangePalette },
   purple:       { id: 'purple',       font: 'JetBrainsMono_400Regular', colors: purplePalette },
+  'scouter-green': { id: 'scouter-green', font: 'JetBrainsMono_400Regular', colors: scouterGreenPalette },
   shelly:       { id: 'shelly',       font: 'JetBrainsMono_400Regular', colors: purplePalette },
   blackline:    { id: 'blackline',    font: 'JetBrainsMono_400Regular', colors: bluePalette },
   modal:        { id: 'modal',        font: 'JetBrainsMono_400Regular', colors: purplePalette },

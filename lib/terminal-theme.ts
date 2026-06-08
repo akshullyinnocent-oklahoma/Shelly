@@ -45,6 +45,15 @@ export const TERMINAL_THEMES: Record<string, TerminalTheme> = {
     brightYellow: '#DAFF70', brightBlue: '#C19AFF', brightMagenta: '#E38AFF',
     brightCyan: '#C19AFF', brightWhite: '#FFFFFF',
   },
+  'scouter-green': {
+    name: 'scouter-green', label: 'Scouter Green',
+    background: '#000000', foreground: '#D8FFE2', cursor: '#12B53E',
+    black: '#031108', red: '#FF5555', green: '#39FF14', yellow: '#F1FA8C',
+    blue: '#8BE9FD', magenta: '#BD93F9', cyan: '#8BE9FD', white: '#D8FFE2',
+    brightBlack: '#2B8A45', brightRed: '#FF6E6E', brightGreen: '#7DFF9F',
+    brightYellow: '#FFFFA5', brightBlue: '#A4FFFF', brightMagenta: '#D6ACFF',
+    brightCyan: '#A4FFFF', brightWhite: '#FFFFFF',
+  },
   shelly: {
     name: 'shelly', label: 'Shelly',
     background: '#0A0A0A', foreground: '#E8E8E8', cursor: '#00D4AA',

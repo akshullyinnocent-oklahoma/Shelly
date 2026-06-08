@@ -378,6 +378,9 @@ class ScouterWidgetPromptActivity : Activity() {
         if (isApprovalPromptScreen(screenText)) {
             return WidgetCodexTarget.ApprovalNeeded(session)
         }
+        if (isInteractivePromptScreen(screenText)) {
+            return WidgetCodexTarget.InteractivePrompt
+        }
         if (status in BUSY_CODEX_STATUSES) return WidgetCodexTarget.Busy(status)
         return WidgetCodexTarget.Ready(session)
     }
@@ -462,6 +465,20 @@ class ScouterWidgetPromptActivity : Activity() {
         return hasApprovalKeyword && hasChoice
     }
 
+    private fun isInteractivePromptScreen(screenText: String): Boolean {
+        val recentLines = screenText
+            .lines()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .takeLast(12)
+        if (recentLines.isEmpty()) return false
+        val tail = recentLines.joinToString("\n")
+        val hasInteractiveKeyword = INTERACTIVE_PROMPT_KEYWORD_RE.containsMatchIn(tail)
+        val numberedChoices = recentLines.count { INTERACTIVE_NUMBERED_CHOICE_RE.containsMatchIn(it) }
+        val hasFocusedChoice = recentLines.any { INTERACTIVE_FOCUSED_CHOICE_RE.containsMatchIn(it) }
+        return hasInteractiveKeyword && (numberedChoices >= 2 || hasFocusedChoice)
+    }
+
     companion object {
         const val ACTION_APPROVAL_ALLOW = "expo.modules.terminalemulator.scouter.APPROVAL_ALLOW"
         const val ACTION_APPROVAL_DENY = "expo.modules.terminalemulator.scouter.APPROVAL_DENY"
@@ -473,6 +490,9 @@ class ScouterWidgetPromptActivity : Activity() {
         private val SHELL_PROMPT_RE = Regex("""^(?:[~\w./:@+-]+\s*)?[$#]\s*$""")
         private val APPROVAL_KEYWORD_RE = Regex("""\b(?:approval|approve|permission|allow|deny)\b""", RegexOption.IGNORE_CASE)
         private val APPROVAL_CHOICE_RE = Regex("""\b(?:y/n|yes/no|allow|deny|approve|reject)\b|^\s*(?:[^A-Za-z0-9\s]\s*)?(?:\d+[\).]\s*)?(?:yes|no|y|n)\b(?:\s*[,):.-]|\s*$)|[\[(]\s*[yY]\s*/\s*[nN]\s*[\])]""", RegexOption.IGNORE_CASE)
+        private val INTERACTIVE_PROMPT_KEYWORD_RE = Regex("""(?:Approaching rate limits|Switch to\b.*\bmodel\b|Keep current model|Press enter to confirm|esc to go back|rate limit reminders|select an option|choose an option)""", RegexOption.IGNORE_CASE)
+        private val INTERACTIVE_NUMBERED_CHOICE_RE = Regex("""^\s*(?:[>]\s*)?\d+[\).]\s+\S""")
+        private val INTERACTIVE_FOCUSED_CHOICE_RE = Regex("""^\s*(?:[>]\s*)\d+[\).]\s+\S""")
         private val UUID_SUFFIX_RE = Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
         private val BUSY_CODEX_STATUSES = setOf(
             ScouterStatus.THINKING,
@@ -500,6 +520,7 @@ class ScouterWidgetPromptActivity : Activity() {
 private sealed class WidgetCodexTarget {
     data class Ready(val session: ShellyTerminalSession) : WidgetCodexTarget()
     data class ApprovalNeeded(val session: ShellyTerminalSession) : WidgetCodexTarget()
+    object InteractivePrompt : WidgetCodexTarget()
     object Missing : WidgetCodexTarget()
     data class Stale(val status: ScouterStatus?) : WidgetCodexTarget()
     data class Busy(val status: ScouterStatus?) : WidgetCodexTarget()
@@ -508,6 +529,7 @@ private sealed class WidgetCodexTarget {
 private fun WidgetCodexTarget.messageResId(): Int = when (this) {
     is WidgetCodexTarget.Ready -> R.string.scouter_widget_prompt_sent
     is WidgetCodexTarget.ApprovalNeeded -> R.string.scouter_widget_prompt_approval_needed
+    WidgetCodexTarget.InteractivePrompt -> R.string.scouter_widget_prompt_interactive
     WidgetCodexTarget.Missing -> R.string.scouter_widget_prompt_no_codex
     is WidgetCodexTarget.Stale -> R.string.scouter_widget_prompt_stale_codex
     is WidgetCodexTarget.Busy -> R.string.scouter_widget_prompt_busy
@@ -516,6 +538,7 @@ private fun WidgetCodexTarget.messageResId(): Int = when (this) {
 private fun WidgetCodexTarget.canResume(): Boolean = when (this) {
     is WidgetCodexTarget.Ready,
     is WidgetCodexTarget.ApprovalNeeded,
+    WidgetCodexTarget.InteractivePrompt,
     is WidgetCodexTarget.Busy -> false
     WidgetCodexTarget.Missing,
     is WidgetCodexTarget.Stale -> true

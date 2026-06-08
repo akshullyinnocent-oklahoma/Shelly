@@ -30,8 +30,8 @@
 
       <ImageView
         android:id="@+id/scouter_codex_dot"
-        android:layout_width="9dp"
-        android:layout_height="9dp"
+        android:layout_width="10dp"
+        android:layout_height="10dp"
         android:src="@drawable/scouter_status_dot"
         android:contentDescription="@string/scouter_status_dot" />
 
@@ -45,7 +45,7 @@
         android:singleLine="true"
         android:text="CODEX"
         android:textColor="#12B53E"
-        android:textSize="14sp"
+        android:textSize="15sp"
         android:letterSpacing="0.06"
         android:typeface="monospace"
         android:textStyle="bold"
@@ -76,7 +76,7 @@
       android:singleLine="true"
       android:text="No Codex session"
       android:textColor="#57C47A"
-      android:textSize="11sp"
+      android:textSize="12sp"
       android:typeface="monospace"
       android:includeFontPadding="false" />
 
@@ -89,8 +89,8 @@
       android:ellipsize="end"
       android:maxLines="2"
       android:text=""
-      android:textColor="#FFFFFF"
-      android:textSize="13sp"
+      android:textColor="#B8FFD0"
+      android:textSize="14sp"
       android:lineSpacingExtra="1dp"
       android:typeface="monospace"
       android:shadowColor="#F2000000"
@@ -108,7 +108,7 @@
       android:maxLines="1"
       android:text="Waiting for ~/.codex/sessions"
       android:textColor="#5FBF7D"
-      android:textSize="9sp"
+      android:textSize="10sp"
       android:typeface="monospace"
       android:lineSpacingExtra="0dp"
       android:includeFontPadding="false" />
@@ -133,7 +133,7 @@
         android:paddingBottom="7dp"
         android:text="@string/scouter_widget_approval_allow_short"
         android:textColor="#12B53E"
-        android:textSize="12sp"
+        android:textSize="13sp"
         android:typeface="monospace"
         android:textStyle="bold"
         android:includeFontPadding="false"
@@ -152,8 +152,8 @@
         android:paddingTop="7dp"
         android:paddingBottom="7dp"
         android:text="@string/scouter_widget_approval_deny_short"
-        android:textColor="#FF9AAA"
-        android:textSize="12sp"
+        android:textColor="#57C47A"
+        android:textSize="13sp"
         android:typeface="monospace"
         android:textStyle="bold"
         android:includeFontPadding="false"
@@ -176,7 +176,7 @@
       android:paddingBottom="7dp"
       android:text="@string/scouter_ask_agent_chat_short"
       android:textColor="#12B53E"
-      android:textSize="12sp"
+      android:textSize="13sp"
       android:letterSpacing="0.04"
       android:typeface="monospace"
       android:textStyle="bold"
@@ -203,8 +203,8 @@
 
       <ImageView
         android:id="@+id/scouter_local_dot"
-        android:layout_width="9dp"
-        android:layout_height="9dp"
+        android:layout_width="10dp"
+        android:layout_height="10dp"
         android:src="@drawable/scouter_status_dot"
         android:contentDescription="@string/scouter_status_dot" />
 
@@ -218,7 +218,7 @@
         android:singleLine="true"
         android:text="LOCAL LLM"
         android:textColor="#57C47A"
-        android:textSize="12sp"
+        android:textSize="13sp"
         android:letterSpacing="0.06"
         android:typeface="monospace"
         android:textStyle="bold"
@@ -245,7 +245,7 @@
       android:singleLine="true"
       android:text="No local endpoint"
       android:textColor="#5FBF7D"
-      android:textSize="10sp"
+      android:textSize="11sp"
       android:typeface="monospace"
       android:includeFontPadding="false" />
 
@@ -258,7 +258,7 @@
       android:maxLines="1"
       android:text="Probe 8080 / 11434"
       android:textColor="#4F9E68"
-      android:textSize="9sp"
+      android:textSize="10sp"
       android:typeface="monospace"
       android:lineSpacingExtra="0dp"
       android:includeFontPadding="false" />
@@ -272,7 +272,7 @@
       android:singleLine="true"
       android:text="updated --:--:--"
       android:textColor="#4F9E68"
-      android:textSize="9sp"
+      android:textSize="10sp"
       android:typeface="monospace"
       android:includeFontPadding="false" />
   </LinearLayout>

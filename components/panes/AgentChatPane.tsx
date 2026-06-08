@@ -37,7 +37,6 @@ import {
   type CodexReplyBlockedReason,
   type CodexReplyReadiness,
 } from '@/lib/codex-session-reply';
-import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
 import { useTranslation } from '@/lib/i18n';
 import { useTerminalStore } from '@/store/terminal-store';
 import { useTheme } from '@/hooks/use-theme';
@@ -1389,10 +1388,13 @@ function buildAgentNotice({
     };
   }
   if (replyReadiness?.ready === false) {
+    const waitingOnCodex =
+      replyReadiness.reason === 'busy' ||
+      replyReadiness.reason === 'interactive_prompt';
     return {
-      icon: replyReadiness.reason === 'busy' ? 'pending' : 'lock-outline',
+      icon: waitingOnCodex ? 'pending' : 'lock-outline',
       text: t(replyBlockedReasonBodyKey(replyReadiness.reason)),
-      tone: replyReadiness.reason === 'busy' ? 'info' : 'warning',
+      tone: waitingOnCodex ? 'info' : 'warning',
     };
   }
   return null;
@@ -1417,6 +1419,8 @@ function replyBlockedReasonBodyKey(reason: CodexReplyBlockedReason): string {
       return 'agent_chat.reply_status_screen_unavailable';
     case 'not_codex_terminal':
       return 'agent_chat.reply_status_not_codex_terminal';
+    case 'interactive_prompt':
+      return 'agent_chat.reply_status_interactive_prompt';
     case 'no_approval_prompt':
       return 'agent_chat.reply_status_no_approval_prompt';
     default:

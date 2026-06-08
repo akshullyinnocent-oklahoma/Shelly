@@ -1,6 +1,7 @@
 import {
   detectCodexActiveTranscript,
   detectCodexApprovalPrompt,
+  detectCodexInteractivePrompt,
   detectCodexPtyLaunchText,
   detectShellReadyText,
 } from '@/lib/codex-pty-detection';
@@ -76,6 +77,26 @@ describe('codex pty detection', () => {
     expect(detectCodexApprovalPrompt([
       'The answer can be yes or no depending on context.',
       'gpt-5.5 default · /data/data/dev.shelly.terminal/files/home',
+    ].join('\n'))).toBe(false);
+  });
+
+  it('detects Codex terminal choice prompts', () => {
+    expect(detectCodexInteractivePrompt([
+      'Approaching rate limits',
+      'Switch to gpt-5.4-mini for lower credit usage?',
+      '> 1. Switch to gpt-5.4-mini',
+      '2. Keep current model',
+      '3. Keep current model (never show again)',
+      'Press enter to confirm or esc to go back',
+    ].join('\n'))).toBe(true);
+  });
+
+  it('strips OSC color replies before detecting terminal state', () => {
+    const leakedOsc = '\u001b]10;rgb:ffff/ffff/ffff\u0007R10;rgb:ffff/ffff/ffff;1;2;6;9;15;18;21;22c';
+    expect(detectCodexActiveTranscript([
+      'gpt-5.5 default · /data/data/dev.shelly.terminal/files/home',
+      leakedOsc,
+      '~$',
     ].join('\n'))).toBe(false);
   });
 });

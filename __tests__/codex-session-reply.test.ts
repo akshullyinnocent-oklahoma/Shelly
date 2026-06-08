@@ -58,6 +58,16 @@ const APPROVAL_CODEX_SCREEN = [
   'Allow this command? yes/no',
 ].join('\n');
 
+const INTERACTIVE_CODEX_SCREEN = [
+  ACTIVE_CODEX_SCREEN,
+  'Approaching rate limits',
+  'Switch to gpt-5.4-mini for lower credit usage?',
+  '> 1. Switch to gpt-5.4-mini',
+  '2. Keep current model',
+  '3. Keep current model (never show again)',
+  'Press enter to confirm or esc to go back',
+].join('\n');
+
 function terminalSession(
   id: string,
   nativeSessionId: string,
@@ -248,6 +258,16 @@ describe('codex session replies', () => {
 
     expect(result).toEqual({ status: 'blocked', reason: 'busy' });
     expect(mockWriteToSession).not.toHaveBeenCalled();
+  });
+
+  it('blocks replies while Codex is waiting for an interactive terminal choice', async () => {
+    mockGetScreenText.mockResolvedValue(INTERACTIVE_CODEX_SCREEN);
+
+    const result = await sendCodexReply(codexSession(), 'next task');
+
+    expect(result).toEqual({ status: 'blocked', reason: 'interactive_prompt' });
+    expect(mockWriteToSession).not.toHaveBeenCalled();
+    expect(mockPasteToSession).not.toHaveBeenCalled();
   });
 
   it('allows approval decisions only while Codex is waiting for permission', async () => {

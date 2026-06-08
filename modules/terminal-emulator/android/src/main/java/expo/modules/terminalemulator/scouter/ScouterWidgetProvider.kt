@@ -17,6 +17,7 @@ import expo.modules.terminalemulator.R
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -230,6 +231,9 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                     "FLOW in -- / out -- · CACHE -- · RATE --"
                 ).joinToString("\n")
             )
+            codex?.let {
+                views.setTextViewText(R.id.scouter_codex_metrics, codexMetrics(it, conversation))
+            }
             bindCodexConversation(views, boundCodex, conversation)
             bindRow(
                 views = views,
@@ -273,7 +277,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(badgeId, emptyBadge)
                 views.setTextViewText(detailId, emptyDetail)
                 views.setTextViewText(metricsId, emptyMetrics)
-                views.setInt(dotId, "setColorFilter", Color.rgb(122, 150, 122))
+                views.setInt(dotId, "setColorFilter", Color.rgb(18, 181, 62))
                 return
             }
 
@@ -471,15 +475,28 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             }
         }
 
-        private fun codexMetrics(snapshot: SessionSnapshot): String {
+        private fun codexMetrics(snapshot: SessionSnapshot, conversation: ScouterWidgetConversation? = null): String {
             val lines = mutableListOf<String>()
+            val windowLimitLine = statusWindowLimitLine(
+                snapshot,
+                conversation?.lastAnswer,
+                snapshot.lastMessage,
+                snapshot.lastError
+            )
+            if (windowLimitLine != null) {
+                lines += windowLimitLine
+            } else if (needsDedicatedRateLimitLine(snapshot)) {
+                lines += rateLimitLine(snapshot)
+            }
             val contextParts = mutableListOf<String>()
             contextParts += contextGauge(snapshot)
             snapshot.modelName?.takeIf { it.isNotBlank() }?.let { contextParts += "MODEL ${shortModelName(it)}" }
             if (snapshot.contextPercentRemaining != null && snapshot.tokensUsed > 0L) {
                 contextParts += "TOK ${formatTokens(snapshot.tokensUsed)}"
             }
-            lines += contextParts.filter { it.isNotBlank() }.joinToString(" · ")
+            contextParts.filter { it.isNotBlank() }.joinToString(" · ")
+                .takeIf { it.isNotBlank() }
+                ?.let { lines += it }
 
             val flowParts = mutableListOf<String>()
             if (snapshot.inputTokens > 0L || snapshot.outputTokens > 0L) {
@@ -495,10 +512,11 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             if (!needsDedicatedRateLimitLine(snapshot)) {
                 compactRateLimitLabel(snapshot)?.let { flowParts += it }
             }
-            lines += flowParts.joinToString(" · ")
-            if (needsDedicatedRateLimitLine(snapshot)) lines += rateLimitLine(snapshot)
+            flowParts.joinToString(" · ")
+                .takeIf { it.isNotBlank() }
+                ?.let { lines += it }
 
-            return lines.filter { it.isNotBlank() }.joinToString("\n")
+            return lines.filter { it.isNotBlank() }.take(2).joinToString("\n")
         }
 
         private fun bindCodexConversation(
@@ -524,8 +542,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             if (conversation == null) {
                 if (codex?.currentStatus == ScouterStatus.WAITING_PERMISSION && !isStale(codex)) {
                     return WidgetConversationPreview(
-                        "PERMIT Codex permission requested",
-                        Color.rgb(255, 232, 128)
+                        "APPROVAL  Codex permission requested",
+                        Color.rgb(184, 255, 208)
                     )
                 }
                 return null
@@ -548,7 +566,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             ) {
                 return WidgetConversationPreview(
                     "APPROVAL ${approvalDecisionLabel(approvalDecision)} queued",
-                    Color.rgb(255, 232, 128)
+                    Color.rgb(184, 255, 208)
                 )
             }
             if (
@@ -557,7 +575,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             ) {
                 return WidgetConversationPreview(
                     "APPROVAL ${approvalDecisionLabel(approvalDecision)} sending",
-                    Color.rgb(255, 232, 128)
+                    Color.rgb(184, 255, 208)
                 )
             }
             val approvalDecisionAfterEvent = approvalDecision != null &&
@@ -577,15 +595,15 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             if (liveApproval && !approvalDecisionAfterEvent) {
                 val text = approval ?: "Codex permission requested"
                 return WidgetConversationPreview(
-                    "PERMIT ${shorten(text.redactForScouter(), 120)}",
-                    Color.rgb(255, 232, 128)
+                    "APPROVAL  ${shorten(text.redactForScouter(), 120)}",
+                    Color.rgb(184, 255, 208)
                 )
             }
             conversation.widgetError?.takeIf { it.isNotBlank() }?.let {
                 val label = if (isApprovalFailure) "APPROVAL ERROR" else "ASK ERROR"
                 return WidgetConversationPreview(
                     "$label  ${shorten(it.redactForScouter(), 96)}",
-                    Color.rgb(255, 176, 96)
+                    Color.rgb(125, 219, 125)
                 )
             }
             if (
@@ -594,13 +612,13 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 lastAnswerAt > widgetStatusAt
             ) {
                 return WidgetConversationPreview(
-                    "CODEX  ${shorten(answer.redactForScouter(), 128)}",
+                    "RESULT  ${shorten(answer.redactForScouter(), 128)}",
                     Color.rgb(216, 255, 232)
                 )
             }
             if (answer != null && lastAnswerAt >= latestPromptAt) {
                 return WidgetConversationPreview(
-                    "CODEX  ${shorten(answer.redactForScouter(), 128)}",
+                    "RESULT  ${shorten(answer.redactForScouter(), 128)}",
                     Color.rgb(216, 255, 232)
                 )
             }
@@ -613,7 +631,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 }
                 return WidgetConversationPreview(
                     "$label${shorten(prompt.redactForScouter(), 128)}",
-                    Color.rgb(120, 239, 255)
+                    Color.rgb(184, 255, 208)
                 )
             }
             return WidgetConversationPreview(
@@ -672,9 +690,9 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val parts = mutableListOf("RATE $statusText")
             snapshot.rateLimitRemainingRequests?.let { parts += "REQ $it" }
             snapshot.rateLimitRemainingTokens?.let { parts += "TOKREM ${formatTokens(it)}" }
-            val cooldown = cooldownSeconds(snapshot)
+            val reset = rateResetLabel(snapshot)
             when {
-                cooldown != null && cooldown > 0L -> parts += "RESET ${formatDuration(cooldown)}"
+                reset != null -> parts += reset
                 status == ScouterRateLimitStatus.OK -> parts += "LIMIT no throttle"
                 status == null || status == ScouterRateLimitStatus.UNKNOWN -> parts += "LIMIT unknown"
             }
@@ -682,18 +700,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         }
 
         private fun localMetrics(snapshot: SessionSnapshot): String {
-            val lines = mutableListOf<String>()
-            val wave = snapshot.tokensPerSecond?.takeIf { it > 0.0 }?.let { sparkline(it, 80.0) } ?: "........"
-            val tps = snapshot.tokensPerSecond?.takeIf { it > 0.0 }?.let {
-                String.format(Locale.US, "TPS %.1f", it)
-            } ?: "TPS --"
-            lines += "WAVE $wave · $tps"
-            val linkParts = mutableListOf<String>()
-            snapshot.latencyMs?.let { linkParts += "PING ${it}ms" } ?: run { linkParts += "PING --ms" }
-            snapshot.localEndpoint?.let { linkParts += "END ${shortEndpoint(it)}" } ?: run { linkParts += "END none" }
-            snapshot.queueSize?.let { linkParts += "Q $it" }
-            lines += linkParts.joinToString(" · ")
-            return lines.filter { it.isNotBlank() }.joinToString("\n")
+            val parts = mutableListOf<String>()
+            snapshot.localEndpoint?.let { parts += "END ${shortEndpoint(it)}" } ?: run { parts += "END none" }
+            snapshot.tokensPerSecond?.takeIf { it > 0.0 }?.let {
+                parts += String.format(Locale.US, "TPS %.1f", it)
+            }
+            snapshot.queueSize?.let { parts += "Q $it" }
+            snapshot.latencyMs?.let { parts += "PING ${it}ms" }
+            return "LOCAL " + parts.joinToString(" · ")
         }
 
         private fun loadLine(load: ScouterSystemLoad): String {
@@ -742,6 +756,63 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             }
         }
 
+        private fun statusWindowLimitLine(snapshot: SessionSnapshot, vararg texts: String?): String? {
+            val text = texts.firstOrNull { value ->
+                val lower = value?.lowercase(Locale.US).orEmpty()
+                lower.contains("5h") ||
+                    lower.contains("5-hour") ||
+                    lower.contains("five-hour") ||
+                    lower.contains("weekly") ||
+                    lower.contains("week limit") ||
+                    lower.contains("usage limit")
+            } ?: return null
+            val fiveHour = percentForLimitWindow(text, FIVE_HOUR_LIMIT_RE)
+            val weekly = percentForLimitWindow(text, WEEKLY_LIMIT_RE)
+            if (fiveHour == null && weekly == null) return null
+            val parts = mutableListOf("LIMIT")
+            fiveHour?.let { parts += "5H ${formatPercent(it)}" }
+            weekly?.let { parts += "WK ${formatPercent(it)}" }
+            rateResetLabel(snapshot)?.let { parts += it }
+            return parts.joinToString(" · ")
+        }
+
+        private fun rateResetLabel(snapshot: SessionSnapshot): String? {
+            val cooldown = cooldownSeconds(snapshot)
+            return when {
+                snapshot.rateLimitResetAt != null && cooldown != null && cooldown > 0L -> "RESET ${formatDeviceTime(snapshot.rateLimitResetAt)}"
+                cooldown != null && cooldown > 0L -> "RESET ${formatDuration(cooldown)}"
+                else -> null
+            }
+        }
+
+        private fun percentForLimitWindow(text: String, label: Regex): Double? {
+            val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+            for (line in lines) {
+                if (!label.containsMatchIn(line)) continue
+                LIMIT_PERCENT_RE.findAll(line).forEach { match ->
+                    match.groupValues.getOrNull(1)?.toDoubleOrNull()?.let {
+                        return it.coerceIn(0.0, 100.0)
+                    }
+                }
+            }
+            return null
+        }
+
+        private fun formatPercent(value: Double): String {
+            return if (value % 1.0 == 0.0) {
+                "${value.toInt()}%"
+            } else {
+                String.format(Locale.US, "%.1f%%", value)
+            }
+        }
+
+        private fun formatDeviceTime(epochMs: Long): String {
+            val zone = TimeZone.getDefault()
+            return SimpleDateFormat("HH:mm z", Locale.US).apply {
+                timeZone = zone
+            }.format(Date(epochMs))
+        }
+
         private fun displayProjectName(raw: String): String {
             val value = raw.redactForScouter().trim().trim('"', '\'')
             if (value.isBlank()) return "Shelly"
@@ -767,14 +838,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         }
 
         private fun colorForStatus(status: ScouterStatus, stale: Boolean = false): Int = when {
-            stale -> Color.rgb(184, 165, 90)
-            status == ScouterStatus.IDLE -> Color.rgb(155, 196, 155)
-            status == ScouterStatus.THINKING -> Color.rgb(125, 219, 125)
-            status == ScouterStatus.TOOL_RUNNING -> Color.rgb(47, 175, 47)
-            status == ScouterStatus.WAITING_PERMISSION -> Color.rgb(158, 217, 93)
-            status == ScouterStatus.COMPLETED -> Color.rgb(155, 196, 155)
-            status == ScouterStatus.ERROR -> Color.rgb(255, 92, 92)
-            else -> Color.rgb(122, 150, 122)
+            stale -> Color.rgb(79, 158, 104)
+            else -> Color.rgb(18, 181, 62)
         }
 
         private fun formatTokens(tokens: Long): String {
@@ -834,6 +899,9 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private const val WAIT_EXPIRY_REFRESH_SLOP_MS = 350L
         private val CODEX_SESSION_UUID_SUFFIX_RE =
             Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
+        private val FIVE_HOUR_LIMIT_RE = Regex("""(?i)\b(?:5\s*h|5-hour|five[- ]hour)\b""")
+        private val WEEKLY_LIMIT_RE = Regex("""(?i)\b(?:weekly|week)\b""")
+        private val LIMIT_PERCENT_RE = Regex("""(?i)(?:<\s*)?(\d{1,3}(?:\.\d+)?)\s*%""")
         private val WAITING_WIDGET_STATUSES = setOf(
             "pending_terminal",
             "sending",

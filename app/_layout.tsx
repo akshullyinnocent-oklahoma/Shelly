@@ -33,7 +33,7 @@ import {
   sendCodexReply,
   type CodexApprovalDecision,
 } from '@/lib/codex-session-reply';
-import { detectCodexApprovalPrompt } from '@/lib/codex-pty-detection';
+import { detectCodexApprovalPrompt, detectCodexInteractivePrompt } from '@/lib/codex-pty-detection';
 import { execCommand } from '@/hooks/use-native-exec';
 import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
 
@@ -431,6 +431,7 @@ export default function RootLayout() {
       let current = latestWidgetSession(session);
       let last = await getCodexReplyReadiness(ptyAuthoritativeWidgetSession(current)).catch(() => null);
       while (!last?.ready && Date.now() < deadline) {
+        if (last?.reason === 'interactive_prompt') break;
         await sleep(650);
         await useAgentChatStore.getState().refresh().catch(() => undefined);
         current = latestWidgetSession(current);
@@ -467,9 +468,10 @@ export default function RootLayout() {
       const { readiness, session: readySession } = await waitForWidgetCodexReady(session);
       const ready = readiness;
       if (!ready?.ready) {
-        await TerminalEmulator.markScouterWidgetPromptFailed?.(
-          `Codex resume did not become ready: ${ready?.reason ?? 'not_ready'}`,
-        ).catch(() => undefined);
+        const message = ready?.reason === 'interactive_prompt'
+          ? 'Codex is waiting for a terminal choice'
+          : `Codex resume did not become ready: ${ready?.reason ?? 'not_ready'}`;
+        await TerminalEmulator.markScouterWidgetPromptFailed?.(message).catch(() => undefined);
         logInfo('DeepLink', `Widget prompt drain skipped: ${ready?.reason ?? 'not_ready'}`);
         return;
       }
@@ -477,6 +479,11 @@ export default function RootLayout() {
       if (typeof screenText === 'string' && detectCodexApprovalPrompt(screenText)) {
         await TerminalEmulator.markScouterWidgetPromptFailed?.('Codex approval is pending').catch(() => undefined);
         logInfo('DeepLink', 'Widget prompt drain skipped: approval pending');
+        return;
+      }
+      if (typeof screenText === 'string' && detectCodexInteractivePrompt(screenText)) {
+        await TerminalEmulator.markScouterWidgetPromptFailed?.('Codex is waiting for a terminal choice').catch(() => undefined);
+        logInfo('DeepLink', 'Widget prompt drain skipped: interactive choice pending');
         return;
       }
       const pending = await TerminalEmulator.consumeScouterWidgetPendingPrompt(

@@ -1,4 +1,8 @@
-import { detectCodexActiveTranscript, detectCodexApprovalPrompt } from '@/lib/codex-pty-detection';
+import {
+  detectCodexActiveTranscript,
+  detectCodexApprovalPrompt,
+  detectCodexInteractivePrompt,
+} from '@/lib/codex-pty-detection';
 import { bindVisibleCodexTerminalToSession } from '@/lib/codex-session-resume';
 import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
 import type { AgentChatSession } from '@/store/agent-chat-store';
@@ -16,6 +20,7 @@ export type CodexReplyReadinessReason =
   | 'busy'
   | 'screen_unavailable'
   | 'not_codex_terminal'
+  | 'interactive_prompt'
   | 'no_approval_prompt';
 
 export type CodexReplyBlockedReason = Exclude<CodexReplyReadinessReason, 'ready'>;
@@ -208,6 +213,14 @@ async function getBoundCodexTerminalReadiness(
     return {
       ready: false,
       reason: 'not_codex_terminal',
+      terminalSessionId: terminalSession.id,
+      nativeSessionId: terminalSession.nativeSessionId,
+    };
+  }
+  if (!options.requireApprovalPrompt && detectCodexInteractivePrompt(screenText)) {
+    return {
+      ready: false,
+      reason: 'interactive_prompt',
       terminalSessionId: terminalSession.id,
       nativeSessionId: terminalSession.nativeSessionId,
     };

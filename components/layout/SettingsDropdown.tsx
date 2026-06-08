@@ -553,6 +553,7 @@ type UiFontId =
   | 'blue'
   | 'orange'
   | 'purple'
+  | 'scouter-green'
   | 'shelly'
   | 'blackline'
   | 'modal'
@@ -581,6 +582,7 @@ function ThemeRow() {
     { value: 'blue',   label: t('theme.blue'), swatch: themePresets.blue.colors.accent },
     { value: 'orange', label: t('theme.red'), swatch: themePresets.orange.colors.accent },
     { value: 'purple', label: t('theme.purple'), swatch: themePresets.purple.colors.accent },
+    { value: 'scouter-green', label: t('theme.scouter_green'), swatch: themePresets['scouter-green'].colors.accent },
   ];
   return (
     <Row label={t('settings.theme')}>
