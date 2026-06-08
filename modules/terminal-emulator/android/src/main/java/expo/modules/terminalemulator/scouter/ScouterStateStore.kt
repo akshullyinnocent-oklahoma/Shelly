@@ -188,6 +188,22 @@ class ScouterStateStore(context: Context) {
         writeHelperState()
     }
 
+    fun recordWidgetChoicePending(message: String) {
+        prefs.edit()
+            .putString(KEY_WIDGET_STATUS, WIDGET_STATUS_CHOICE_PENDING)
+            .putLong(KEY_WIDGET_STATUS_AT, System.currentTimeMillis())
+            .putString(KEY_WIDGET_ERROR, message.take(MAX_WIDGET_TEXT_LENGTH))
+            .remove(KEY_WIDGET_PENDING_PROMPT)
+            .remove(KEY_WIDGET_PENDING_APPROVAL_DECISION)
+            .remove(KEY_WIDGET_PENDING_APPROVAL_AT)
+            .remove(KEY_WIDGET_PENDING_APPROVAL_TEXT)
+            .remove(KEY_WIDGET_PENDING_CODEX_SESSION_ID)
+            .remove(KEY_WIDGET_PENDING_PTY_SESSION_ID)
+            .remove(KEY_WIDGET_PENDING_SHELLY_SESSION_ID)
+            .commit()
+        writeHelperState()
+    }
+
     fun recordWidgetApprovalPending(decision: String): Boolean {
         val normalized = normalizeApprovalDecision(decision)
         val now = System.currentTimeMillis()
@@ -584,6 +600,24 @@ class ScouterStateStore(context: Context) {
                 .commit()
         }
         if (
+            widgetStatus == WIDGET_STATUS_CHOICE_PENDING &&
+            (widgetStatusAt <= 0L || event.timestamp >= widgetStatusAt) &&
+            (
+                event.eventType == ScouterEventType.USER_PROMPT ||
+                    event.eventType == ScouterEventType.PRE_TOOL_USE ||
+                    event.eventType == ScouterEventType.POST_TOOL_USE ||
+                    event.eventType == ScouterEventType.POST_TOOL_USE_FAILURE ||
+                    isCodexAnswerEvent(event) ||
+                    isCodexApprovalEvent(event)
+                )
+        ) {
+            prefs.edit()
+                .putString(KEY_WIDGET_STATUS, WIDGET_STATUS_OBSERVED)
+                .putLong(KEY_WIDGET_STATUS_AT, event.timestamp)
+                .remove(KEY_WIDGET_ERROR)
+                .commit()
+        }
+        if (
             widgetStatus in WIDGET_AWAITING_ANSWER_STATUSES &&
             event.eventType == ScouterEventType.USER_PROMPT &&
             widgetPromptAt > 0L &&
@@ -778,6 +812,7 @@ class ScouterStateStore(context: Context) {
         private const val KEY_WIDGET_PENDING_SHELLY_SESSION_ID = "widget_pending_shelly_session_id"
         private const val WIDGET_STATUS_PENDING_TERMINAL = "pending_terminal"
         private const val WIDGET_STATUS_SENDING = "sending"
+        private const val WIDGET_STATUS_CHOICE_PENDING = "choice_pending"
         private const val WIDGET_STATUS_OBSERVED = "observed"
         private const val WIDGET_STATUS_EXPIRED = "expired"
         private const val WIDGET_STATUS_APPROVAL_FAILED = "approval_failed"
@@ -817,6 +852,7 @@ class ScouterStateStore(context: Context) {
         }
 
         fun approvalFailedStatus(): String = WIDGET_STATUS_APPROVAL_FAILED
+        fun choicePendingStatus(): String = WIDGET_STATUS_CHOICE_PENDING
     }
 }
 

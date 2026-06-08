@@ -153,7 +153,7 @@ export function CommandPalette() {
         onExecute: () => { applyPalette('orange'); close(); } },
       { id: 'theme-purple', label: 'Theme: Purple', hint: 'purple chrome', icon: 'palette', category: 'action',
         onExecute: () => { applyPalette('purple'); close(); } },
-      { id: 'theme-scouter-green', label: 'Theme: Scouter Green', hint: 'green HUD chrome', icon: 'palette', category: 'action',
+      { id: 'theme-scouter-green', label: 'Theme: Green', hint: 'green HUD chrome', icon: 'palette', category: 'action',
         onExecute: () => { applyPalette('scouter-green'); close(); } },
 
       // Voice dialogue

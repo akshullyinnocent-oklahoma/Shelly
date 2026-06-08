@@ -204,7 +204,7 @@ const ja: Record<string, string> = {
   'theme.blue': 'ブルー',
   'theme.red': 'レッド',
   'theme.purple': 'パープル',
-  'theme.scouter_green': 'スカウターグリーン',
+  'theme.scouter_green': 'Green',
   'wallpaper.title': '壁紙',
   'wallpaper.image': '画像',
   'wallpaper.pick': '選択',

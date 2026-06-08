@@ -204,7 +204,7 @@ const en: Record<string, string> = {
   'theme.blue': 'Blue',
   'theme.red': 'Red',
   'theme.purple': 'Purple',
-  'theme.scouter_green': 'Scouter Green',
+  'theme.scouter_green': 'Green',
   'wallpaper.title': 'Wallpaper',
   'wallpaper.image': 'Image',
   'wallpaper.pick': 'Pick',

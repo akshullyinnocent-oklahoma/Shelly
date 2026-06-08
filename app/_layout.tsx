@@ -471,7 +471,11 @@ export default function RootLayout() {
         const message = ready?.reason === 'interactive_prompt'
           ? 'Codex is waiting for a terminal choice'
           : `Codex resume did not become ready: ${ready?.reason ?? 'not_ready'}`;
-        await TerminalEmulator.markScouterWidgetPromptFailed?.(message).catch(() => undefined);
+        if (ready?.reason === 'interactive_prompt') {
+          await TerminalEmulator.markScouterWidgetChoicePending?.(message).catch(() => undefined);
+        } else {
+          await TerminalEmulator.markScouterWidgetPromptFailed?.(message).catch(() => undefined);
+        }
         logInfo('DeepLink', `Widget prompt drain skipped: ${ready?.reason ?? 'not_ready'}`);
         return;
       }
@@ -482,7 +486,7 @@ export default function RootLayout() {
         return;
       }
       if (typeof screenText === 'string' && detectCodexInteractivePrompt(screenText)) {
-        await TerminalEmulator.markScouterWidgetPromptFailed?.('Codex is waiting for a terminal choice').catch(() => undefined);
+        await TerminalEmulator.markScouterWidgetChoicePending?.('Codex is waiting for a terminal choice').catch(() => undefined);
         logInfo('DeepLink', 'Widget prompt drain skipped: interactive choice pending');
         return;
       }

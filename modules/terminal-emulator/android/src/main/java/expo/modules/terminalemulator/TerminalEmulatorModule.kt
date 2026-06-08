@@ -860,6 +860,13 @@ class TerminalEmulatorModule : Module() {
             null
         }
 
+        AsyncFunction("markScouterWidgetChoicePending") { message: String ->
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).recordWidgetChoicePending(message)
+            null
+        }
+
         AsyncFunction("returnToHome") {
             val context = appContext.reactContext
                 ?: throw IllegalStateException("React context unavailable")

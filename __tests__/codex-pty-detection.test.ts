@@ -91,6 +91,16 @@ describe('codex pty detection', () => {
     ].join('\n'))).toBe(true);
   });
 
+  it('detects Codex edit confirmation choice prompts', () => {
+    expect(detectCodexInteractivePrompt([
+      'Would you like to make the following edits?',
+      '> 1. Yes, proceed (y)',
+      "2. Yes, and don't ask again for these files (a)",
+      '3. No, and tell Codex what to do differently (esc)',
+      'Press enter to confirm or esc to cancel',
+    ].join('\n'))).toBe(true);
+  });
+
   it('strips OSC color replies before detecting terminal state', () => {
     const leakedOsc = '\u001b]10;rgb:ffff/ffff/ffff\u0007R10;rgb:ffff/ffff/ffff;1;2;6;9;15;18;21;22c';
     expect(detectCodexActiveTranscript([

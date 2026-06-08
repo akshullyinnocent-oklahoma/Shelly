@@ -61,7 +61,7 @@ export function detectCodexInteractivePrompt(output: string): boolean {
   const tail = recentLines.join('\n');
   if (!tail) return false;
 
-  const hasInteractiveKeyword = /(?:Approaching rate limits|Switch to\b.*\bmodel\b|Keep current model|Press enter to confirm|esc to go back|rate limit reminders|select an option|choose an option)/i.test(tail);
+  const hasInteractiveKeyword = /(?:Approaching rate limits|Switch to\b.*\bmodel\b|Keep current model|Would you like to make the following edits|Yes,\s*proceed|don't ask again|Press enter to confirm|esc to go back|rate limit reminders|select an option|choose an option)/i.test(tail);
   const numberedChoices = recentLines.filter((line) =>
     /^\s*(?:[\u003e\u203a\u276f]\s*)?\d+[\).]\s+\S/.test(line)
   ).length;

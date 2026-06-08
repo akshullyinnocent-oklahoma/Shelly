@@ -109,6 +109,7 @@ declare class TerminalEmulatorModuleType extends NativeModule {
   markScouterWidgetApprovalFailed?(message: string): Promise<void>;
   markScouterWidgetApprovalResolved?(): Promise<void>;
   markScouterWidgetPromptFailed?(message: string): Promise<void>;
+  markScouterWidgetChoicePending?(message: string): Promise<void>;
   returnToHome?(): Promise<void>;
   addListener(eventName: string, listener: (event: any) => void): { remove(): void };
 }

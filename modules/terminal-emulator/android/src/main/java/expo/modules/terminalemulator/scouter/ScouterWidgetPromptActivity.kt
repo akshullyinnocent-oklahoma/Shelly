@@ -274,7 +274,11 @@ class ScouterWidgetPromptActivity : Activity() {
                 return false
             }
             val messageId = target.messageResId()
-            store.recordWidgetPromptFailed(getString(messageId))
+            if (target is WidgetCodexTarget.InteractivePrompt) {
+                store.recordWidgetChoicePending(getString(messageId))
+            } else {
+                store.recordWidgetPromptFailed(getString(messageId))
+            }
             ScouterWidgetProvider.updateAll(this, force = true)
             replaceWithUnavailableContent(dialog, messageId, target.canResume())
             return false
@@ -490,7 +494,7 @@ class ScouterWidgetPromptActivity : Activity() {
         private val SHELL_PROMPT_RE = Regex("""^(?:[~\w./:@+-]+\s*)?[$#]\s*$""")
         private val APPROVAL_KEYWORD_RE = Regex("""\b(?:approval|approve|permission|allow|deny)\b""", RegexOption.IGNORE_CASE)
         private val APPROVAL_CHOICE_RE = Regex("""\b(?:y/n|yes/no|allow|deny|approve|reject)\b|^\s*(?:[^A-Za-z0-9\s]\s*)?(?:\d+[\).]\s*)?(?:yes|no|y|n)\b(?:\s*[,):.-]|\s*$)|[\[(]\s*[yY]\s*/\s*[nN]\s*[\])]""", RegexOption.IGNORE_CASE)
-        private val INTERACTIVE_PROMPT_KEYWORD_RE = Regex("""(?:Approaching rate limits|Switch to\b.*\bmodel\b|Keep current model|Press enter to confirm|esc to go back|rate limit reminders|select an option|choose an option)""", RegexOption.IGNORE_CASE)
+        private val INTERACTIVE_PROMPT_KEYWORD_RE = Regex("""(?:Approaching rate limits|Switch to\b.*\bmodel\b|Keep current model|Would you like to make the following edits|Yes,\s*proceed|don't ask again|Press enter to confirm|esc to go back|rate limit reminders|select an option|choose an option)""", RegexOption.IGNORE_CASE)
         private val INTERACTIVE_NUMBERED_CHOICE_RE = Regex("""^\s*(?:[>]\s*)?\d+[\).]\s+\S""")
         private val INTERACTIVE_FOCUSED_CHOICE_RE = Regex("""^\s*(?:[>]\s*)\d+[\).]\s+\S""")
         private val UUID_SUFFIX_RE = Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
@@ -509,11 +513,11 @@ class ScouterWidgetPromptActivity : Activity() {
             }
         }
         private const val TAG = "ScouterWidgetPrompt"
-        private val COLOR_PANEL = Color.rgb(3, 16, 22)
-        private val COLOR_BORDER = Color.rgb(0, 157, 209)
-        private val COLOR_ACCENT = Color.rgb(48, 213, 255)
-        private val COLOR_TEXT = Color.rgb(230, 247, 255)
-        private val COLOR_MUTED = Color.rgb(126, 169, 190)
+        private val COLOR_PANEL = Color.rgb(0, 12, 4)
+        private val COLOR_BORDER = Color.rgb(0, 255, 65)
+        private val COLOR_ACCENT = Color.rgb(0, 255, 65)
+        private val COLOR_TEXT = Color.rgb(230, 255, 236)
+        private val COLOR_MUTED = Color.rgb(140, 255, 170)
     }
 }
 

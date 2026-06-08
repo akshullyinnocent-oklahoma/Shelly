@@ -8,6 +8,6 @@
     <solid android:color="#00000000" />
     <stroke
       android:width="1dp"
-      android:color="#B312B53E" />
+      android:color="#CC00FF41" />
   </shape>
 </inset>

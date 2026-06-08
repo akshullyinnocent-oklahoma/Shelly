@@ -14,6 +14,7 @@ import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import expo.modules.terminalemulator.R
+import expo.modules.terminalemulator.TerminalSessionService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -214,7 +215,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val boundCodex = latestCodexForBinding(snapshots, binding)
             val codex = boundCodex ?: latestFor(snapshots, ScouterSource.CODEX)
             val local = latestFor(snapshots, ScouterSource.LOCAL_LLM)
-            bindCodexApprovalActions(views, context, binding, boundCodex, conversation)
+            val boundScreen = inspectBoundCodexScreen(binding)
+            bindCodexApprovalActions(views, context, binding, boundCodex, conversation, boundScreen)
             bindRow(
                 views = views,
                 snapshot = codex,
@@ -234,7 +236,12 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             codex?.let {
                 views.setTextViewText(R.id.scouter_codex_metrics, codexMetrics(it, conversation))
             }
-            bindCodexConversation(views, boundCodex, conversation)
+            if (boundScreen.state == BoundCodexScreenState.INTERACTIVE) {
+                bindCodexChoicePending(views, boundScreen)
+            } else {
+                views.setTextViewText(R.id.scouter_codex_ask, context.getString(R.string.scouter_ask_agent_chat_short))
+                bindCodexConversation(views, boundCodex, conversation, showStoredChoicePending = false)
+            }
             bindRow(
                 views = views,
                 snapshot = local,
@@ -257,6 +264,41 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 "${loadLine(load)} · ${latestAt?.let { "updated ${formatTime(it)}" } ?: "updated --:--:--"}"
             )
             return views
+        }
+
+        private fun inspectBoundCodexScreen(binding: ScouterWidgetCodexBinding?): BoundCodexScreen {
+            val ptySessionId = binding?.ptySessionId?.takeIf { it.isNotBlank() }
+                ?: return BoundCodexScreen(BoundCodexScreenState.MISSING)
+            val session = TerminalSessionService.sessionRegistry[ptySessionId]
+                ?: return BoundCodexScreen(BoundCodexScreenState.MISSING)
+            if (!session.isAlive()) return BoundCodexScreen(BoundCodexScreenState.STALE)
+            val screenText = runCatching { session.getScreenText() }.getOrDefault("")
+            if (!isActiveCodexScreen(screenText)) return BoundCodexScreen(BoundCodexScreenState.STALE)
+            if (isApprovalPromptScreen(screenText)) return BoundCodexScreen(BoundCodexScreenState.APPROVAL)
+            if (isInteractivePromptScreen(screenText)) {
+                return BoundCodexScreen(
+                    BoundCodexScreenState.INTERACTIVE,
+                    interactivePromptSummary(screenText)
+                )
+            }
+            return BoundCodexScreen(BoundCodexScreenState.READY)
+        }
+
+        private fun bindCodexChoicePending(views: RemoteViews, screen: BoundCodexScreen) {
+            val message = screen.message?.takeIf { it.isNotBlank() }
+                ?: "Codex is waiting for terminal selection"
+            views.setViewVisibility(R.id.scouter_codex_allow, View.GONE)
+            views.setViewVisibility(R.id.scouter_codex_deny, View.GONE)
+            views.setViewVisibility(R.id.scouter_codex_ask, View.VISIBLE)
+            views.setTextViewText(R.id.scouter_codex_ask, "CHOICE")
+            views.setTextViewText(R.id.scouter_codex_detail, "STATE [??] Choice waiting in terminal")
+            views.setTextViewText(R.id.scouter_codex_metrics, "CHOICE pending · select in Codex PTY")
+            views.setViewVisibility(R.id.scouter_codex_conversation, View.VISIBLE)
+            views.setTextColor(R.id.scouter_codex_conversation, HUD_GREEN)
+            views.setTextViewText(
+                R.id.scouter_codex_conversation,
+                "CHOICE  ${shorten(message.redactForScouter(), 120)}"
+            )
         }
 
         private fun bindRow(
@@ -376,7 +418,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             context: Context,
             binding: ScouterWidgetCodexBinding?,
             codex: SessionSnapshot?,
-            conversation: ScouterWidgetConversation?
+            conversation: ScouterWidgetConversation?,
+            boundScreen: BoundCodexScreen
         ) {
             val lastApprovalAt = conversation?.lastApprovalAt ?: 0L
             val widgetStatusAt = conversation?.widgetStatusAt ?: 0L
@@ -384,6 +427,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 (lastApprovalAt <= 0L || widgetStatusAt >= lastApprovalAt)
             val hasApproval = !binding?.codexSessionId.isNullOrBlank() &&
                 !binding?.ptySessionId.isNullOrBlank() &&
+                boundScreen.state != BoundCodexScreenState.INTERACTIVE &&
                 codex?.currentStatus == ScouterStatus.WAITING_PERMISSION &&
                 !isStale(codex) &&
                 lastApprovalAt > 0L &&
@@ -489,6 +533,9 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 lines += rateLimitLine(snapshot)
             }
             val contextParts = mutableListOf<String>()
+            if (windowLimitLine == null && !needsDedicatedRateLimitLine(snapshot)) {
+                contextParts += defaultRateLimitLabel(snapshot)
+            }
             contextParts += contextGauge(snapshot)
             snapshot.modelName?.takeIf { it.isNotBlank() }?.let { contextParts += "MODEL ${shortModelName(it)}" }
             if (snapshot.contextPercentRemaining != null && snapshot.tokensUsed > 0L) {
@@ -522,9 +569,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private fun bindCodexConversation(
             views: RemoteViews,
             codex: SessionSnapshot?,
-            conversation: ScouterWidgetConversation?
+            conversation: ScouterWidgetConversation?,
+            showStoredChoicePending: Boolean = true
         ) {
-            val preview = widgetConversationPreview(codex, conversation)
+            val preview = widgetConversationPreview(codex, conversation, showStoredChoicePending)
             if (preview == null) {
                 views.setViewVisibility(R.id.scouter_codex_conversation, View.GONE)
                 views.setTextViewText(R.id.scouter_codex_conversation, "")
@@ -537,18 +585,20 @@ class ScouterWidgetProvider : AppWidgetProvider() {
 
         private fun widgetConversationPreview(
             codex: SessionSnapshot?,
-            conversation: ScouterWidgetConversation?
+            conversation: ScouterWidgetConversation?,
+            showStoredChoicePending: Boolean = true
         ): WidgetConversationPreview? {
             if (conversation == null) {
                 if (codex?.currentStatus == ScouterStatus.WAITING_PERMISSION && !isStale(codex)) {
                     return WidgetConversationPreview(
                         "APPROVAL  Codex permission requested",
-                        Color.rgb(184, 255, 208)
+                        HUD_GREEN
                     )
                 }
                 return null
             }
             val isApprovalFailure = conversation.widgetStatus == ScouterStateStore.approvalFailedStatus()
+            val isChoicePending = conversation.widgetStatus == ScouterStateStore.choicePendingStatus()
             val widgetPromptAt = conversation.widgetPromptAt ?: 0L
             val lastAnswerAt = conversation.lastAnswerAt ?: 0L
             val lastPromptAt = conversation.lastPromptAt ?: 0L
@@ -560,13 +610,21 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val approvalDecision = ScouterStateStore.approvalDecisionFromStatus(conversation.widgetStatus)
             val isApprovalPending = conversation.widgetStatus?.startsWith("approval_pending_") == true
             val isApprovalSending = conversation.widgetStatus?.startsWith("approval_sending_") == true
+            if (isChoicePending && showStoredChoicePending) {
+                val message = conversation.widgetError?.takeIf { it.isNotBlank() }
+                    ?: "Codex is waiting for a terminal choice"
+                return WidgetConversationPreview(
+                    "CHOICE  ${shorten(message.redactForScouter(), 96)}",
+                    HUD_GREEN
+                )
+            }
             if (
                 approvalDecision != null &&
                 isApprovalPending
             ) {
                 return WidgetConversationPreview(
                     "APPROVAL ${approvalDecisionLabel(approvalDecision)} queued",
-                    Color.rgb(184, 255, 208)
+                    HUD_GREEN
                 )
             }
             if (
@@ -575,7 +633,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             ) {
                 return WidgetConversationPreview(
                     "APPROVAL ${approvalDecisionLabel(approvalDecision)} sending",
-                    Color.rgb(184, 255, 208)
+                    HUD_GREEN
                 )
             }
             val approvalDecisionAfterEvent = approvalDecision != null &&
@@ -587,7 +645,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 if (ageMs <= WIDGET_APPROVAL_SENT_DISPLAY_MS) {
                     return WidgetConversationPreview(
                         "APPROVAL ${approvalDecisionLabel(approvalDecision)} sent",
-                        Color.rgb(184, 255, 208)
+                        HUD_GREEN
                     )
                 }
             }
@@ -596,14 +654,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 val text = approval ?: "Codex permission requested"
                 return WidgetConversationPreview(
                     "APPROVAL  ${shorten(text.redactForScouter(), 120)}",
-                    Color.rgb(184, 255, 208)
+                    HUD_GREEN
                 )
             }
-            conversation.widgetError?.takeIf { it.isNotBlank() }?.let {
+            conversation.widgetError?.takeIf { it.isNotBlank() && !isChoicePending }?.let {
                 val label = if (isApprovalFailure) "APPROVAL ERROR" else "ASK ERROR"
                 return WidgetConversationPreview(
                     "$label  ${shorten(it.redactForScouter(), 96)}",
-                    Color.rgb(125, 219, 125)
+                    HUD_GREEN
                 )
             }
             if (
@@ -613,13 +671,13 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             ) {
                 return WidgetConversationPreview(
                     "RESULT  ${shorten(answer.redactForScouter(), 128)}",
-                    Color.rgb(216, 255, 232)
+                    HUD_GREEN
                 )
             }
             if (answer != null && lastAnswerAt >= latestPromptAt) {
                 return WidgetConversationPreview(
                     "RESULT  ${shorten(answer.redactForScouter(), 128)}",
-                    Color.rgb(216, 255, 232)
+                    HUD_GREEN
                 )
             }
             val prompt = if (widgetPromptAt >= lastPromptAt) conversation.widgetPrompt else conversation.lastPrompt
@@ -631,12 +689,12 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 }
                 return WidgetConversationPreview(
                     "$label${shorten(prompt.redactForScouter(), 128)}",
-                    Color.rgb(184, 255, 208)
+                    HUD_GREEN
                 )
             }
             return WidgetConversationPreview(
                 "ASK ready when Codex is bound",
-                Color.rgb(184, 255, 208)
+                HUD_GREEN
             )
         }
 
@@ -675,6 +733,16 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 ScouterRateLimitStatus.UNKNOWN -> "RATE --"
                 null -> null
                 else -> null
+            }
+        }
+
+        private fun defaultRateLimitLabel(snapshot: SessionSnapshot): String {
+            val status = snapshot.rateLimitStatus ?: inferScouterRateLimitFromText(snapshot.lastError).status
+            return when (status) {
+                ScouterRateLimitStatus.OK -> "LIMIT OK"
+                ScouterRateLimitStatus.UNKNOWN, null -> "LIMIT --"
+                ScouterRateLimitStatus.HOT -> "LIMIT HOT"
+                ScouterRateLimitStatus.LIMITED -> "LIMITED"
             }
         }
 
@@ -813,6 +881,59 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             }.format(Date(epochMs))
         }
 
+        private fun isActiveCodexScreen(screenText: String): Boolean {
+            if (screenText.isBlank()) return false
+            val lines = screenText.lines().map { it.trimEnd() }
+            var lastCodexPrompt = -1
+            var lastShellPrompt = -1
+            lines.forEachIndexed { index, line ->
+                when {
+                    line.contains("OpenAI Codex", ignoreCase = true) ||
+                        CODEX_STATUS_RE.containsMatchIn(line) -> lastCodexPrompt = index
+                    SHELL_PROMPT_RE.matches(line.trim()) -> lastShellPrompt = index
+                }
+            }
+            return lastCodexPrompt >= 0 && lastCodexPrompt > lastShellPrompt
+        }
+
+        private fun isApprovalPromptScreen(screenText: String): Boolean {
+            val recentLines = screenText
+                .lines()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .takeLast(8)
+            if (recentLines.isEmpty()) return false
+            val tail = recentLines.joinToString("\n")
+            val hasApprovalKeyword = APPROVAL_KEYWORD_RE.containsMatchIn(tail)
+            val hasChoice = recentLines.any { APPROVAL_CHOICE_RE.containsMatchIn(it) }
+            return hasApprovalKeyword && hasChoice
+        }
+
+        private fun isInteractivePromptScreen(screenText: String): Boolean {
+            val recentLines = screenText
+                .lines()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .takeLast(12)
+            if (recentLines.isEmpty()) return false
+            val tail = recentLines.joinToString("\n")
+            val hasInteractiveKeyword = INTERACTIVE_PROMPT_KEYWORD_RE.containsMatchIn(tail)
+            val numberedChoices = recentLines.count { INTERACTIVE_NUMBERED_CHOICE_RE.containsMatchIn(it) }
+            val hasFocusedChoice = recentLines.any { INTERACTIVE_FOCUSED_CHOICE_RE.containsMatchIn(it) }
+            return hasInteractiveKeyword && (numberedChoices >= 2 || hasFocusedChoice)
+        }
+
+        private fun interactivePromptSummary(screenText: String): String {
+            val recentLines = screenText
+                .lines()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .takeLast(12)
+            return recentLines.firstOrNull { INTERACTIVE_PROMPT_KEYWORD_RE.containsMatchIn(it) }
+                ?: recentLines.firstOrNull { INTERACTIVE_FOCUSED_CHOICE_RE.containsMatchIn(it) }
+                ?: "Codex is waiting for terminal selection"
+        }
+
         private fun displayProjectName(raw: String): String {
             val value = raw.redactForScouter().trim().trim('"', '\'')
             if (value.isBlank()) return "Shelly"
@@ -838,8 +959,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         }
 
         private fun colorForStatus(status: ScouterStatus, stale: Boolean = false): Int = when {
-            stale -> Color.rgb(79, 158, 104)
-            else -> Color.rgb(18, 181, 62)
+            stale -> HUD_GREEN_STALE
+            else -> HUD_GREEN
         }
 
         private fun formatTokens(tokens: Long): String {
@@ -890,6 +1011,19 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             return SimpleDateFormat(pattern, Locale.US).format(Date(time))
         }
 
+        private enum class BoundCodexScreenState {
+            READY,
+            APPROVAL,
+            INTERACTIVE,
+            MISSING,
+            STALE
+        }
+
+        private data class BoundCodexScreen(
+            val state: BoundCodexScreenState,
+            val message: String? = null
+        )
+
         private const val TAG = "ScouterWidget"
         private const val ACTION_WAIT_EXPIRY_REFRESH =
             "expo.modules.terminalemulator.scouter.WIDGET_WAIT_EXPIRY_REFRESH"
@@ -902,6 +1036,13 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private val FIVE_HOUR_LIMIT_RE = Regex("""(?i)\b(?:5\s*h|5-hour|five[- ]hour)\b""")
         private val WEEKLY_LIMIT_RE = Regex("""(?i)\b(?:weekly|week)\b""")
         private val LIMIT_PERCENT_RE = Regex("""(?i)(?:<\s*)?(\d{1,3}(?:\.\d+)?)\s*%""")
+        private val CODEX_STATUS_RE = Regex("""\b(?:gpt|o\d|codex)[A-Za-z0-9_.-]*\b.*[·•]\s*/""", RegexOption.IGNORE_CASE)
+        private val SHELL_PROMPT_RE = Regex("""^(?:[~\w./:@+-]+\s*)?[$#]\s*$""")
+        private val APPROVAL_KEYWORD_RE = Regex("""\b(?:approval|approve|permission|allow|deny)\b""", RegexOption.IGNORE_CASE)
+        private val APPROVAL_CHOICE_RE = Regex("""\b(?:y/n|yes/no|allow|deny|approve|reject)\b|^\s*(?:[^A-Za-z0-9\s]\s*)?(?:\d+[\).]\s*)?(?:yes|no|y|n)\b(?:\s*[,):.-]|\s*$)|[\[(]\s*[yY]\s*/\s*[nN]\s*[\])]""", RegexOption.IGNORE_CASE)
+        private val INTERACTIVE_PROMPT_KEYWORD_RE = Regex("""(?:Approaching rate limits|Switch to\b.*\bmodel\b|Keep current model|Would you like to make the following edits|Yes,\s*proceed|don't ask again|Press enter to confirm|esc to go back|rate limit reminders|select an option|choose an option)""", RegexOption.IGNORE_CASE)
+        private val INTERACTIVE_NUMBERED_CHOICE_RE = Regex("""^\s*(?:[>]\s*)?\d+[\).]\s+\S""")
+        private val INTERACTIVE_FOCUSED_CHOICE_RE = Regex("""^\s*(?:[>]\s*)\d+[\).]\s+\S""")
         private val WAITING_WIDGET_STATUSES = setOf(
             "pending_terminal",
             "sending",
@@ -910,5 +1051,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             ScouterStateStore.approvalSendingStatus("allow"),
             ScouterStateStore.approvalSendingStatus("deny")
         )
+        private val HUD_GREEN = Color.rgb(0, 255, 65)
+        private val HUD_GREEN_STALE = Color.rgb(52, 232, 94)
     }
 }
