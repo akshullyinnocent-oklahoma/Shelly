@@ -841,10 +841,11 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val primaryRemaining = snapshot.rateLimitPrimaryUsedPercent?.let { (100.0 - it).coerceIn(0.0, 100.0) }
             val secondaryRemaining = snapshot.rateLimitSecondaryUsedPercent?.let { (100.0 - it).coerceIn(0.0, 100.0) }
             if (primaryRemaining == null && secondaryRemaining == null) return null
-            // Threshold-color each REMAINING-quota percent (green/amber/red) so a low
-            // window jumps out; keep the "left" tag so it isn't misread as "used".
-            // Length is unchanged from the old plain line (no bar) to avoid the
-            // single-line usage view truncating WK / RESET.
+            // "LIMIT · 5H[##···]45% · WK[#····]4% · RESET 14:05" — each window gets a
+            // 5-cell REMAINING-quota bar + percent, green while healthy and red once
+            // the bar drops to its last cell (~≤25%), with a dimmed rail; LIMIT prefix
+            // and the dimmed RESET are kept. The bar is the "remaining" indicator
+            // (so the "left" word is dropped).
             val sb = SpannableStringBuilder("LIMIT")
             primaryRemaining?.let { appendQuota(sb, "5H", it) }
             secondaryRemaining?.let { appendQuota(sb, "WK", it) }
@@ -857,14 +858,28 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             return sb
         }
 
-        // Appends " · <label> <pct>% left" with the figure colored by threshold.
+        // Appends " · <label> [#####] <pct>%" — a 5-cell remaining-quota bar (filled
+        // + dim rail) plus the percent; fill and percent are green, turning red once
+        // only the last cell is filled (~≤25% remaining).
         private fun appendQuota(sb: SpannableStringBuilder, label: String, remainingPercent: Double) {
-            sb.append(" · ").append(label).append(" ")
-            val start = sb.length
-            sb.append(formatPercent(remainingPercent)).append(" ").append(REMAINING_QUOTA_SUFFIX)
+            val pct = remainingPercent.coerceIn(0.0, 100.0)
+            val filled = Math.round(pct / 100.0 * GAUGE_CELLS).toInt().coerceIn(0, GAUGE_CELLS)
+            // Green while healthy; red once the bar is down to its last cell
+            // (~≤25% remaining) so a nearly-exhausted window reads at a glance.
+            val color = if (filled <= 1) HUD_RED else HUD_GREEN
+            sb.append(" · ").append(label).append(" [")
+            val fillStart = sb.length
+            sb.append("#".repeat(filled))
+            sb.setSpan(ForegroundColorSpan(color), fillStart, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            val railStart = sb.length
+            sb.append(".".repeat(GAUGE_CELLS - filled))
+            sb.setSpan(ForegroundColorSpan(HUD_DIM), railStart, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.append("] ")
+            val pctStart = sb.length
+            sb.append(formatPercent(pct))
             sb.setSpan(
-                ForegroundColorSpan(thresholdColor(remainingPercent)),
-                start,
+                ForegroundColorSpan(color),
+                pctStart,
                 sb.length,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
@@ -1292,14 +1307,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             else -> HUD_GREEN // IDLE, COMPLETED
         }
 
-        // Threshold color for a REMAINING-quota percent (gauges + rate-limit %):
-        // green when healthy, amber when low (≤25%), red when critical (≤10%).
-        private fun thresholdColor(remainingPercent: Double): Int = when {
-            remainingPercent <= 10.0 -> HUD_RED
-            remainingPercent <= 25.0 -> HUD_AMBER
-            else -> HUD_GREEN
-        }
-
         private fun formatTokens(tokens: Long): String {
             return if (tokens >= 1000) String.format(Locale.US, "%.1fK", tokens / 1000.0) else tokens.toString()
         }
@@ -1376,11 +1383,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private const val CHOICE_SELECT_REQUEST_BASE = 9110
         private val CODEX_SESSION_UUID_SUFFIX_RE =
             Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
-        // Suffix tagging a percent as REMAINING quota (vs used), so structured
-        // rate-limit lines never show a bare ambiguous "5H 45%". Kept short for the
-        // monospace widget. statusWindowLimitLine scrapes USED% from Codex text, so
-        // it intentionally stays untagged (different semantics).
-        private const val REMAINING_QUOTA_SUFFIX = "left"
+        // Number of cells in the inline remaining-quota bar ("[#####]"). The filled
+        // count = round(remaining% / 100 * GAUGE_CELLS), so the bar itself is the
+        // "remaining" indicator and no "left"/"used" word is needed.
+        private const val GAUGE_CELLS = 5
         private val FIVE_HOUR_LIMIT_RE = Regex("""(?i)\b(?:5\s*h|5-hour|five[- ]hour)\b""")
         private val WEEKLY_LIMIT_RE = Regex("""(?i)\b(?:weekly|week)\b""")
         private val LIMIT_PERCENT_RE = Regex("""(?i)(?:<\s*)?(\d{1,3}(?:\.\d+)?)\s*%""")
