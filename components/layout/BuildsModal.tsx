@@ -192,6 +192,42 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const NETWORK_TIMEOUT_MS = 15_000;
+
+// fetch() in React Native has no default timeout: a stalled TLS/connection
+// (or a throttled GitHub response held open) never settles, which hangs the
+// whole Updates refresh on "Checking…" forever. Abort the request after a
+// bounded time so the promise always rejects instead of hanging.
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = NETWORK_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Backstop for any promise feeding the Updates refresh (native version probe,
+// codex --version shell probe, fetches). Guarantees Promise.allSettled can
+// never hang: if the underlying op stalls, this rejects after `ms`.
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)),
+      ms,
+    );
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
 function parseCodexVersion(output: string): string | null {
   const match = output.match(/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
   return match?.[1] ?? null;
@@ -269,7 +305,7 @@ export async function fetchBuildRuns(): Promise<BuildRun[]> {
   // carry Termux-specific CURL_CA_BUNDLE / SSL_CERT_FILE paths that do not
   // exist inside Shelly and produce false TLS errors.
   const apiUrl = `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?per_page=5`;
-  const response = await fetch(apiUrl, {
+  const response = await fetchWithTimeout(apiUrl, {
     headers: {
       Accept: 'application/vnd.github+json',
       'User-Agent': 'Shelly',
@@ -284,7 +320,7 @@ export async function fetchBuildRuns(): Promise<BuildRun[]> {
 
 async function fetchLatestAndroidUpdate(): Promise<AndroidUpdateManifest | null> {
   const releaseUrl = `https://api.github.com/repos/${REPO}/releases/tags/${UPDATE_TAG}`;
-  const releaseResponse = await fetch(releaseUrl, {
+  const releaseResponse = await fetchWithTimeout(releaseUrl, {
     headers: {
       Accept: 'application/vnd.github+json',
       'User-Agent': 'Shelly',
@@ -303,7 +339,7 @@ async function fetchLatestAndroidUpdate(): Promise<AndroidUpdateManifest | null>
     throw new Error(`Release ${UPDATE_TAG} has no ${UPDATE_MANIFEST_ASSET} asset.`);
   }
 
-  const manifestResponse = await fetch(String(manifestAsset.browser_download_url), {
+  const manifestResponse = await fetchWithTimeout(String(manifestAsset.browser_download_url), {
     headers: {
       Accept: 'application/json',
       'User-Agent': 'Shelly',
@@ -359,7 +395,7 @@ async function fetchLatestAndroidUpdate(): Promise<AndroidUpdateManifest | null>
 
 async function fetchLatestCodexRuntime(): Promise<CodexRuntimeManifest | null> {
   const releaseUrl = `https://api.github.com/repos/${REPO}/releases/tags/${CODEX_RUNTIME_TAG}`;
-  const releaseResponse = await fetch(releaseUrl, {
+  const releaseResponse = await fetchWithTimeout(releaseUrl, {
     headers: {
       Accept: 'application/vnd.github+json',
       'User-Agent': 'Shelly',
@@ -378,7 +414,7 @@ async function fetchLatestCodexRuntime(): Promise<CodexRuntimeManifest | null> {
     throw new Error(`Release ${CODEX_RUNTIME_TAG} has no ${CODEX_RUNTIME_MANIFEST_ASSET} asset.`);
   }
 
-  const manifestResponse = await fetch(String(manifestAsset.browser_download_url), {
+  const manifestResponse = await fetchWithTimeout(String(manifestAsset.browser_download_url), {
     headers: {
       Accept: 'application/json',
       'User-Agent': 'Shelly',
@@ -689,12 +725,16 @@ export function BuildsModal({ visible, onClose, onStatusChange }: Props) {
     setLoading(true);
     setError(null);
     try {
+      // The three GitHub calls are now internally bounded by fetchWithTimeout
+      // (AbortController), so they can't hang. The two non-fetch probes have no
+      // intrinsic abort, so wrap them in withTimeout — together this guarantees
+      // refresh() can never stay pending forever on "Checking…".
       const [runsResult, updateResult, codexRuntimeResult, versionResult, codexResult] = await Promise.allSettled([
         fetchBuildRuns(),
         fetchLatestAndroidUpdate(),
         fetchLatestCodexRuntime(),
-        TerminalEmulator.getAppVersionInfo(),
-        fetchInstalledCodexVersion(),
+        withTimeout<AppVersionInfo>(TerminalEmulator.getAppVersionInfo(), 10_000, 'App version'),
+        withTimeout<CodexVersionInfo | null>(fetchInstalledCodexVersion(), 20_000, 'Codex version probe'),
       ]);
       let nextRuns: BuildRun[] = [];
       let nextUpdate: AndroidUpdateManifest | null = null;
