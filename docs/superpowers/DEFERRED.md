@@ -303,6 +303,25 @@ fail-loud する。詳細:
 - 既存 `groqChatStream` を `systemPromptOverride` 経由で流用 — 新規 LLM plumbing ゼロ
 - AddPaneSheet / LayoutAddSheet / PaneSlot の選択肢に統合
 
+### Scouter Widget Stage 2 — 見た目オーバーホール (設計完了、実装未着手)
+
+**優先度**: P1 (Stage 1 = commit `2f06d63b` / versionCode 1464 の実機検証 PASS が前提ゲート)
+
+**設計書**: `docs/superpowers/specs/2026-06-09-scouter-widget-stage2-visual-overhaul.md`
+
+**Why not now**: 視覚リスク高 + 既存 approval/choice/ASK/LOCAL/footer/resume フローへの回帰リスク。Stage 1 (live rate-limit override + 60s heartbeat + render-time footer + LiteLLM cost) の実機検証が先。テーマ (緑モノクロ HUD) は維持。
+
+**内容 (additive 中心)**:
+- 項目6 Chronometer (RemoteViews `setChronometerCountDown` API24+): rate-limit reset カウントダウン + session 経過時間。可視時は再描画なしで自走 → idle 凍結緩和 + 動く感。
+- 項目7 ゲージ (5H/WK 残量 + ctx): **Spannable ASCII バー**で閾値色 (>25%緑 / ≤25%amber / ≤10%red)。API24–30 で ProgressBar 動的 tint 不可のため本物 ProgressBar は不採用 (判断A)。
+- 項目8 状態色分け (idle緑/thinking明緑/waiting amber/error・rate-limit red) + used/left 明示 (混同防止) + dim 階層 + Local offline 1行圧縮 + [OK] 重複解消 + 下段ヘッダ `MODEL`→`LOCAL` (語衝突)。Spannable+ForegroundColorSpan で1行内個別色分け。
+
+**触るファイル**: `res/layout/scouter_widget_medium.xml`, `ScouterWidgetProvider.kt` (色定数 + `colorForStatus` 拡張 + Chronometer バインド + `gaugeSpan`), 必要なら `CodexScreenInspect.kt` (reset 時刻 parse)。
+
+→ sync: 実装着手時に本エントリへ ✅ + commit SHA。
+
+---
+
 **Stage 2 予定** (設計完了、実装未着手 — docs/ask-pane-stage2-design.md 参照):
 - `[📝 Create GitHub issue]` ActionBlock (NOT_AVAILABLE 時に表示)
 - Issue 作成 flow: 質問 + AI 回答 + 環境情報を template に pre-populate、editable modal で preview → POST /repos/RYOITABASHI/Shelly/issues
@@ -1750,6 +1769,7 @@ claude() {
 - **2026-05-20**: Claude Code 2.1.143+ Bash tool 追従で、内部 subprocess 実装追跡だけでは更新時に再発しやすいことを確認。`sdk-tools.d.ts` snapshot + schema diff + behavior smoke + breaking version gate を P1 として登録。
 - **2026-05-21**: Claude Code Bash tool `Exit code 1` 追跡で 7 ビルドを試したが未解決。証明済みの CI marker / exec-wrapper null-deref hardening のみ main に残し、未検証の relay / launcher / stack-frame churn は deferred 化。
 - **2026-06-02**: Codex Agent Chat UI 設計を追加。V1 は Shelly 本体の pane-native chat + Type-less など外部入力ツールからの text input に限定し、Galaxy Watch / Shelly-owned STT は P3 deferred。
+- **2026-06-09**: Scouter widget Stage 1 (live rate-limit override + 60s heartbeat + render-time footer + LiteLLM cost, commit `2f06d63b`) を push。Stage 2 (見た目オーバーホール: Chronometer / Spannable ゲージ閾値色 / 状態色分け / used·left 明示) を設計完了・P1 登録 (spec: 2026-06-09-scouter-widget-stage2-visual-overhaul.md)。Stage 1 実機検証 PASS が着手ゲート。RemoteViews の ProgressBar 動的 tint が API24–30 で不可と判明 → ゲージは Spannable ASCII で実装する判断。
 
 ---
 
