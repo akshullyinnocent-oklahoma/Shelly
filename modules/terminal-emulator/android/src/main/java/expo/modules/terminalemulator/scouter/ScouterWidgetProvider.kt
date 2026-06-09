@@ -679,17 +679,29 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         // status-window summary (e.g. "LIMIT 5H 20% · WK 58% · RESET 14:05" or
         // "RATE LIMITED · ..."), or null when there is nothing meaningful to show.
         private fun codexUsageLine(snapshot: SessionSnapshot, conversation: ScouterWidgetConversation? = null): String? {
-            // Prefer the continuous structured rate_limits snapshot when present.
-            structuredRateLimitLine(snapshot)?.let { return it }
-            val windowLimitLine = statusWindowLimitLine(
-                snapshot,
-                conversation?.lastAnswer,
-                snapshot.lastMessage,
-                snapshot.lastError
-            )
-            if (windowLimitLine != null) return windowLimitLine
-            if (needsDedicatedRateLimitLine(snapshot)) return rateLimitLine(snapshot)
-            return null
+            // Rate-limit / status-window summary (ordering unchanged from before).
+            // Computed first so the spent-cost token can be appended alongside it
+            // for a "budget" read: remaining quota + dollars spent this session.
+            val rate: String? = run {
+                // Prefer the continuous structured rate_limits snapshot when present.
+                structuredRateLimitLine(snapshot)?.let { return@run it }
+                val windowLimitLine = statusWindowLimitLine(
+                    snapshot,
+                    conversation?.lastAnswer,
+                    snapshot.lastMessage,
+                    snapshot.lastError
+                )
+                if (windowLimitLine != null) return@run windowLimitLine
+                if (needsDedicatedRateLimitLine(snapshot)) return@run rateLimitLine(snapshot)
+                null
+            }
+            // Session cost: totalCostUsd lives in the model but was never surfaced
+            // on the widget. Show it whenever > 0, even when no rate line exists, so
+            // a cost-only usage line still appears. Approval state already forces
+            // this whole line off at the call site, so cost is hidden then too.
+            val cost = snapshot.totalCostUsd.takeIf { it > 0.0 }
+                ?.let { "COST $" + String.format(Locale.US, "%.2f", it) }
+            return listOfNotNull(rate, cost).takeIf { it.isNotEmpty() }?.joinToString(" · ")
         }
 
         // Continuous remaining display from the parsed Codex rate_limits snapshot.
