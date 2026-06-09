@@ -295,7 +295,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 badgeId = R.id.scouter_local_badge,
                 detailId = R.id.scouter_local_detail,
                 metricsId = R.id.scouter_local_metrics,
-                emptyTitle = "MODEL: LOCAL LLM",
+                emptyTitle = "LOCAL  LLM",
                 emptyBadge = "LL",
                 emptyDetail = "HEALTH LINK [--] no local endpoint",
                 emptyMetrics = listOf(
@@ -471,7 +471,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val project = displayProjectName(snapshot.projectName).uppercase(Locale.US)
             val title = when (snapshot.source) {
                 ScouterSource.CODEX -> "AGENT  CODEX@$project"
-                ScouterSource.LOCAL_LLM -> "MODEL  ${shorten(snapshot.modelName ?: snapshot.localBackend ?: project, 22)}"
+                ScouterSource.LOCAL_LLM -> "LOCAL  ${shorten(snapshot.modelName ?: snapshot.localBackend ?: project, 22)}"
                 else -> "$project · ${displaySourceName(snapshot.source)}"
             }
             views.setTextViewText(titleId, title.redactForScouter())
@@ -677,7 +677,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private fun localStatus(snapshot: SessionSnapshot): String {
             val backend = snapshot.localBackend?.takeIf { it != "offline" } ?: snapshot.modelName
             return when {
-                snapshot.localBackend == "offline" -> "Offline · no endpoint"
+                // "Offline" only — the probe targets are shown on the metrics line
+                // as "PROBE <ports>", so don't also claim "no endpoint" here (the
+                // two contradicted each other when localEndpoint held probe ports).
+                snapshot.localBackend == "offline" -> "Offline"
                 snapshot.currentStatus == ScouterStatus.ERROR -> "Error · ${backend ?: "local"}"
                 snapshot.currentStatus == ScouterStatus.TOOL_RUNNING -> "Busy · ${backend ?: "local"}"
                 else -> "Ready · ${backend ?: "local"}"
@@ -699,7 +702,9 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val parts = mutableListOf<String>()
             // Option B USAGE line: MODEL · TOK · $cost · <n>%ctx (skip blanks).
             snapshot.modelName?.takeIf { it.isNotBlank() }?.let { parts += "MODEL ${shortModelName(it)}" }
-            if (snapshot.tokensUsed > 0L) parts += "TOK ${formatTokens(snapshot.tokensUsed)}"
+            // "used" makes the token total unambiguous vs the rate-limit line's
+            // "left" (remaining quota) — the two were easy to confuse.
+            if (snapshot.tokensUsed > 0L) parts += "TOK ${formatTokens(snapshot.tokensUsed)} used"
             // Prefer a real cost if the source emitted one (e.g. Claude); otherwise
             // derive it from the static LiteLLM price table, since Codex never
             // emits totalCostUsd and leaves it structurally 0.
@@ -982,6 +987,13 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         }
 
         private fun localMetrics(snapshot: SessionSnapshot): String {
+            // Offline: localEndpoint carries the probe targets (e.g. ":11434"), not
+            // a live connection. Render them as "PROBE <ports>" so this line agrees
+            // with the "Offline" health line instead of showing a misleading "END".
+            if (snapshot.localBackend == "offline") {
+                val probe = snapshot.localEndpoint?.takeIf { it.isNotBlank() } ?: "8080/11434"
+                return "LOCAL PROBE $probe"
+            }
             val parts = mutableListOf<String>()
             snapshot.localEndpoint?.let { parts += "END ${shortEndpoint(it)}" } ?: run { parts += "END none" }
             snapshot.tokensPerSecond?.takeIf { it > 0.0 }?.let {
@@ -1198,7 +1210,10 @@ class ScouterWidgetProvider : AppWidgetProvider() {
 
         private fun colorForStatus(status: ScouterStatus, stale: Boolean = false): Int = when {
             stale -> HUD_GREEN_STALE
-            else -> HUD_GREEN
+            status == ScouterStatus.ERROR -> HUD_RED
+            status == ScouterStatus.WAITING_PERMISSION -> HUD_AMBER
+            status == ScouterStatus.THINKING || status == ScouterStatus.TOOL_RUNNING -> HUD_BRIGHT
+            else -> HUD_GREEN // IDLE, COMPLETED
         }
 
         private fun formatTokens(tokens: Long): String {
@@ -1305,5 +1320,11 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         )
         private val HUD_GREEN = Color.rgb(0, 255, 65)
         private val HUD_GREEN_STALE = Color.rgb(52, 232, 94)
+        // Stage 2 state palette: bright green = active work, amber = needs
+        // attention / quota low, red = error / quota critical. Kept within the
+        // green-mono HUD aesthetic (amber/red used sparingly).
+        private val HUD_BRIGHT = Color.rgb(120, 255, 140)
+        private val HUD_AMBER = Color.rgb(255, 176, 0)
+        private val HUD_RED = Color.rgb(255, 76, 76)
     }
 }

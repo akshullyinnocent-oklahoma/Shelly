@@ -173,12 +173,14 @@ class NotificationDispatcher(private val context: Context) {
             approvalAt = approvalAt,
             approvalText = approvalText
         )
-        val text = truncate(approvalText.redactForScouter(), REPLY_MAX_CHARS)
+        // Collapsed view stays short; expanded (BigText) shows the full command /
+        // diff being approved so the user knows exactly what they're allowing.
+        val redacted = approvalText.redactForScouter()
         notify(
             id = ID_APPROVAL,
             title = "Codex needs approval",
-            text = text,
-            bigText = text,
+            text = truncate(redacted, REPLY_MAX_CHARS),
+            bigText = truncate(redacted, APPROVAL_MAX_CHARS),
             actions = listOf(
                 action("Allow", allow),
                 action("Deny", deny)
@@ -217,11 +219,16 @@ class NotificationDispatcher(private val context: Context) {
                 choiceSelectActionPendingIntent(codexSessionId, ptySessionId, option)
             )
         }
+        // Expanded body lists the menu text + every option, so the choice is
+        // readable even on surfaces that hide action buttons (e.g. some lockscreens
+        // / minimal launchers). Buttons stay for one-tap selection where available.
+        val optionLines = options.joinToString("\n") { shorten("${it.index}. ${it.label}", 80) }
+        val bigText = listOf(summary, optionLines).filter { it.isNotBlank() }.joinToString("\n")
         notify(
             id = ID_CHOICE,
             title = "Codex is waiting for a choice",
             text = summary,
-            bigText = summary,
+            bigText = bigText,
             actions = actions,
             autoCancel = false
         )
@@ -458,6 +465,9 @@ class NotificationDispatcher(private val context: Context) {
         private const val KEY_LAST_REPLY = "last_reply_key"
 
         private const val REPLY_MAX_CHARS = 120
+        // Expanded (BigText) approval body: long enough to show the full command /
+        // diff being approved without unbounded growth.
+        private const val APPROVAL_MAX_CHARS = 400
         // Allow the assistant message to be counted as "this turn's reply" even
         // when its parsed timestamp slightly precedes the COMPLETED event.
         private const val REPLY_FRESHNESS_SLOP_MS = 30_000L
