@@ -12,7 +12,6 @@ concurrency:
 permissions:
   actions: write
   contents: write
-  pull-requests: write
 
 jobs:
   bump:
@@ -94,7 +93,7 @@ jobs:
             echo "format=${latest_format}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Open bump pull request
+      - name: Commit bump to main and trigger release build
         if: steps.resolve.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -103,32 +102,29 @@ jobs:
           CODEX_TERMUX_FORMAT: ${{ steps.resolve.outputs.format }}
         run: |
           set -euo pipefail
-          branch="bot/codex-runtime-${CODEX_TERMUX_VERSION#v}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$branch"
           git add .ci-versions/codex.txt .ci-versions/codex-termux.txt .ci-versions/codex-termux.integrity
-          git commit -m "chore(codex): bump runtime to ${CODEX_VERSION}"
-          git push --force-with-lease origin "$branch"
-          cat > /tmp/codex-runtime-pr.md <<EOF
-          Updates the pinned Shelly Codex runtime.
-
-          - @openai/codex: ${CODEX_VERSION}
-          - codex-termux: ${CODEX_TERMUX_VERSION} (${CODEX_TERMUX_FORMAT})
-
-          A validation Android build is dispatched for this branch. Merging this PR triggers the normal Android APK release workflow with a new versionCode.
-          EOF
-          if gh pr view "$branch" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh pr edit "$branch" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "chore(codex): bump runtime to ${CODEX_VERSION}" \
-              --body-file /tmp/codex-runtime-pr.md
-          else
-            gh pr create \
-              --repo "$GITHUB_REPOSITORY" \
-              --base main \
-              --head "$branch" \
-              --title "chore(codex): bump runtime to ${CODEX_VERSION}" \
-              --body-file /tmp/codex-runtime-pr.md
-          fi
-          gh workflow run build-android.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          git commit -m "chore(codex): bump runtime to ${CODEX_VERSION} (${CODEX_TERMUX_VERSION}, ${CODEX_TERMUX_FORMAT})"
+          # Land the bump directly on main instead of opening a PR. GitHub
+          # Actions cannot create PRs with the default GITHUB_TOKEN ("not
+          # permitted to create or approve pull requests"), and this repo ships
+          # everything from main anyway. Retry-rebase if main moved meanwhile.
+          pushed=0
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              pushed=1
+              break
+            fi
+            echo "main moved, rebasing and retrying (attempt ${attempt})"
+            git fetch origin main
+            git rebase origin/main
+          done
+          test "${pushed}" = 1 || { echo "FATAL: could not push codex bump to main" >&2; exit 1; }
+          # A push made with GITHUB_TOKEN does not auto-trigger workflows
+          # (recursion guard), so dispatch the Android build explicitly. It runs
+          # on refs/heads/main, so its "Publish Android update release" step
+          # (gated on refs/heads/main) publishes the android-latest release with
+          # the bumped codex. A bad bump fails the build's codex canaries first,
+          # so no broken release is ever published.
+          gh workflow run build-android.yml --repo "$GITHUB_REPOSITORY" --ref main
