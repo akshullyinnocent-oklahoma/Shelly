@@ -10,6 +10,9 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
@@ -246,9 +249,20 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             // Right-aligned status signal in the title row (reuses the
             // scouter_codex_badge slot). bindRow set it to the source badge ("CX");
             // override with the animated/stale status signal for the codex row.
+            // Also state-color the title + signal: amber when a live rate-limit
+            // override is up, otherwise by status (error red / waiting amber /
+            // working bright / idle green). The CHOICE/APPROVAL pill states below
+            // set their own title text+color and still win (they run later).
             run {
                 val codexSignal = codex?.let { statusSignal(it.currentStatus, isStale(it)) } ?: "[--]"
                 views.setTextViewText(R.id.scouter_codex_badge, codexSignal)
+                val codexColor = when {
+                    usageLimited != null -> HUD_AMBER
+                    codex != null -> colorForStatus(codex.currentStatus, isStale(codex))
+                    else -> HUD_GREEN
+                }
+                views.setTextColor(R.id.scouter_codex_title, codexColor)
+                views.setTextColor(R.id.scouter_codex_badge, codexColor)
             }
             // DOING line: current tool/file when running, else idle + last reply.
             views.setTextViewText(R.id.scouter_codex_doing, codex?.let { codexDoing(it) } ?: "")
@@ -740,7 +754,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             snapshot: SessionSnapshot,
             conversation: ScouterWidgetConversation? = null,
             usageLimited: ScouterWidgetUsageLimited? = null
-        ): String? {
+        ): CharSequence? {
             // Live PTS poll saw a usage-limit banner: this is the most authoritative
             // signal (Codex emits no JSONL event for it), so it overrides the stale
             // structured/JSONL percentages that would otherwise read e.g. "WK 4% left".
@@ -751,7 +765,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             // Rate-limit / status-window summary (ordering unchanged from before).
             // Cost now lives on the USAGE (metrics) line, so this returns the
             // rate-limit summary only, or null when there is nothing to show.
-            val rate: String? = run {
+            val rate: CharSequence? = run {
                 // Prefer the continuous structured rate_limits snapshot when present.
                 structuredRateLimitLine(snapshot)?.let { return@run it }
                 val windowLimitLine = statusWindowLimitLine(
@@ -772,17 +786,37 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         // means 80% of the window is still available. RESET is the wall-clock time the
         // primary (5H) window refills. Returns null when no structured field is present
         // so callers fall back to the text-scrape path unchanged.
-        private fun structuredRateLimitLine(snapshot: SessionSnapshot): String? {
+        private fun structuredRateLimitLine(snapshot: SessionSnapshot): CharSequence? {
             val primaryRemaining = snapshot.rateLimitPrimaryUsedPercent?.let { (100.0 - it).coerceIn(0.0, 100.0) }
             val secondaryRemaining = snapshot.rateLimitSecondaryUsedPercent?.let { (100.0 - it).coerceIn(0.0, 100.0) }
             if (primaryRemaining == null && secondaryRemaining == null) return null
-            val parts = mutableListOf("LIMIT")
-            // These percents are REMAINING quota (100 - used). Tag them so the user
-            // doesn't misread "5H 45%" as "45% used" (the opposite, bug: ambiguity).
-            primaryRemaining?.let { parts += "5H ${formatPercent(it)} $REMAINING_QUOTA_SUFFIX" }
-            secondaryRemaining?.let { parts += "WK ${formatPercent(it)} $REMAINING_QUOTA_SUFFIX" }
-            snapshot.rateLimitPrimaryResetAt?.let { parts += "RESET ${formatDeviceTime(it)}" }
-            return parts.joinToString(" · ")
+            // Threshold-color each REMAINING-quota percent (green/amber/red) so a low
+            // window jumps out; keep the "left" tag so it isn't misread as "used".
+            // Length is unchanged from the old plain line (no bar) to avoid the
+            // single-line usage view truncating WK / RESET.
+            val sb = SpannableStringBuilder("LIMIT")
+            primaryRemaining?.let { appendQuota(sb, "5H", it) }
+            secondaryRemaining?.let { appendQuota(sb, "WK", it) }
+            snapshot.rateLimitPrimaryResetAt?.let {
+                val start = sb.length
+                sb.append(" · RESET ").append(formatDeviceTime(it))
+                // RESET is secondary info — dim it below the colored quota figures.
+                sb.setSpan(ForegroundColorSpan(HUD_DIM), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            return sb
+        }
+
+        // Appends " · <label> <pct>% left" with the figure colored by threshold.
+        private fun appendQuota(sb: SpannableStringBuilder, label: String, remainingPercent: Double) {
+            sb.append(" · ").append(label).append(" ")
+            val start = sb.length
+            sb.append(formatPercent(remainingPercent)).append(" ").append(REMAINING_QUOTA_SUFFIX)
+            sb.setSpan(
+                ForegroundColorSpan(thresholdColor(remainingPercent)),
+                start,
+                sb.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
         }
 
         private fun bindCodexConversation(
@@ -883,33 +917,24 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                     HUD_GREEN
                 )
             }
-            if (
-                answer != null &&
-                lastAnswerAt >= latestPromptAt &&
-                lastAnswerAt > widgetStatusAt
-            ) {
-                return WidgetConversationPreview(
-                    "RESULT  ${shorten(answer.redactForScouter(), 128)}",
-                    HUD_GREEN
-                )
-            }
-            if (answer != null && lastAnswerAt >= latestPromptAt) {
-                return WidgetConversationPreview(
-                    "RESULT  ${shorten(answer.redactForScouter(), 128)}",
-                    HUD_GREEN
-                )
-            }
-            val prompt = if (widgetPromptAt >= lastPromptAt) conversation.widgetPrompt else conversation.lastPrompt
-            if (!prompt.isNullOrBlank()) {
-                val label = if (isActiveWidgetWait(conversation, widgetPromptAt, lastAnswerAt)) {
-                    "WAIT   "
-                } else {
-                    "YOU    "
+            // Idle/completed: show BOTH what was asked and what Codex replied, so
+            // the line isn't just an echo of the user's own prompt (item 9). The
+            // conversation TextView allows 2 lines. Blocking states (choice /
+            // approval) are handled above and still take priority over this.
+            val hasAnswer = answer != null && lastAnswerAt >= latestPromptAt
+            val prompt = (if (widgetPromptAt >= lastPromptAt) conversation.widgetPrompt else conversation.lastPrompt)
+                ?.takeIf { it.isNotBlank() }
+            if (prompt != null || hasAnswer) {
+                val youLabel = if (isActiveWidgetWait(conversation, widgetPromptAt, lastAnswerAt)) "WAIT " else "YOU  "
+                val lines = mutableListOf<String>()
+                prompt?.let { lines += "$youLabel${shorten(it.redactForScouter(), 64)}" }
+                when {
+                    hasAnswer -> lines += "CODEX ${shorten(answer!!.redactForScouter(), 64)}"
+                    // Turn ended without a captured reply — say so rather than
+                    // leaving only the user's prompt on screen.
+                    prompt != null -> lines += "CODEX —"
                 }
-                return WidgetConversationPreview(
-                    "$label${shorten(prompt.redactForScouter(), 128)}",
-                    HUD_GREEN
-                )
+                return WidgetConversationPreview(lines.joinToString("\n"), HUD_GREEN)
             }
             return WidgetConversationPreview(
                 "ASK ready when Codex is bound",
@@ -1216,6 +1241,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             else -> HUD_GREEN // IDLE, COMPLETED
         }
 
+        // Threshold color for a REMAINING-quota percent (gauges + rate-limit %):
+        // green when healthy, amber when low (≤25%), red when critical (≤10%).
+        private fun thresholdColor(remainingPercent: Double): Int = when {
+            remainingPercent <= 10.0 -> HUD_RED
+            remainingPercent <= 25.0 -> HUD_AMBER
+            else -> HUD_GREEN
+        }
+
         private fun formatTokens(tokens: Long): String {
             return if (tokens >= 1000) String.format(Locale.US, "%.1fK", tokens / 1000.0) else tokens.toString()
         }
@@ -1326,5 +1359,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private val HUD_BRIGHT = Color.rgb(120, 255, 140)
         private val HUD_AMBER = Color.rgb(255, 176, 0)
         private val HUD_RED = Color.rgb(255, 76, 76)
+        private val HUD_DIM = Color.rgb(95, 191, 125)
     }
 }
