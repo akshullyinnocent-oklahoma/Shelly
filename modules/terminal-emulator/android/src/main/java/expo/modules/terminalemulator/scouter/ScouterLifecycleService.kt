@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import expo.modules.terminalemulator.HomeInitializer
+import expo.modules.terminalemulator.TerminalSessionService
 import java.io.File
 import org.json.JSONObject
 
@@ -18,6 +19,13 @@ class ScouterLifecycleService private constructor(private val context: Context) 
     @Volatile private var lastWidgetRefreshAtMs = 0L
     @Volatile private var trailingWidgetRefreshScheduled = false
     @Volatile private var eventSink: ((ScouterEvent, SessionSnapshot) -> Unit)? = null
+    // Live PTS poll: detects blocking Codex states (interactive numbered menu /
+    // passive usage-limit banner) that emit NO JSONL event, so the existing
+    // widget render + notification paths can surface them. Purely additive and
+    // fully guarded — a poll failure never touches existing flows.
+    @Volatile private var pollThread: Thread? = null
+    @Volatile private var pollRunning = false
+    @Volatile private var lastLiveStateKey: String? = null
 
     fun setEventSink(sink: ((ScouterEvent, SessionSnapshot) -> Unit)?) {
         eventSink = sink
@@ -53,6 +61,15 @@ class ScouterLifecycleService private constructor(private val context: Context) 
             }
         }
         handleEvent(ShellyStateBridge.snapshot(), forceWidgetRefresh = true)
+        // Additive: start the live PTS poll once. Independent of the watcher/
+        // server above; never alters their behavior.
+        if (pollThread == null) {
+            pollRunning = true
+            pollThread = Thread({ livePollLoop() }, "ScouterLivePtsPoll").apply {
+                isDaemon = true
+                start()
+            }
+        }
     }
 
     @Synchronized
@@ -65,6 +82,11 @@ class ScouterLifecycleService private constructor(private val context: Context) 
         store.setRuntimePort(-1)
         store.clearSnapshots()
         longRunningChecks.clear()
+        // Additive: tear down the live PTS poll.
+        pollRunning = false
+        pollThread?.interrupt()
+        pollThread = null
+        lastLiveStateKey = null
         requestWidgetRefresh(force = true, reason = "stop")
     }
 
@@ -249,9 +271,91 @@ class ScouterLifecycleService private constructor(private val context: Context) 
         }
     }
 
+    // --- Live PTS poll (additive) --------------------------------------------
+    // Background loop that classifies the bound Codex PTS screen and surfaces
+    // blocking states that emit no JSONL event. Everything below is wrapped in
+    // runCatching so a poll failure can never disturb event/widget/notification
+    // flows. It only WRITES widget choice-pending state for the INTERACTIVE case
+    // (the gap this closes); APPROVAL and READY/INACTIVE leave existing state
+    // untouched.
+
+    private fun livePollLoop() {
+        while (pollRunning) {
+            val interval = runCatching { pollOnce() }
+                .onFailure { Log.w(TAG, "live pts poll failed", it) }
+                .getOrDefault(POLL_IDLE_MS)
+            try {
+                Thread.sleep(interval)
+            } catch (ie: InterruptedException) {
+                break
+            }
+        }
+    }
+
+    private fun pollOnce(): Long {
+        val binding = store.widgetCodexBinding() ?: return POLL_IDLE_MS
+        val pty = binding.ptySessionId?.takeIf { it.isNotBlank() } ?: return POLL_IDLE_MS
+        val session = TerminalSessionService.sessionRegistry[pty] ?: return POLL_IDLE_MS
+        if (!session.isAlive()) return POLL_IDLE_MS
+        val screen = runCatching { session.getScreenText() }.getOrDefault("")
+        val result = CodexScreenInspect.classify(screen)
+
+        val key = "${binding.codexSessionId}|${result.state}|${result.summary}|" +
+            result.choices.joinToString { it.index.toString() }
+
+        // INACTIVE/READY: nothing is blocking. Reset the dedup signature and
+        // leave ALL store state alone (existing flows own non-blocking states).
+        if (result.state == CodexScreenInspect.State.INACTIVE ||
+            result.state == CodexScreenInspect.State.READY
+        ) {
+            lastLiveStateKey = null
+            return POLL_ACTIVE_MS
+        }
+
+        // Already surfaced this exact blocking state — no spam.
+        if (key == lastLiveStateKey) return POLL_ACTIVE_MS
+        lastLiveStateKey = key
+
+        when (result.state) {
+            CodexScreenInspect.State.INTERACTIVE -> {
+                store.recordWidgetChoicePending(result.summary, result.choices)
+                requestWidgetRefresh(force = true, reason = "live-poll-choice")
+                val snap = store.all().firstOrNull {
+                    it.source == ScouterSource.CODEX &&
+                        normalizeCodexSessionId(it.sessionId) ==
+                        normalizeCodexSessionId(binding.codexSessionId)
+                }
+                val convo = runCatching { store.widgetConversation(binding.codexSessionId) }.getOrNull()
+                if (snap != null) {
+                    notificationDispatcher.notifyChoiceWaitingNow(snap, convo, binding.ptySessionId)
+                }
+            }
+            CodexScreenInspect.State.RATE_LIMITED -> {
+                // Passive usage-limit banner (no menu): do NOT touch widget choice
+                // state. Just fire a deduped notification off the snapshot.
+                val snap = store.all().firstOrNull {
+                    it.source == ScouterSource.CODEX &&
+                        normalizeCodexSessionId(it.sessionId) ==
+                        normalizeCodexSessionId(binding.codexSessionId)
+                }
+                if (snap != null) {
+                    notificationDispatcher.notifyUsageLimitedNow(snap, result.summary)
+                }
+            }
+            CodexScreenInspect.State.APPROVAL -> {
+                // Existing JSONL WAITING_PERMISSION path + widget live-render already
+                // handle approvals — do not duplicate here.
+            }
+            else -> Unit
+        }
+        return POLL_ACTIVE_MS
+    }
+
     companion object {
         private const val TAG = "Scouter"
         private const val LONG_RUNNING_THRESHOLD_MS = 120_000L
+        private const val POLL_ACTIVE_MS = 6_000L
+        private const val POLL_IDLE_MS = 15_000L
         private val CODEX_SESSION_UUID_SUFFIX_RE =
             Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
         @Volatile private var instance: ScouterLifecycleService? = null

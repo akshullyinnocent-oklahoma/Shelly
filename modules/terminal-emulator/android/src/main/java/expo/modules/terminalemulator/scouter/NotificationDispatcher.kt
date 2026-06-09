@@ -70,6 +70,31 @@ class NotificationDispatcher(private val context: Context) {
         notify(ID_LONG_RUNNING, "Agent still running", "${snapshot.currentTool ?: "Tool"} · ${snapshot.projectName}")
     }
 
+    // --- Live-poll entry points (additive) -----------------------------------
+    // Public wrappers for the live PTS poll. They REUSE the existing private
+    // logic + dedup, so they only fire for a genuinely new state and never spam.
+    // Guarded so a notification failure never propagates back into the poll.
+
+    fun notifyChoiceWaitingNow(
+        snapshot: SessionSnapshot,
+        conversation: ScouterWidgetConversation?,
+        boundPtySessionId: String?
+    ) {
+        runCatching { notifyChoiceWaiting(snapshot, conversation, boundPtySessionId) }
+            .onFailure { Log.w(TAG, "live choice notify failed", it) }
+    }
+
+    fun notifyUsageLimitedNow(snapshot: SessionSnapshot, summary: String) {
+        runCatching {
+            val key = "${snapshot.sessionId}|usage|$summary"
+            // Own dedup key (not KEY_LAST_RATE) so the live usage-limit poll and
+            // the JSONL notifyRateLimited never reset each other's dedup. They
+            // still share ID_RATE so they replace rather than stack.
+            if (!shouldFire(KEY_LAST_USAGE, key)) return
+            notify(ID_RATE, "Codex usage limit", summary.ifBlank { "Codex usage limit reached" })
+        }.onFailure { Log.w(TAG, "live usage-limit notify failed", it) }
+    }
+
     // --- Reply completed (with text) -----------------------------------------
 
     private fun notifyCompleted(snapshot: SessionSnapshot, conversation: ScouterWidgetConversation?) {
@@ -429,6 +454,7 @@ class NotificationDispatcher(private val context: Context) {
         private const val KEY_LAST_APPROVAL = "last_approval_at"
         private const val KEY_LAST_CHOICE = "last_choice_at"
         private const val KEY_LAST_RATE = "last_rate_onset"
+        private const val KEY_LAST_USAGE = "last_usage_onset"
         private const val KEY_LAST_REPLY = "last_reply_key"
 
         private const val REPLY_MAX_CHARS = 120
