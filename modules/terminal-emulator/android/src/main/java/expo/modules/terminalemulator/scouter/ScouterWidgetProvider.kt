@@ -859,21 +859,26 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         }
 
         // Appends " · <label> ■■□□□ <pct>%" — a 5-cell remaining-quota bar (filled
-        // ■ + dim empty □) plus the percent; fill and percent are green, turning red
-        // once only the last cell is filled (~≤25% remaining).
+        // ■ + empty □) plus the percent. Green while healthy; once only the last cell
+        // is filled (~≤25%) the fill, the empty cells, and the percent all go red so
+        // the whole bar reads as critical at a glance.
         private fun appendQuota(sb: SpannableStringBuilder, label: String, remainingPercent: Double) {
             val pct = remainingPercent.coerceIn(0.0, 100.0)
             val filled = Math.round(pct / 100.0 * GAUGE_CELLS).toInt().coerceIn(0, GAUGE_CELLS)
             // Green while healthy; red once the bar is down to its last cell
-            // (~≤25% remaining) so a nearly-exhausted window reads at a glance.
-            val color = if (filled <= 1) HUD_RED else HUD_GREEN
+            // (~≤25% remaining). At that point the EMPTY cells go red too (not dim),
+            // so a nearly-exhausted window glows red across the whole bar instead of
+            // only tinting the percent.
+            val critical = filled <= 1
+            val color = if (critical) HUD_RED else HUD_GREEN
+            val railColor = if (critical) HUD_RED else HUD_DIM
             sb.append(" · ").append(label).append(" ")
             val fillStart = sb.length
             sb.append("■".repeat(filled))
             sb.setSpan(ForegroundColorSpan(color), fillStart, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             val railStart = sb.length
             sb.append("□".repeat(GAUGE_CELLS - filled))
-            sb.setSpan(ForegroundColorSpan(HUD_DIM), railStart, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.setSpan(ForegroundColorSpan(railColor), railStart, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             sb.append(" ")
             val pctStart = sb.length
             sb.append(formatPercent(pct))
