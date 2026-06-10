@@ -751,7 +751,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 val file = snapshot.currentFile?.takeIf { it.isNotBlank() }?.let { " on ${displayPathLeaf(it)}" } ?: ""
                 "DOING $running$tool$file"
             } else {
-                "DOING idle · last ${formatTime(snapshot.lastEventAt)}"
+                "DOING idle · ${formatRelativeTime(snapshot.lastEventAt)}"
             }
             return shorten(line, 40)
         }
@@ -1330,6 +1330,19 @@ class ScouterWidgetProvider : AppWidgetProvider() {
 
         private fun formatDuration(seconds: Long): String {
             return if (seconds >= 60L) "${seconds / 60L}m" else "${seconds}s"
+        }
+
+        // Coarse "time since" for the idle line — more glanceable than an absolute
+        // clock. The 60s poll heartbeat re-renders the widget, so this stays current.
+        private fun formatRelativeTime(time: Long): String {
+            val sec = ((System.currentTimeMillis() - time) / 1000L)
+            return when {
+                sec < 10L -> "just now"
+                sec < 60L -> "${sec}s ago"
+                sec < 3600L -> "${sec / 60L}m ago"
+                sec < 86_400L -> "${sec / 3600L}h ago"
+                else -> "${sec / 86_400L}d ago"
+            }
         }
 
         private fun shortSessionId(sessionId: String): String {
