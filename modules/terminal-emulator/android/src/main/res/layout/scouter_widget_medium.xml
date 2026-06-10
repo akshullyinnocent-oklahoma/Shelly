@@ -81,7 +81,7 @@
       android:textColor="#8CFFAA"
       android:shadowColor="#6600FF41"
       android:shadowRadius="4"
-      android:textSize="13sp"
+      android:textSize="14sp"
       android:typeface="monospace"
       android:includeFontPadding="false" />
 
@@ -318,7 +318,7 @@
       android:singleLine="true"
       android:text="No local endpoint"
       android:textColor="#66FF88"
-      android:textSize="12sp"
+      android:textSize="13sp"
       android:typeface="monospace"
       android:includeFontPadding="false" />
 

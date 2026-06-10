@@ -841,11 +841,11 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             val primaryRemaining = snapshot.rateLimitPrimaryUsedPercent?.let { (100.0 - it).coerceIn(0.0, 100.0) }
             val secondaryRemaining = snapshot.rateLimitSecondaryUsedPercent?.let { (100.0 - it).coerceIn(0.0, 100.0) }
             if (primaryRemaining == null && secondaryRemaining == null) return null
-            // "LIMIT · 5H[##···]45% · WK[#····]4% · RESET 14:05" — each window gets a
-            // 5-cell REMAINING-quota bar + percent, green while healthy and red once
-            // the bar drops to its last cell (~≤25%), with a dimmed rail; LIMIT prefix
-            // and the dimmed RESET are kept. The bar is the "remaining" indicator
-            // (so the "left" word is dropped).
+            // "LIMIT · 5H ■■□□□ 45% · WK □□□□□ 4% · RESET 14:05" — each window gets a
+            // 5-cell REMAINING-quota bar (filled ■ + empty □) + percent, green while
+            // healthy and red once the bar drops to its last cell (~≤25%); LIMIT
+            // prefix and the dimmed RESET are kept. The bar is the "remaining"
+            // indicator (so the "left" word is dropped).
             val sb = SpannableStringBuilder("LIMIT")
             primaryRemaining?.let { appendQuota(sb, "5H", it) }
             secondaryRemaining?.let { appendQuota(sb, "WK", it) }
@@ -858,23 +858,23 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             return sb
         }
 
-        // Appends " · <label> [#####] <pct>%" — a 5-cell remaining-quota bar (filled
-        // + dim rail) plus the percent; fill and percent are green, turning red once
-        // only the last cell is filled (~≤25% remaining).
+        // Appends " · <label> ■■□□□ <pct>%" — a 5-cell remaining-quota bar (filled
+        // ■ + dim empty □) plus the percent; fill and percent are green, turning red
+        // once only the last cell is filled (~≤25% remaining).
         private fun appendQuota(sb: SpannableStringBuilder, label: String, remainingPercent: Double) {
             val pct = remainingPercent.coerceIn(0.0, 100.0)
             val filled = Math.round(pct / 100.0 * GAUGE_CELLS).toInt().coerceIn(0, GAUGE_CELLS)
             // Green while healthy; red once the bar is down to its last cell
             // (~≤25% remaining) so a nearly-exhausted window reads at a glance.
             val color = if (filled <= 1) HUD_RED else HUD_GREEN
-            sb.append(" · ").append(label).append(" [")
+            sb.append(" · ").append(label).append(" ")
             val fillStart = sb.length
-            sb.append("#".repeat(filled))
+            sb.append("■".repeat(filled))
             sb.setSpan(ForegroundColorSpan(color), fillStart, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             val railStart = sb.length
-            sb.append(".".repeat(GAUGE_CELLS - filled))
+            sb.append("□".repeat(GAUGE_CELLS - filled))
             sb.setSpan(ForegroundColorSpan(HUD_DIM), railStart, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            sb.append("] ")
+            sb.append(" ")
             val pctStart = sb.length
             sb.append(formatPercent(pct))
             sb.setSpan(
