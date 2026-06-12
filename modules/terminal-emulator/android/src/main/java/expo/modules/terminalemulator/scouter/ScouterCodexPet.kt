@@ -5,7 +5,6 @@ import android.content.SharedPreferences
 import android.content.res.AssetManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.os.Environment
 import expo.modules.terminalemulator.HomeInitializer
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,7 +16,8 @@ internal object ScouterCodexPet {
     private const val KEY_VISIBLE = "codex_pet_visible"
     private const val KEY_SELECTED_PET_ID = "codex_pet_selected_id"
     private const val KEY_SELECTED_PET_KEY = "codex_pet_selected_key"
-    private const val DEMO_ASSET_ROOT = "pets/shelly"
+    private const val DEFAULT_VISIBLE = false
+    private const val ASSET_PET_ROOT = "pets"
     private const val COLUMNS = 8
     private const val CELL_WIDTH = 192
     private const val CELL_HEIGHT = 208
@@ -36,21 +36,28 @@ internal object ScouterCodexPet {
     }
 
     fun isVisible(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_VISIBLE, true)
-
-    fun toggleVisible(context: Context) {
-        val preferences = prefs(context)
-        preferences.edit().putBoolean(KEY_VISIBLE, !preferences.getBoolean(KEY_VISIBLE, true)).apply()
-    }
+        prefs(context).getBoolean(KEY_VISIBLE, DEFAULT_VISIBLE)
 
     fun cycleVisiblePet(context: Context) {
-        val pets = discoverPets(context).filter { atlas(context, it) != null }
+        val pets = discoverPets(context)
+            .filter { atlas(context, it) != null }
+            .distinctBy { it.id }
         val preferences = prefs(context)
         if (pets.isEmpty()) {
             preferences.edit()
                 .putBoolean(KEY_VISIBLE, false)
                 .remove(KEY_SELECTED_PET_ID)
                 .remove(KEY_SELECTED_PET_KEY)
+                .apply()
+            return
+        }
+
+        if (!preferences.getBoolean(KEY_VISIBLE, DEFAULT_VISIBLE)) {
+            val firstPet = pets.first()
+            preferences.edit()
+                .putString(KEY_SELECTED_PET_ID, firstPet.id)
+                .putString(KEY_SELECTED_PET_KEY, firstPet.selectionKey)
+                .putBoolean(KEY_VISIBLE, true)
                 .apply()
             return
         }
@@ -64,6 +71,14 @@ internal object ScouterCodexPet {
                 ?.let { id -> pets.indexOfFirst { it.id == id } }
                 ?.takeIf { it >= 0 }
             ?: 0
+        if (currentIndex >= pets.lastIndex) {
+            preferences.edit()
+                .putBoolean(KEY_VISIBLE, false)
+                .remove(KEY_SELECTED_PET_ID)
+                .remove(KEY_SELECTED_PET_KEY)
+                .apply()
+            return
+        }
         val nextPet = pets[(currentIndex + 1) % pets.size]
         preferences.edit()
             .putString(KEY_SELECTED_PET_ID, nextPet.id)
@@ -74,9 +89,6 @@ internal object ScouterCodexPet {
 
     fun hasPet(context: Context): Boolean =
         discoverPets(context).any { atlas(context, it) != null }
-
-    fun hasMultiplePets(context: Context): Boolean =
-        discoverPets(context).count { atlas(context, it) != null } > 1
 
     fun debugJson(context: Context): JSONObject {
         val appContext = context.applicationContext
@@ -121,7 +133,7 @@ internal object ScouterCodexPet {
             })
         }
         return JSONObject().apply {
-            put("visible", preferences.getBoolean(KEY_VISIBLE, true))
+            put("visible", preferences.getBoolean(KEY_VISIBLE, DEFAULT_VISIBLE))
             put("selectedId", selectedId ?: JSONObject.NULL)
             put("selectedKey", selectedKey ?: JSONObject.NULL)
             put("localRoot", localRoot.absolutePath)
@@ -175,32 +187,25 @@ internal object ScouterCodexPet {
     }
 
     private fun discoverPets(context: Context): List<PetSource> =
-        localPets(context) + demoPet(context)
+        localPets(context) + assetPets(context)
 
     private fun localPets(context: Context): List<PetSource> =
         petRoots(context).flatMap(::petsInRoot).distinctBy { it.selectionKey }
 
     private fun petRoots(context: Context): List<File> {
-        val roots = mutableListOf<File>()
-        roots += File(HomeInitializer.getHomeDir(context), ".codex/pets")
-        context.getExternalFilesDir(null)?.let { externalFiles ->
-            roots += File(externalFiles, ".codex/pets")
-            roots += File(externalFiles, "Codex/pets")
-            roots += File(externalFiles, "pets")
+        val filesRoot = context.filesDir.canonicalFile
+        val homePath = HomeInitializer.getHomeDir(context).absoluteFile
+        val home = homePath.canonicalFile
+        if (home.path != homePath.path || !home.path.startsWith(filesRoot.path + File.separator)) {
+            return emptyList()
         }
-        externalStorageRoot()?.let { external ->
-            roots += File(external, ".codex/pets")
-            roots += File(external, "Codex/pets")
-            roots += File(external, "Codex/.codex/pets")
-            roots += File(external, "Documents/Codex/pets")
-            roots += File(external, "Documents/Codex/.codex/pets")
-            roots += File(external, "Download/Codex/pets")
-            roots += File(external, "Download/.codex/pets")
-            roots += File(external, "Download/codex-pets")
-            roots += File(external, "Shelly/pets")
-            roots += File(external, "Documents/Shelly/pets")
+        val root = File(home, ".codex/pets").absoluteFile
+        val canonicalRoot = runCatching { root.canonicalFile }.getOrNull() ?: return emptyList()
+        if (canonicalRoot.path != root.path || !canonicalRoot.path.startsWith(home.path + File.separator)) {
+            return emptyList()
         }
-        return roots.distinctBy { canonicalKey(it) }
+        return listOf(root)
+            .distinctBy { canonicalKey(it) }
     }
 
     private fun petsInRoot(root: File): List<PetSource> {
@@ -209,6 +214,9 @@ internal object ScouterCodexPet {
             .sortedBy { it.name.lowercase(Locale.US) }
             .mapNotNull { directory ->
                 runCatching {
+                    val petRoot = directory.absoluteFile
+                    val canonicalPetRoot = petRoot.canonicalFile
+                    if (canonicalPetRoot.path != petRoot.path) return@runCatching null
                     val manifestFile = File(directory, "pet.json")
                     if (!manifestFile.isFile || manifestFile.length() > 32_768L) return@runCatching null
                     val manifest = JSONObject(manifestFile.readText(Charsets.UTF_8))
@@ -216,7 +224,11 @@ internal object ScouterCodexPet {
                         ?: return@runCatching null
                     val spritesheet = manifest.optString("spritesheetPath", "spritesheet.webp")
                     if (!isSafeAssetName(spritesheet)) return@runCatching null
-                    val spritesheetFile = File(directory, spritesheet)
+                    val spritesheetFile = File(directory, spritesheet).canonicalFile
+                    if (
+                        spritesheetFile.path == canonicalPetRoot.path ||
+                        !spritesheetFile.path.startsWith(canonicalPetRoot.path + File.separator)
+                    ) return@runCatching null
                     if (!spritesheetFile.isFile) return@runCatching null
                     PetSource.FilePet(
                         id = id,
@@ -229,30 +241,33 @@ internal object ScouterCodexPet {
             }
     }
 
-    private fun externalStorageRoot(): File? =
-        runCatching { Environment.getExternalStorageDirectory() }
-            .getOrNull()
-            ?.takeIf { it.absolutePath.isNotBlank() }
-
     private fun canonicalKey(file: File): String =
         runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
 
-    private fun demoPet(context: Context): List<PetSource> {
+    private fun assetPets(context: Context): List<PetSource> {
         return runCatching {
             val assets = context.applicationContext.assets
-            val manifest = JSONObject(readUtf8(assets, "$DEMO_ASSET_ROOT/pet.json"))
-            val id = manifest.optString("id", "shelly").takeIf { isSafeId(it) } ?: "shelly"
-            val spritesheet = manifest.optString("spritesheetPath", "spritesheet.webp")
-            if (!isSafeAssetName(spritesheet)) return@runCatching emptyList()
-            listOf(
-                PetSource.AssetPet(
-                    id = id,
-                    root = DEMO_ASSET_ROOT,
-                    spritesheet = spritesheet,
-                    selectionKey = "asset:$DEMO_ASSET_ROOT",
-                    key = "asset:$DEMO_ASSET_ROOT/$spritesheet"
-                )
-            )
+            assets.list(ASSET_PET_ROOT)
+                .orEmpty()
+                .filter { isSafePathSegment(it) }
+                .sortedBy { it.lowercase(Locale.US) }
+                .mapNotNull { directory ->
+                    runCatching {
+                        val root = "$ASSET_PET_ROOT/$directory"
+                        val manifest = JSONObject(readUtf8(assets, "$root/pet.json"))
+                        val id = manifest.optString("id", directory).takeIf { isSafeId(it) }
+                            ?: return@runCatching null
+                        val spritesheet = manifest.optString("spritesheetPath", "spritesheet.webp")
+                        if (!isSafeAssetName(spritesheet)) return@runCatching null
+                        PetSource.AssetPet(
+                            id = id,
+                            root = root,
+                            spritesheet = spritesheet,
+                            selectionKey = "asset:$root",
+                            key = "asset:$root/$spritesheet"
+                        )
+                    }.getOrNull()
+                }
         }.getOrDefault(emptyList())
     }
 
@@ -298,6 +313,17 @@ internal object ScouterCodexPet {
                 char in 'A'..'Z' ||
                 char in '0'..'9' ||
                 char == '.' ||
+                char == '_' ||
+                char == '-'
+        }
+    }
+
+    private fun isSafePathSegment(name: String?): Boolean {
+        if (name.isNullOrEmpty() || name.length > 80) return false
+        return name.all { char ->
+            char in 'a'..'z' ||
+                char in 'A'..'Z' ||
+                char in '0'..'9' ||
                 char == '_' ||
                 char == '-'
         }

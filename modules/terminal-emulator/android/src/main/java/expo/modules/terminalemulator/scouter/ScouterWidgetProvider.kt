@@ -34,11 +34,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 ScouterCodexPet.cycleVisiblePet(context)
                 enqueueUpdate(context, null, pending::finish, force = true)
             }
-            ACTION_TOGGLE_PET -> {
-                val pending = goAsync()
-                ScouterCodexPet.toggleVisible(context)
-                enqueueUpdate(context, null, pending::finish, force = true)
-            }
             ACTION_WAIT_EXPIRY_REFRESH -> {
                 val pending = goAsync()
                 enqueueUpdate(context, null, pending::finish, force = true)
@@ -349,25 +344,21 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             boundScreen: BoundCodexScreen,
             actionRowHasPriority: Boolean
         ) {
-            val togglePending = petTogglePendingIntent(context)
             val cyclePending = petCyclePendingIntent(context)
-            views.setOnClickPendingIntent(R.id.scouter_codex_pet, petCyclePendingIntent(context))
-            views.setOnClickPendingIntent(R.id.scouter_codex_pet_hide, togglePending)
-            views.setOnClickPendingIntent(R.id.scouter_codex_pet_next, cyclePending)
-            views.setOnClickPendingIntent(R.id.scouter_codex_pet_toggle, togglePending)
+            views.setOnClickPendingIntent(R.id.scouter_codex_pet, cyclePending)
+            views.setOnClickPendingIntent(R.id.scouter_codex_pet_touch, cyclePending)
+            views.setOnClickPendingIntent(R.id.scouter_codex_pet_toggle, cyclePending)
 
             if (actionRowHasPriority || !ScouterCodexPet.hasPet(context)) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_next, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_touch, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
                 return
             }
 
             if (!ScouterCodexPet.isVisible(context)) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_next, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_touch, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.VISIBLE)
                 return
             }
@@ -379,19 +370,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             )
             if (frame == null) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_next, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_touch, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
                 return
             }
 
             views.setImageViewBitmap(R.id.scouter_codex_pet, frame)
             views.setViewVisibility(R.id.scouter_codex_pet, View.VISIBLE)
-            views.setViewVisibility(R.id.scouter_codex_pet_hide, View.VISIBLE)
-            views.setViewVisibility(
-                R.id.scouter_codex_pet_next,
-                if (ScouterCodexPet.hasMultiplePets(context)) View.VISIBLE else View.GONE
-            )
+            views.setViewVisibility(R.id.scouter_codex_pet_touch, View.VISIBLE)
             views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
         }
 
@@ -632,17 +618,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 context,
                 9101,
                 launchIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        }
-
-        private fun petTogglePendingIntent(context: Context): PendingIntent {
-            val intent = Intent(context, ScouterWidgetProvider::class.java)
-                .setAction(ACTION_TOGGLE_PET)
-            return PendingIntent.getBroadcast(
-                context,
-                9105,
-                intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         }
@@ -1534,8 +1509,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private const val TAG = "ScouterWidget"
         private const val ACTION_CYCLE_PET =
             "expo.modules.terminalemulator.scouter.WIDGET_CYCLE_CODEX_PET"
-        private const val ACTION_TOGGLE_PET =
-            "expo.modules.terminalemulator.scouter.WIDGET_TOGGLE_CODEX_PET"
         private const val ACTION_WAIT_EXPIRY_REFRESH =
             "expo.modules.terminalemulator.scouter.WIDGET_WAIT_EXPIRY_REFRESH"
         private const val STALE_AFTER_MS = 10 * 60 * 1000L
