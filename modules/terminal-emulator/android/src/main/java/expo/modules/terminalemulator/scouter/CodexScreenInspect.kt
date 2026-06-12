@@ -56,7 +56,7 @@ object CodexScreenInspect {
             .lines()
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .takeLast(12)
+            .takeLast(INTERACTIVE_PROMPT_TAIL_LINES)
         if (recentLines.isEmpty()) return false
         val tail = recentLines.joinToString("\n")
         val hasInteractiveKeyword = INTERACTIVE_PROMPT_KEYWORD_RE.containsMatchIn(tail)
@@ -68,15 +68,15 @@ object CodexScreenInspect {
     // Parses numbered choices (e.g. "1. Switch to gpt-5.4-mini") from the
     // tail of the interactive prompt screen into tappable options. Strips an
     // optional focus caret (">") and the "<digit>." / "<digit>)" prefix,
-    // keeping the digit as the option index. Caps usable options at 3 and
-    // returns empty (→ banner fallback) when 0 or >3 are parsed, or when
-    // duplicate indices appear (ambiguous/unsafe to map to a single digit).
+    // keeping the digit as the option index. Caps usable widget options at 6
+    // and returns empty (→ banner fallback) when no choices are parsed, too
+    // many are parsed, or duplicate indices appear (ambiguous/unsafe to map).
     fun parseInteractiveChoices(screenText: String): List<ChoiceOption> {
         val recentLines = screenText
             .lines()
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .takeLast(12)
+            .takeLast(INTERACTIVE_PROMPT_TAIL_LINES)
         val out = mutableListOf<ChoiceOption>()
         val seen = mutableSetOf<Int>()
         for (line in recentLines) {
@@ -86,9 +86,9 @@ object CodexScreenInspect {
             if (label.isBlank()) continue
             if (!seen.add(index)) return emptyList()
             out += ChoiceOption(index, shorten(label.redactForScouter(), 36))
-            if (out.size > 3) return emptyList()
+            if (out.size > MAX_WIDGET_CHOICE_OPTIONS) return emptyList()
         }
-        if (out.size < 1 || out.size > 3) return emptyList()
+        if (out.isEmpty() || out.size > MAX_WIDGET_CHOICE_OPTIONS) return emptyList()
         return out
     }
 
@@ -97,7 +97,7 @@ object CodexScreenInspect {
             .lines()
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .takeLast(12)
+            .takeLast(INTERACTIVE_PROMPT_TAIL_LINES)
         return recentLines.firstOrNull { INTERACTIVE_PROMPT_KEYWORD_RE.containsMatchIn(it) }
             ?: recentLines.firstOrNull { INTERACTIVE_FOCUSED_CHOICE_RE.containsMatchIn(it) }
             ?: "Codex is waiting for terminal selection"
@@ -205,4 +205,6 @@ object CodexScreenInspect {
     // group 2 = label text after the "<digit>." / "<digit>)" marker.
     private val INTERACTIVE_CHOICE_CAPTURE_RE = Regex("""^\s*(?:[>]\s*)?(\d+)[\).]\s+(\S.*)$""")
     private val USAGE_LIMIT_RE = Regex("""(?i)(?:you'?ve\s+hit\s+your\s+usage\s+limit|usage\s+limit\s+(?:reached|hit)|out\s+of\s+credits|purchase\s+more\s+credits|rate\s*limit(?:ed)?\s+reached)""")
+    private const val MAX_WIDGET_CHOICE_OPTIONS = 6
+    private const val INTERACTIVE_PROMPT_TAIL_LINES = 24
 }

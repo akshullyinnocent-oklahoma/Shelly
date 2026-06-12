@@ -234,12 +234,13 @@ class NotificationDispatcher(private val context: Context) {
             ?.let { truncate(it.redactForScouter(), REPLY_MAX_CHARS) }
             ?: "Codex is waiting for a terminal selection"
 
-        // Up to 3 parsed options become action buttons reusing ACTION_CHOICE_SELECT;
-        // if parsing yielded nothing, fall back to a tap-to-open notification.
-        val options = conversation.choiceOptions.take(3)
+        // Android notifications have a small practical action-button budget, so
+        // the first 3 parsed options become buttons. The expanded body lists all
+        // parsed options.
+        val actionOptions = conversation.choiceOptions.take(3)
         val codexSessionId = snapshot.sessionId
         val ptySessionId = boundPtySessionId
-        val actions = options.map { option ->
+        val actions = actionOptions.map { option ->
             action(
                 shorten("${option.index}. ${option.label}", 24),
                 choiceSelectActionPendingIntent(codexSessionId, ptySessionId, option)
@@ -248,7 +249,7 @@ class NotificationDispatcher(private val context: Context) {
         // Expanded body lists the menu text + every option, so the choice is
         // readable even on surfaces that hide action buttons (e.g. some lockscreens
         // / minimal launchers). Buttons stay for one-tap selection where available.
-        val optionLines = options.joinToString("\n") { shorten("${it.index}. ${it.label}", 80) }
+        val optionLines = conversation.choiceOptions.joinToString("\n") { shorten("${it.index}. ${it.label}", 80) }
         val bigText = listOf(summary, optionLines).filter { it.isNotBlank() }.joinToString("\n")
         notify(
             id = ID_CHOICE,

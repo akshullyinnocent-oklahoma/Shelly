@@ -340,6 +340,13 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       lastUpdatedAt: Date.now(),
     });
     persistDismissedSessionIds(dismissedSessionIds);
+    if (sessions.length === 0) {
+      TerminalEmulator.clearScouterWidgetConversationForPrivacy?.().catch((error) => {
+        logError('AgentChatStore', 'Failed to clear Scouter widget conversation after closing all Agent Chat tabs', error);
+      });
+    } else {
+      persistLatestWidgetCodexBinding(sessions);
+    }
   },
 
   renameSession: (sessionId, title) => {

@@ -433,7 +433,7 @@ class ScouterWidgetPromptActivity : Activity() {
             .lines()
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .takeLast(12)
+            .takeLast(INTERACTIVE_PROMPT_TAIL_LINES)
         val out = mutableListOf<ChoiceOption>()
         for (line in recentLines) {
             val match = INTERACTIVE_CHOICE_CAPTURE_RE.find(line) ?: continue
@@ -569,7 +569,7 @@ class ScouterWidgetPromptActivity : Activity() {
             .lines()
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .takeLast(12)
+            .takeLast(INTERACTIVE_PROMPT_TAIL_LINES)
         if (recentLines.isEmpty()) return false
         val tail = recentLines.joinToString("\n")
         val hasInteractiveKeyword = INTERACTIVE_PROMPT_KEYWORD_RE.containsMatchIn(tail)
@@ -599,6 +599,7 @@ class ScouterWidgetPromptActivity : Activity() {
         // provider's INTERACTIVE_CHOICE_CAPTURE_RE so anchor validation re-parses
         // the live screen with identical semantics.
         private val INTERACTIVE_CHOICE_CAPTURE_RE = Regex("""^\s*(?:[>]\s*)?(\d+)[\).]\s+(\S.*)$""")
+        private const val INTERACTIVE_PROMPT_TAIL_LINES = 24
         private val UUID_SUFFIX_RE = Regex("""([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$""")
         private val BUSY_CODEX_STATUSES = setOf(
             ScouterStatus.THINKING,

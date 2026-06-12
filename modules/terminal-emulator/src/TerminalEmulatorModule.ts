@@ -68,6 +68,7 @@ declare class TerminalEmulatorModuleType extends NativeModule {
     shellySessionId?: string | null;
     cwd?: string | null;
   }): Promise<void>;
+  clearScouterWidgetConversationForPrivacy?(): Promise<void>;
   consumeScouterWidgetPendingPrompt?(
     codexSessionId?: string | null,
     ptySessionId?: string | null,

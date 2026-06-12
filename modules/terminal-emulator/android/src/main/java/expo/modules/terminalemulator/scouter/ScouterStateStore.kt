@@ -152,6 +152,7 @@ class ScouterStateStore(context: Context) {
             .putLong(KEY_WIDGET_PROMPT_AT, now)
             .putString(KEY_WIDGET_STATUS, "queued")
             .putLong(KEY_WIDGET_STATUS_AT, now)
+            .remove(KEY_WIDGET_PRIVACY_CLEARED_AT)
             .remove(KEY_WIDGET_PENDING_PROMPT)
             .remove(KEY_WIDGET_PENDING_APPROVAL_DECISION)
             .remove(KEY_WIDGET_PENDING_APPROVAL_AT)
@@ -173,6 +174,7 @@ class ScouterStateStore(context: Context) {
             .putLong(KEY_WIDGET_PROMPT_AT, now)
             .putString(KEY_WIDGET_STATUS, WIDGET_STATUS_PENDING_TERMINAL)
             .putLong(KEY_WIDGET_STATUS_AT, now)
+            .remove(KEY_WIDGET_PRIVACY_CLEARED_AT)
             .putString(KEY_WIDGET_PENDING_CODEX_SESSION_ID, binding?.codexSessionId?.takeIf { it.isNotBlank() })
             .putString(KEY_WIDGET_PENDING_PTY_SESSION_ID, binding?.ptySessionId?.takeIf { it.isNotBlank() })
             .putString(KEY_WIDGET_PENDING_SHELLY_SESSION_ID, binding?.shellySessionId?.takeIf { it.isNotBlank() })
@@ -508,6 +510,9 @@ class ScouterStateStore(context: Context) {
     fun widgetConversation(codexSessionId: String? = widgetCodexBinding()?.codexSessionId): ScouterWidgetConversation {
         synchronized(lock) {
             expireStaleWidgetPromptLocked()
+            if (codexSessionId.isNullOrBlank() && prefs.getLong(KEY_WIDGET_PRIVACY_CLEARED_AT, 0L) > 0L) {
+                return emptyWidgetConversation()
+            }
             val recent = readRecentEventJsons()
                 .filter { event -> matchesCodexSession(event.optString("sessionId"), codexSessionId) }
                 .sortedBy { it.optLong("timestamp", 0L) }
@@ -547,6 +552,22 @@ class ScouterStateStore(context: Context) {
         }
     }
 
+    private fun emptyWidgetConversation(): ScouterWidgetConversation =
+        ScouterWidgetConversation(
+            lastPrompt = null,
+            lastPromptAt = null,
+            lastAnswer = null,
+            lastAnswerAt = null,
+            lastApproval = null,
+            lastApprovalAt = null,
+            widgetPrompt = null,
+            widgetPromptAt = null,
+            widgetStatus = null,
+            widgetStatusAt = null,
+            widgetError = null,
+            choiceOptions = emptyList()
+        )
+
     fun setWidgetCodexBinding(
         codexSessionId: String?,
         ptySessionId: String?,
@@ -563,6 +584,7 @@ class ScouterStateStore(context: Context) {
             .putString(KEY_WIDGET_SHELLY_SESSION_ID, shellySessionId?.takeIf { it.isNotBlank() })
             .putString(KEY_WIDGET_CWD, cwd?.takeIf { it.isNotBlank() })
             .putLong(KEY_WIDGET_BINDING_AT, System.currentTimeMillis())
+            .remove(KEY_WIDGET_PRIVACY_CLEARED_AT)
             .commit()
         writeHelperState()
     }
@@ -574,6 +596,31 @@ class ScouterStateStore(context: Context) {
             .remove(KEY_WIDGET_SHELLY_SESSION_ID)
             .remove(KEY_WIDGET_CWD)
             .remove(KEY_WIDGET_BINDING_AT)
+            .commit()
+        writeHelperState()
+    }
+
+    fun clearWidgetConversationForPrivacy() {
+        prefs.edit()
+            .remove(KEY_WIDGET_PROMPT)
+            .remove(KEY_WIDGET_PROMPT_AT)
+            .remove(KEY_WIDGET_STATUS)
+            .remove(KEY_WIDGET_STATUS_AT)
+            .remove(KEY_WIDGET_ERROR)
+            .remove(KEY_WIDGET_CHOICE_OPTIONS)
+            .remove(KEY_WIDGET_PENDING_PROMPT)
+            .remove(KEY_WIDGET_PENDING_APPROVAL_DECISION)
+            .remove(KEY_WIDGET_PENDING_APPROVAL_AT)
+            .remove(KEY_WIDGET_PENDING_APPROVAL_TEXT)
+            .remove(KEY_WIDGET_PENDING_CODEX_SESSION_ID)
+            .remove(KEY_WIDGET_PENDING_PTY_SESSION_ID)
+            .remove(KEY_WIDGET_PENDING_SHELLY_SESSION_ID)
+            .remove(KEY_WIDGET_CODEX_SESSION_ID)
+            .remove(KEY_WIDGET_PTY_SESSION_ID)
+            .remove(KEY_WIDGET_SHELLY_SESSION_ID)
+            .remove(KEY_WIDGET_CWD)
+            .remove(KEY_WIDGET_BINDING_AT)
+            .putLong(KEY_WIDGET_PRIVACY_CLEARED_AT, System.currentTimeMillis())
             .commit()
         writeHelperState()
     }
@@ -886,6 +933,7 @@ class ScouterStateStore(context: Context) {
         private const val KEY_WIDGET_STATUS_AT = "widget_status_at"
         private const val KEY_WIDGET_ERROR = "widget_error"
         private const val KEY_WIDGET_CHOICE_OPTIONS = "widget_choice_options"
+        private const val KEY_WIDGET_PRIVACY_CLEARED_AT = "widget_privacy_cleared_at"
         private const val KEY_WIDGET_CODEX_SESSION_ID = "widget_codex_session_id"
         private const val KEY_WIDGET_PTY_SESSION_ID = "widget_pty_session_id"
         private const val KEY_WIDGET_SHELLY_SESSION_ID = "widget_shelly_session_id"

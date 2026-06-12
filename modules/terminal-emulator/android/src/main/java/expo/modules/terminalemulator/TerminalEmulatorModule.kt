@@ -869,6 +869,14 @@ class TerminalEmulatorModule : Module() {
             null
         }
 
+        AsyncFunction("clearScouterWidgetConversationForPrivacy") {
+            val context = appContext.reactContext
+                ?: throw IllegalStateException("React context unavailable")
+            ScouterStateStore(context).clearWidgetConversationForPrivacy()
+            ScouterWidgetProvider.updateAll(context, force = true)
+            null
+        }
+
         AsyncFunction("returnToHome") {
             val context = appContext.reactContext
                 ?: throw IllegalStateException("React context unavailable")
