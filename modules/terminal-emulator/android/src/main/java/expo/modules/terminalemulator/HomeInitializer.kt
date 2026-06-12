@@ -1041,7 +1041,10 @@ patchCodex(libDir);
     //      Codex as the automatic fallback.
     // 219: If app-data codex_tui exits immediately, quarantine its health
     //      marker and retry the bundled APK TUI so widgets can resume Codex.
-    private const val BASHRC_VERSION = 225
+    // 226: Launch the explicit shelly-update-clis Node helper through a small
+    //      eval bootstrap. This avoids Node's Android ReadFileSync ESM
+    //      main-file detection crash while preserving process.argv shape.
+    private const val BASHRC_VERSION = 226
 
     fun getHomeDir(context: Context): File =
         File(context.filesDir, "home").also { it.mkdirs() }
@@ -2711,7 +2714,7 @@ patchCodex(libDir);
             sb.appendLine("shelly-update-clis() {")
             sb.appendLine("  case \"\${1:-codex}\" in")
             sb.appendLine("    codex|all|--check-only|--force)")
-            sb.appendLine("      SHELLY_LIB_DIR=\"$libDir\" _run $libDir/node \"\$HOME/.shelly-runtime-update.js\" \"\$@\"")
+            sb.appendLine("      SHELLY_RUNTIME_UPDATE_SCRIPT=\"\$HOME/.shelly-runtime-update.js\" SHELLY_LIB_DIR=\"$libDir\" _run $libDir/node -e 'const p=process.env.SHELLY_RUNTIME_UPDATE_SCRIPT; process.argv.splice(1, 0, p); require(p);' \"\$@\"")
             sb.appendLine("      ;;")
             sb.appendLine("    *)")
             sb.appendLine("      echo 'shelly-update-clis: only Codex runtime is supported in this build' >&2")
