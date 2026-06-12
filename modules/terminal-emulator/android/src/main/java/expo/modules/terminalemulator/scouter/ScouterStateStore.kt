@@ -152,7 +152,6 @@ class ScouterStateStore(context: Context) {
             .putLong(KEY_WIDGET_PROMPT_AT, now)
             .putString(KEY_WIDGET_STATUS, "queued")
             .putLong(KEY_WIDGET_STATUS_AT, now)
-            .remove(KEY_WIDGET_PRIVACY_CLEARED_AT)
             .remove(KEY_WIDGET_PENDING_PROMPT)
             .remove(KEY_WIDGET_PENDING_APPROVAL_DECISION)
             .remove(KEY_WIDGET_PENDING_APPROVAL_AT)
@@ -174,7 +173,6 @@ class ScouterStateStore(context: Context) {
             .putLong(KEY_WIDGET_PROMPT_AT, now)
             .putString(KEY_WIDGET_STATUS, WIDGET_STATUS_PENDING_TERMINAL)
             .putLong(KEY_WIDGET_STATUS_AT, now)
-            .remove(KEY_WIDGET_PRIVACY_CLEARED_AT)
             .putString(KEY_WIDGET_PENDING_CODEX_SESSION_ID, binding?.codexSessionId?.takeIf { it.isNotBlank() })
             .putString(KEY_WIDGET_PENDING_PTY_SESSION_ID, binding?.ptySessionId?.takeIf { it.isNotBlank() })
             .putString(KEY_WIDGET_PENDING_SHELLY_SESSION_ID, binding?.shellySessionId?.takeIf { it.isNotBlank() })
@@ -510,26 +508,42 @@ class ScouterStateStore(context: Context) {
     fun widgetConversation(codexSessionId: String? = widgetCodexBinding()?.codexSessionId): ScouterWidgetConversation {
         synchronized(lock) {
             expireStaleWidgetPromptLocked()
-            if (codexSessionId.isNullOrBlank() && prefs.getLong(KEY_WIDGET_PRIVACY_CLEARED_AT, 0L) > 0L) {
-                return emptyWidgetConversation()
+            val privacyClearedAt = prefs.getLong(KEY_WIDGET_PRIVACY_CLEARED_AT, 0L)
+            val recent = if (codexSessionId.isNullOrBlank()) {
+                emptyList()
+            } else {
+                readRecentEventJsons()
+                    .filter { event ->
+                        val timestamp = event.optLong("timestamp", 0L)
+                        matchesCodexSession(event.optString("sessionId"), codexSessionId) &&
+                            (privacyClearedAt <= 0L || timestamp > privacyClearedAt)
+                    }
+                    .sortedBy { it.optLong("timestamp", 0L) }
             }
-            val recent = readRecentEventJsons()
-                .filter { event -> matchesCodexSession(event.optString("sessionId"), codexSessionId) }
-                .sortedBy { it.optLong("timestamp", 0L) }
             val lastPrompt = recent.lastOrNull { event ->
                 event.optString("source") == ScouterSource.CODEX.name &&
                     event.optString("eventType") == ScouterEventType.USER_PROMPT.name &&
                     event.optString("lastMessage").isNotBlank()
             }
+            val lastPromptAt = lastPrompt?.optLong("timestamp", 0L)?.takeIf { it > 0L }
             val lastAnswer = recent.lastOrNull { event ->
-                isCodexAnswerEvent(event)
+                isCodexAnswerEvent(event) &&
+                    (privacyClearedAt <= 0L || (lastPromptAt != null && event.optLong("timestamp", 0L) >= lastPromptAt))
             }
             val lastApproval = recent.lastOrNull { event ->
-                isCodexApprovalEvent(event)
+                isCodexApprovalEvent(event) &&
+                    (privacyClearedAt <= 0L || (lastPromptAt != null && event.optLong("timestamp", 0L) >= lastPromptAt))
             }
+            val widgetPromptAt = prefs.getLong(KEY_WIDGET_PROMPT_AT, 0L).takeIf { it > 0L }
+            val widgetStatusAt = prefs.getLong(KEY_WIDGET_STATUS_AT, 0L).takeIf { it > 0L }
+            val widgetPromptVisible = isWidgetValueVisibleAfterPrivacy(widgetPromptAt, privacyClearedAt)
+            val widgetStatusVisible = isWidgetValueVisibleAfterPrivacy(widgetStatusAt, privacyClearedAt)
+            val widgetStatus = prefs.getString(KEY_WIDGET_STATUS, null)
+                ?.ifBlank { null }
+                ?.takeIf { widgetStatusVisible }
             return ScouterWidgetConversation(
                 lastPrompt = lastPrompt?.optString("lastMessage")?.ifBlank { null },
-                lastPromptAt = lastPrompt?.optLong("timestamp", 0L)?.takeIf { it > 0L },
+                lastPromptAt = lastPromptAt,
                 lastAnswer = lastAnswer?.optString("lastMessage")?.ifBlank { null },
                 lastAnswerAt = lastAnswer?.optLong("timestamp", 0L)?.takeIf { it > 0L },
                 lastApproval = firstNonBlank(
@@ -538,12 +552,12 @@ class ScouterStateStore(context: Context) {
                     lastApproval?.optString("toolName")
                 ),
                 lastApprovalAt = lastApproval?.optLong("timestamp", 0L)?.takeIf { it > 0L },
-                widgetPrompt = prefs.getString(KEY_WIDGET_PROMPT, null)?.ifBlank { null },
-                widgetPromptAt = prefs.getLong(KEY_WIDGET_PROMPT_AT, 0L).takeIf { it > 0L },
-                widgetStatus = prefs.getString(KEY_WIDGET_STATUS, null)?.ifBlank { null },
-                widgetStatusAt = prefs.getLong(KEY_WIDGET_STATUS_AT, 0L).takeIf { it > 0L },
-                widgetError = prefs.getString(KEY_WIDGET_ERROR, null)?.ifBlank { null },
-                choiceOptions = if (prefs.getString(KEY_WIDGET_STATUS, null) == WIDGET_STATUS_CHOICE_PENDING) {
+                widgetPrompt = prefs.getString(KEY_WIDGET_PROMPT, null)?.ifBlank { null }?.takeIf { widgetPromptVisible },
+                widgetPromptAt = widgetPromptAt?.takeIf { widgetPromptVisible },
+                widgetStatus = widgetStatus,
+                widgetStatusAt = widgetStatusAt?.takeIf { widgetStatusVisible },
+                widgetError = prefs.getString(KEY_WIDGET_ERROR, null)?.ifBlank { null }?.takeIf { widgetStatusVisible },
+                choiceOptions = if (widgetStatus == WIDGET_STATUS_CHOICE_PENDING) {
                     ChoiceOption.listFromJson(prefs.getString(KEY_WIDGET_CHOICE_OPTIONS, null))
                 } else {
                     emptyList()
@@ -568,6 +582,9 @@ class ScouterStateStore(context: Context) {
             choiceOptions = emptyList()
         )
 
+    private fun isWidgetValueVisibleAfterPrivacy(timestamp: Long?, privacyClearedAt: Long): Boolean =
+        privacyClearedAt <= 0L || (timestamp != null && timestamp > privacyClearedAt)
+
     fun setWidgetCodexBinding(
         codexSessionId: String?,
         ptySessionId: String?,
@@ -584,7 +601,6 @@ class ScouterStateStore(context: Context) {
             .putString(KEY_WIDGET_SHELLY_SESSION_ID, shellySessionId?.takeIf { it.isNotBlank() })
             .putString(KEY_WIDGET_CWD, cwd?.takeIf { it.isNotBlank() })
             .putLong(KEY_WIDGET_BINDING_AT, System.currentTimeMillis())
-            .remove(KEY_WIDGET_PRIVACY_CLEARED_AT)
             .commit()
         writeHelperState()
     }

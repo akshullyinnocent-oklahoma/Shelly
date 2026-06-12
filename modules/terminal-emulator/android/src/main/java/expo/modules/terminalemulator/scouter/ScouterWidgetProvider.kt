@@ -356,16 +356,19 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         ) {
             val togglePending = petTogglePendingIntent(context)
             views.setOnClickPendingIntent(R.id.scouter_codex_pet, petCyclePendingIntent(context))
+            views.setOnClickPendingIntent(R.id.scouter_codex_pet_hide, togglePending)
             views.setOnClickPendingIntent(R.id.scouter_codex_pet_toggle, togglePending)
 
             if (actionRowHasPriority || !ScouterCodexPet.hasPet(context)) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
                 return
             }
 
             if (!ScouterCodexPet.isVisible(context)) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.VISIBLE)
                 return
             }
@@ -377,12 +380,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             )
             if (frame == null) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
                 return
             }
 
             views.setImageViewBitmap(R.id.scouter_codex_pet, frame)
             views.setViewVisibility(R.id.scouter_codex_pet, View.VISIBLE)
+            views.setViewVisibility(R.id.scouter_codex_pet_hide, View.VISIBLE)
             views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
         }
 

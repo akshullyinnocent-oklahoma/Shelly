@@ -149,12 +149,17 @@ type AgentChatState = {
   ingestNativeEvent: (payload: NativeScouterEventPayload) => void;
   recordCodexPtyCandidate: (candidate: CodexPtyCandidate) => void;
   bindCodexSessionToPty: (sessionId: string, candidate: CodexPtyCandidate) => void;
-  dismissSession: (sessionId: string) => void;
+  dismissSession: (sessionId: string, options?: DismissSessionOptions) => void;
   renameSession: (sessionId: string, title: string) => void;
   requestComposeFocus: () => void;
   refresh: () => Promise<void>;
   startPolling: () => void;
   stopPolling: () => void;
+};
+
+type DismissSessionOptions = {
+  dismissWorkspace?: boolean;
+  clearWidgetPrivacy?: boolean;
 };
 
 type NativeScouterEventPayload = {
@@ -320,17 +325,32 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     persistLatestWidgetCodexBinding(sessions);
   },
 
-  dismissSession: (sessionId) => {
+  dismissSession: (sessionId, options = {}) => {
     const normalized = normalizeCodexSessionId(sessionId);
     if (!normalized) return;
+    const currentSessions = get().sessions;
+    const targetSession = currentSessions.find((session) => normalizeCodexSessionId(session.codexSessionId) === normalized);
+    const workspaceKey = options.dismissWorkspace && targetSession
+      ? agentSessionWorkspaceKey(targetSession)
+      : null;
+    const idsToDismiss = new Set<string>([normalized]);
+    if (workspaceKey) {
+      currentSessions.forEach((session) => {
+        if (agentSessionWorkspaceKey(session) === workspaceKey) {
+          const id = normalizeCodexSessionId(session.codexSessionId);
+          if (id) idsToDismiss.add(id);
+        }
+      });
+    }
     const dismissedSessionIds = [
-      normalized,
-      ...get().dismissedSessionIds.filter((id) => id !== normalized),
+      ...Array.from(idsToDismiss),
+      ...get().dismissedSessionIds.filter((id) => !idsToDismiss.has(id)),
     ].slice(0, MAX_DISMISSED_SESSIONS);
     const dismissedSet = new Set(dismissedSessionIds);
-    const sessions = get().sessions.filter((session) => !isDismissedSessionId(session.codexSessionId, dismissedSet));
+    const sessions = currentSessions.filter((session) => !isDismissedSessionId(session.codexSessionId, dismissedSet));
     const events = filterDismissedEvents(get().events, dismissedSet);
     const bindings = omitDismissedBindings(get().bindings, dismissedSet);
+    const shouldClearWidgetPrivacy = options.clearWidgetPrivacy || sessions.length === 0;
     set({
       dismissedSessionIds,
       sessions,
@@ -340,7 +360,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       lastUpdatedAt: Date.now(),
     });
     persistDismissedSessionIds(dismissedSessionIds);
-    if (sessions.length === 0) {
+    if (shouldClearWidgetPrivacy) {
       TerminalEmulator.clearScouterWidgetConversationForPrivacy?.().catch((error) => {
         logError('AgentChatStore', 'Failed to clear Scouter widget conversation after closing all Agent Chat tabs', error);
       });
@@ -380,11 +400,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     try {
       await hydrateDismissedSessionIds(set, get);
       await hydrateSessionTitleOverrides(set, get);
-      const dismissedIds = new Set(get().dismissedSessionIds);
       const raw = await (
         TerminalEmulator.refreshScouter?.()
         ?? TerminalEmulator.getScouterDebugInfo()
       );
+      const dismissedIds = new Set(get().dismissedSessionIds);
       const parsed = JSON.parse(raw) as ScouterDebugInfo;
       const codexSessions = filterDismissedScouterSessions(
         dedupeCodexSessions(parsed.sessions ?? []),
@@ -416,20 +436,26 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         mergeEvents(filterDismissedEvents(get().events, dismissedIds), newEvents, boundSessions),
         bindings,
       );
+      const finalDismissedIds = new Set(get().dismissedSessionIds);
+      const finalBoundSessions = boundSessions.filter((session) => (
+        !isDismissedSessionId(session.codexSessionId, finalDismissedIds)
+      ));
+      const finalEvents = filterDismissedEvents(events, finalDismissedIds);
+      const finalBindings = omitDismissedBindings(bindings, finalDismissedIds);
 
       set({
         enabled: Boolean(parsed.enabled),
         jsonlWatcherRunning: Boolean(parsed.jsonlWatcherRunning),
-        sessions: boundSessions,
-        events,
-        bindings,
+        sessions: finalBoundSessions,
+        events: finalEvents,
+        bindings: finalBindings,
         codexPtyLaunches: launches,
-        latestSessionId: boundSessions[0]?.codexSessionId ?? null,
+        latestSessionId: finalBoundSessions[0]?.codexSessionId ?? null,
         loading: false,
         error: null,
         lastUpdatedAt: Date.now(),
       });
-      persistLatestWidgetCodexBinding(boundSessions);
+      persistLatestWidgetCodexBinding(finalBoundSessions);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       set({ loading: false, error: message, lastUpdatedAt: Date.now() });
@@ -508,6 +534,16 @@ function persistLatestWidgetCodexBinding(sessions: AgentChatSession[]): void {
   }).catch((error) => {
     logError('AgentChatStore', 'Failed to persist Scouter Codex binding for widget', error);
   });
+}
+
+function agentSessionWorkspaceKey(session: AgentChatSession): string {
+  if (session.bindingConfidence === 'reliable' && session.ptySessionId?.trim()) {
+    return `live:${session.codexSessionId}`;
+  }
+  const workspace = session.cwd?.trim() || session.projectName?.trim();
+  const model = session.modelName?.trim();
+  if (!workspace || !model) return `session:${session.codexSessionId}`;
+  return `${workspace}:${model}`;
 }
 
 async function hydrateDismissedSessionIds(

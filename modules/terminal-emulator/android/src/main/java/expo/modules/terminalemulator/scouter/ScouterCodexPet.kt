@@ -14,6 +14,7 @@ internal object ScouterCodexPet {
     private const val PREFS = "scouter_widget"
     private const val KEY_VISIBLE = "codex_pet_visible"
     private const val KEY_SELECTED_PET_ID = "codex_pet_selected_id"
+    private const val KEY_SELECTED_PET_KEY = "codex_pet_selected_key"
     private const val DEMO_ASSET_ROOT = "pets/shelly"
     private const val COLUMNS = 8
     private const val CELL_WIDTH = 192
@@ -47,30 +48,30 @@ internal object ScouterCodexPet {
             preferences.edit()
                 .putBoolean(KEY_VISIBLE, false)
                 .remove(KEY_SELECTED_PET_ID)
+                .remove(KEY_SELECTED_PET_KEY)
                 .apply()
             return
         }
 
+        val selectedKey = preferences.getString(KEY_SELECTED_PET_KEY, null)?.takeIf { it.isNotBlank() }
         val selectedId = preferences.getString(KEY_SELECTED_PET_ID, null)?.takeIf { isSafeId(it) }
-        val currentIndex = selectedId
-            ?.let { id -> pets.indexOfFirst { it.id == id } }
+        val currentIndex = selectedKey
+            ?.let { key -> pets.indexOfFirst { it.selectionKey == key } }
             ?.takeIf { it >= 0 }
+            ?: selectedId
+                ?.let { id -> pets.indexOfFirst { it.id == id } }
+                ?.takeIf { it >= 0 }
             ?: 0
-        val editor = preferences.edit()
-        if (pets.size == 1 || currentIndex >= pets.lastIndex) {
-            editor
-                .putString(KEY_SELECTED_PET_ID, pets.first().id)
-                .putBoolean(KEY_VISIBLE, false)
-        } else {
-            editor
-                .putString(KEY_SELECTED_PET_ID, pets[currentIndex + 1].id)
-                .putBoolean(KEY_VISIBLE, true)
-        }
-        editor.apply()
+        val nextPet = pets[(currentIndex + 1) % pets.size]
+        preferences.edit()
+            .putString(KEY_SELECTED_PET_ID, nextPet.id)
+            .putString(KEY_SELECTED_PET_KEY, nextPet.selectionKey)
+            .putBoolean(KEY_VISIBLE, true)
+            .apply()
     }
 
     fun hasPet(context: Context): Boolean =
-        discoverPets(context).isNotEmpty()
+        discoverPets(context).any { atlas(context, it) != null }
 
     fun frameBitmap(context: Context, state: State, timestampMillis: Long): Bitmap? {
         val atlas = atlasForSelectedOrFallback(context) ?: return null
@@ -90,10 +91,13 @@ internal object ScouterCodexPet {
 
     private fun atlasForSelectedOrFallback(context: Context): Bitmap? {
         val pets = discoverPets(context)
-        val selectedId = prefs(context).getString(KEY_SELECTED_PET_ID, null)?.takeIf { isSafeId(it) }
+        val preferences = prefs(context)
+        val selectedKey = preferences.getString(KEY_SELECTED_PET_KEY, null)?.takeIf { it.isNotBlank() }
+        val selectedId = preferences.getString(KEY_SELECTED_PET_ID, null)?.takeIf { isSafeId(it) }
         val orderedPets = when {
-            selectedId == null -> pets
-            else -> pets.sortedBy { if (it.id == selectedId) 0 else 1 }
+            selectedKey != null -> pets.sortedBy { if (it.selectionKey == selectedKey) 0 else 1 }
+            selectedId != null -> pets.sortedBy { if (it.id == selectedId) 0 else 1 }
+            else -> pets
         }
         return orderedPets.firstNotNullOfOrNull { atlas(context, it) }
     }
@@ -121,6 +125,7 @@ internal object ScouterCodexPet {
                         id = id,
                         root = directory,
                         spritesheet = spritesheet,
+                        selectionKey = "file:${directory.absolutePath}",
                         key = "file:${spritesheetFile.absolutePath}:${spritesheetFile.lastModified()}:${spritesheetFile.length()}"
                     )
                 }.getOrNull()
@@ -139,6 +144,7 @@ internal object ScouterCodexPet {
                     id = id,
                     root = DEMO_ASSET_ROOT,
                     spritesheet = spritesheet,
+                    selectionKey = "asset:$DEMO_ASSET_ROOT",
                     key = "asset:$DEMO_ASSET_ROOT/$spritesheet"
                 )
             )
@@ -198,6 +204,7 @@ internal object ScouterCodexPet {
     private sealed class PetSource {
         abstract val id: String
         abstract val spritesheet: String
+        abstract val selectionKey: String
         abstract val key: String
 
         abstract fun open(context: Context): java.io.InputStream
@@ -206,6 +213,7 @@ internal object ScouterCodexPet {
             override val id: String,
             val root: String,
             override val spritesheet: String,
+            override val selectionKey: String,
             override val key: String
         ) : PetSource() {
             override fun open(context: Context): java.io.InputStream =
@@ -216,6 +224,7 @@ internal object ScouterCodexPet {
             override val id: String,
             val root: File,
             override val spritesheet: String,
+            override val selectionKey: String,
             override val key: String
         ) : PetSource() {
             override fun open(context: Context): java.io.InputStream =

@@ -45,11 +45,13 @@ import { fonts as F } from '@/theme.config';
 import { withAlpha } from '@/lib/theme-utils';
 import { usePanelBackground } from '@/hooks/use-panel-background';
 import TerminalEmulator from '@/modules/terminal-emulator/src/TerminalEmulatorModule';
+import { logError } from '@/lib/debug-logger';
 
 const MAX_VISIBLE_SESSION_TABS = 4;
 const LOCAL_REPLY_EVENT_TTL_MS = 10 * 60 * 1000;
 const LOCAL_REPLY_EVENT_MATCH_WINDOW_MS = 30 * 1000;
 const MAX_LOCAL_REPLY_EVENTS = 24;
+let mountedAgentChatPaneCount = 0;
 
 type ResumeNotice =
   | { status: 'pending'; sessionId: string }
@@ -153,8 +155,17 @@ export default function AgentChatPane() {
   const listRef = useRef<FlatList<AgentChatEvent>>(null);
 
   useEffect(() => {
+    mountedAgentChatPaneCount += 1;
     startPolling();
-    return () => stopPolling();
+    return () => {
+      stopPolling();
+      mountedAgentChatPaneCount = Math.max(0, mountedAgentChatPaneCount - 1);
+      if (mountedAgentChatPaneCount === 0) {
+        TerminalEmulator.clearScouterWidgetConversationForPrivacy?.().catch((error) => {
+          logError('AgentChatPane', 'Failed to clear Scouter widget conversation after closing Agent Chat panes', error);
+        });
+      }
+    };
   }, [startPolling, stopPolling]);
 
   const sessionTabs = useMemo(
@@ -424,11 +435,14 @@ export default function AgentChatPane() {
         {
           text: t('common.delete'),
           style: 'destructive',
-          onPress: () => dismissSession(session.codexSessionId),
+          onPress: () => dismissSession(session.codexSessionId, {
+            dismissWorkspace: true,
+            clearWidgetPrivacy: sessionTabs.length <= 1,
+          }),
         },
       ],
     );
-  }, [dismissSession, t]);
+  }, [dismissSession, sessionTabs.length, t]);
 
   const sendReply = useCallback(async () => {
     if (!activeSession || replySending || !draft.trim()) return;
