@@ -29,6 +29,7 @@ internal object ScouterCodexPet {
     private const val KEY_SIDECAR_IMPORT_ERROR = "codex_pet_sidecar_import_error"
     private const val DEFAULT_VISIBLE = false
     private const val ASSET_PET_ROOT = "pets"
+    private const val SHARED_PET_ROOT = "Codex/pets"
     private const val SIDECAR_PET_ZIP = "shelly-personal-pets.zip"
     private const val TAG = "ScouterCodexPet"
     private const val COLUMNS = 8
@@ -530,42 +531,64 @@ internal object ScouterCodexPet {
         petRoots(context).flatMap(::petsInRoot).distinctBy { it.selectionKey }
 
     private fun petRoots(context: Context): List<File> {
-        val filesRoot = context.filesDir.canonicalFile
-        val expectedHome = File(filesRoot, "home").absoluteFile
-        val home = HomeInitializer.getHomeDir(context).canonicalFile
-        if (home.path != expectedHome.path || !home.path.startsWith(filesRoot.path + File.separator)) {
-            return emptyList()
-        }
-        val root = File(home, ".codex/pets").absoluteFile
-        val canonicalRoot = runCatching { root.canonicalFile }.getOrNull() ?: return emptyList()
-        if (canonicalRoot.path != root.path || !canonicalRoot.path.startsWith(home.path + File.separator)) {
-            return emptyList()
-        }
-        return listOf(root)
+        val roots = mutableListOf<File>()
+        privatePetRootForDiscovery(context)?.let { roots += it }
+        roots += sharedPetRoots()
+        return roots
             .distinctBy { canonicalKey(it) }
     }
 
+    private fun privatePetRootForDiscovery(context: Context): File? =
+        runCatching {
+            val filesRoot = context.filesDir.canonicalFile
+            val expectedHome = File(filesRoot, "home").absoluteFile
+            val home = HomeInitializer.getHomeDir(context).canonicalFile
+            if (home.path != expectedHome.path || !home.path.startsWith(filesRoot.path + File.separator)) {
+                return@runCatching null
+            }
+            val root = File(home, ".codex/pets").absoluteFile
+            val canonicalRoot = root.canonicalFile
+            if (canonicalRoot.path != root.path || !canonicalRoot.path.startsWith(home.path + File.separator)) {
+                return@runCatching null
+            }
+            canonicalRoot
+        }.getOrNull()
+
+    private fun sharedPetRoots(): List<File> {
+        val externalRoot = Environment.getExternalStorageDirectory()
+        val downloadsRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        return listOf(
+            File(externalRoot, SHARED_PET_ROOT),
+            File("/sdcard/$SHARED_PET_ROOT"),
+            File("/storage/emulated/0/$SHARED_PET_ROOT"),
+            File(downloadsRoot, SHARED_PET_ROOT),
+            File("/sdcard/Download/$SHARED_PET_ROOT"),
+            File("/storage/emulated/0/Download/$SHARED_PET_ROOT")
+        ).mapNotNull { root ->
+            runCatching { root.canonicalFile }.getOrNull()
+        }.distinctBy { canonicalKey(it) }
+    }
+
     private fun petsInRoot(root: File): List<PetSource> {
-        val directories = root.listFiles { file -> file.isDirectory } ?: return emptyList()
-        val canonicalRootPath = runCatching { root.canonicalPath }.getOrNull() ?: return emptyList()
+        val canonicalRoot = runCatching { root.canonicalFile }.getOrNull() ?: return emptyList()
+        val directories = canonicalRoot.listFiles { file -> file.isDirectory } ?: return emptyList()
+        val canonicalRootPath = canonicalRoot.path
         return directories
             .sortedBy { it.name.lowercase(Locale.US) }
             .mapNotNull { directory ->
                 runCatching {
-                    val petRoot = directory.absoluteFile
-                    val canonicalPetRoot = petRoot.canonicalFile
-                    if (
-                        canonicalPetRoot.path != petRoot.path ||
-                        !canonicalPetRoot.path.startsWith(canonicalRootPath + File.separator)
-                    ) return@runCatching null
-                    val manifestFile = File(directory, "pet.json")
+                    val canonicalPetRoot = directory.canonicalFile
+                    if (!canonicalPetRoot.path.startsWith(canonicalRootPath + File.separator)) {
+                        return@runCatching null
+                    }
+                    val manifestFile = File(canonicalPetRoot, "pet.json")
                     if (!manifestFile.isFile || manifestFile.length() > 32_768L) return@runCatching null
                     val manifest = JSONObject(manifestFile.readText(Charsets.UTF_8))
                     val id = manifest.optString("id", directory.name).takeIf { isSafeId(it) }
                         ?: return@runCatching null
                     val spritesheet = manifest.optString("spritesheetPath", "spritesheet.webp")
                     if (!isSafeAssetName(spritesheet)) return@runCatching null
-                    val spritesheetFile = File(directory, spritesheet).canonicalFile
+                    val spritesheetFile = File(canonicalPetRoot, spritesheet).canonicalFile
                     if (
                         spritesheetFile.path == canonicalPetRoot.path ||
                         !spritesheetFile.path.startsWith(canonicalPetRoot.path + File.separator)
@@ -573,9 +596,9 @@ internal object ScouterCodexPet {
                     if (!spritesheetFile.isFile) return@runCatching null
                     PetSource.FilePet(
                         id = id,
-                        root = directory,
+                        root = canonicalPetRoot,
                         spritesheet = spritesheet,
-                        selectionKey = "file:${directory.absolutePath}",
+                        selectionKey = "file:${canonicalPetRoot.absolutePath}",
                         key = "file:${spritesheetFile.absolutePath}:${spritesheetFile.lastModified()}:${spritesheetFile.length()}"
                     )
                 }.getOrNull()
