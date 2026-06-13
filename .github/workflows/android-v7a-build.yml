@@ -1,0 +1,146 @@
+name: Android armeabi-v7a Build Pipeline
+
+on:
+  workflow_dispatch: # Allows manual triggering from the GitHub UI
+  push:
+    branches:
+      - main # Triggers on push to main branch
+
+# Grant the GITHUB_TOKEN permission to write to the repository contents (required for committing files)
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ----------------------------------------------------------------------
+      # STEP 1: Checkout the source code
+      # ----------------------------------------------------------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for all branches to allow switching branches later
+
+      # ----------------------------------------------------------------------
+      # STEP 2: Setup Java Development Kit (Required for Gradle)
+      # ----------------------------------------------------------------------
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # ----------------------------------------------------------------------
+      # STEP 3: Setup Android SDK and NDK
+      # ----------------------------------------------------------------------
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ----------------------------------------------------------------------
+      # STEP 4: Execute Build with Verbose Logging
+      # ----------------------------------------------------------------------
+      - name: Build armeabi-v7a Debug APK with Verbose Logging
+        id: gradle_build
+        run: |
+          # Ensure gradlew is executable
+          chmod +x gradlew
+          
+          # Execute the build. 
+          # -Pandroid.injected.build.abi=armeabi-v7a forces the 32-bit target.
+          # --info and --stacktrace provide maximum verbosity for debugging.
+          # 'tee' captures the output to a file while still printing to the console.
+          ./gradlew assembleDebug -Pandroid.injected.build.abi=armeabi-v7a --info --stacktrace | tee build_output.log
+          
+          # Capture the exit code of the gradle command, not the tee command
+          exit ${PIPESTATUS[0]}
+
+      # ----------------------------------------------------------------------
+      # STEP 5: Handle SUCCESS - Commit APK to artifacts branch
+      # ----------------------------------------------------------------------
+      - name: Process Successful Build
+        if: steps.gradle_build.outcome == 'success'
+        run: |
+          # Configure Git identity
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Switch to or create the 'artifacts' branch
+          git checkout -b artifacts || git checkout artifacts
+          git pull origin artifacts || true
+
+          # Define the expected default output path for a debug APK in Android Gradle
+          DEFAULT_APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          
+          # Define the target path using the repository name as the base name
+          TARGET_DIR="builds/debug"
+          BASE_NAME="${{ github.event.repository.name }}"
+          TARGET_PATH="${TARGET_DIR}/${BASE_NAME}.v7a-debug.apk"
+
+          # Verify the APK exists
+          if [ -f "$DEFAULT_APK_PATH" ]; then
+            # Create target directory
+            mkdir -p "$TARGET_DIR"
+            
+            # Copy and rename the APK
+            cp "$DEFAULT_APK_PATH" "$TARGET_PATH"
+            
+            # Commit the artifact
+            git add "$TARGET_PATH"
+            # [skip ci] prevents this commit from triggering the workflow again, avoiding infinite loops
+            git commit -m "chore: add successful ${BASE_NAME}.v7a-debug.apk [skip ci]"
+            git push origin artifacts
+            
+            echo "✅ Successfully built and committed ${TARGET_PATH} to the 'artifacts' branch."
+          else
+            echo "❌ Build reported success, but APK was not found at ${DEFAULT_APK_PATH}."
+            exit 1
+          fi
+
+      # ----------------------------------------------------------------------
+      # STEP 6: Handle FAILURE - Commit Verbose Log to failed-builds branch
+      # ----------------------------------------------------------------------
+      - name: Process Failed Build
+        if: steps.gradle_build.outcome == 'failure'
+        run: |
+          # Configure Git identity
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Switch to or create the 'failed-builds' branch
+          git checkout -b failed-builds || git checkout failed-builds
+          git pull origin failed-builds || true
+
+          # Define log directory and filename using the unique GitHub Run ID
+          LOG_DIR="logs"
+          LOG_FILENAME="${{ github.run_id }}-armeabi-v7a-failure.log"
+          LOG_PATH="${LOG_DIR}/${LOG_FILENAME}"
+
+          # Create directory and move the captured log
+          mkdir -p "$LOG_DIR"
+          cp build_output.log "$LOG_PATH"
+
+          # Commit the log
+          git add "$LOG_PATH"
+          # [skip ci] prevents this commit from triggering the workflow again
+          git commit -m "chore: add verbose build failure log for run ${{ github.run_id }} [skip ci]"
+          git push origin failed-builds
+
+          echo "❌ Build failed. Verbose log committed to ${LOG_PATH} on the 'failed-builds' branch."
+          
+          # Force the workflow to remain marked as failed in the GitHub UI
+          exit 1
+
+      # ----------------------------------------------------------------------
+      # STEP 7: Upload Artifacts to GitHub UI (Fallback/Convenience)
+      # ----------------------------------------------------------------------
+      # Even though files are committed to branches, uploading them as GitHub 
+      # Artifacts makes them easily downloadable from the Actions tab UI.
+      - name: Upload Build Log or APK as GitHub Artifact
+        uses: actions/upload-artifact@v4
+        if: always() # Run this step regardless of success or failure
+        with:
+          name: ${{ steps.gradle_build.outcome == 'success' && 'successful-v7a-apk' || 'failed-v7a-build-log' }}
+          path: ${{ steps.gradle_build.outcome == 'success' && 'app/build/outputs/apk/debug/app-debug.apk' || 'build_output.log' }}
+          retention-days: 30
