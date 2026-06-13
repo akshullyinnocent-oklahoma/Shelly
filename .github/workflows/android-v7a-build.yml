@@ -1,10 +1,7 @@
 name: Android armeabi-v7a Build Pipeline
 
 on:
-  workflow_dispatch: # Allows manual triggering from the GitHub UI
-  push:
-    branches:
-      - main # Triggers on push to main branch
+  workflow_dispatch: # Allows manual triggering from the iggers on push to main branch
 
 # Grant the GITHUB_TOKEN permission to write to the repository contents (required for committing files)
 permissions:
