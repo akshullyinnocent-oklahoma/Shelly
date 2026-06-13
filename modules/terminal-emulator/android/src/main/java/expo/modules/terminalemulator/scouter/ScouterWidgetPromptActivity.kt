@@ -30,6 +30,9 @@ class ScouterWidgetPromptActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (handlePetCycleAction(intent)) {
+            return
+        }
         if (handleApprovalAction(intent)) {
             return
         }
@@ -260,6 +263,17 @@ class ScouterWidgetPromptActivity : Activity() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun finishQuietly() {
+        overridePendingTransition(0, 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            finishAndRemoveTask()
+        } else {
+            finish()
+        }
+        overridePendingTransition(0, 0)
+    }
+
     private fun sendPrompt(prompt: String, dialog: Dialog): Boolean {
         val store = ScouterStateStore(this)
         val target = findBoundCodexTerminal(store)
@@ -304,6 +318,17 @@ class ScouterWidgetPromptActivity : Activity() {
             Toast.makeText(this, R.string.scouter_widget_prompt_no_codex, Toast.LENGTH_SHORT).show()
             false
         })
+    }
+
+    private fun handlePetCycleAction(intent: Intent?): Boolean {
+        if (intent?.action != ACTION_PET_CYCLE) return false
+        ScouterCodexPet.cycleVisiblePet(this)
+        runCatching {
+            Log.i(TAG, "Widget pet cycle state=${ScouterCodexPet.debugJson(this)}")
+        }
+        ScouterWidgetProvider.updateAll(this, force = true)
+        finishQuietly()
+        return true
     }
 
     private fun handleApprovalAction(intent: Intent?): Boolean {
@@ -582,6 +607,7 @@ class ScouterWidgetPromptActivity : Activity() {
         const val ACTION_APPROVAL_ALLOW = "expo.modules.terminalemulator.scouter.APPROVAL_ALLOW"
         const val ACTION_APPROVAL_DENY = "expo.modules.terminalemulator.scouter.APPROVAL_DENY"
         const val ACTION_CHOICE_SELECT = "expo.modules.terminalemulator.scouter.CHOICE_SELECT"
+        const val ACTION_PET_CYCLE = "expo.modules.terminalemulator.scouter.PET_CYCLE"
         const val EXTRA_CODEX_SESSION_ID = "expo.modules.terminalemulator.scouter.CODEX_SESSION_ID"
         const val EXTRA_PTY_SESSION_ID = "expo.modules.terminalemulator.scouter.PTY_SESSION_ID"
         const val EXTRA_APPROVAL_AT = "expo.modules.terminalemulator.scouter.APPROVAL_AT"

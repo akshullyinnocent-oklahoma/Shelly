@@ -34,11 +34,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 ScouterCodexPet.cycleVisiblePet(context)
                 enqueueUpdate(context, null, pending::finish, force = true)
             }
-            ACTION_TOGGLE_PET -> {
-                val pending = goAsync()
-                ScouterCodexPet.toggleVisible(context)
-                enqueueUpdate(context, null, pending::finish, force = true)
-            }
             ACTION_WAIT_EXPIRY_REFRESH -> {
                 val pending = goAsync()
                 enqueueUpdate(context, null, pending::finish, force = true)
@@ -251,8 +246,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 emptyBadge = "CX",
                 emptyDetail = "STATE  WAIT [..] no Codex session",
                 emptyMetrics = listOf(
-                    "CTX [..........] --% · TOK --",
-                    "FLOW in -- / out -- · CACHE -- · RATE --"
+                    "MODEL --",
+                    "FLOW -- · CACHE -- · RATE --"
                 ).joinToString("\n")
             )
             codex?.let {
@@ -349,25 +344,21 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             boundScreen: BoundCodexScreen,
             actionRowHasPriority: Boolean
         ) {
-            val togglePending = petTogglePendingIntent(context)
             val cyclePending = petCyclePendingIntent(context)
-            views.setOnClickPendingIntent(R.id.scouter_codex_pet, petCyclePendingIntent(context))
-            views.setOnClickPendingIntent(R.id.scouter_codex_pet_hide, togglePending)
-            views.setOnClickPendingIntent(R.id.scouter_codex_pet_next, cyclePending)
-            views.setOnClickPendingIntent(R.id.scouter_codex_pet_toggle, togglePending)
+            views.setOnClickPendingIntent(R.id.scouter_codex_pet, cyclePending)
+            views.setOnClickPendingIntent(R.id.scouter_codex_pet_touch, cyclePending)
+            views.setOnClickPendingIntent(R.id.scouter_codex_pet_toggle, cyclePending)
 
             if (actionRowHasPriority || !ScouterCodexPet.hasPet(context)) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_next, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_touch, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
                 return
             }
 
             if (!ScouterCodexPet.isVisible(context)) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_next, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_touch, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.VISIBLE)
                 return
             }
@@ -379,19 +370,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             )
             if (frame == null) {
                 views.setViewVisibility(R.id.scouter_codex_pet, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_hide, View.GONE)
-                views.setViewVisibility(R.id.scouter_codex_pet_next, View.GONE)
+                views.setViewVisibility(R.id.scouter_codex_pet_touch, View.GONE)
                 views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
                 return
             }
 
             views.setImageViewBitmap(R.id.scouter_codex_pet, frame)
             views.setViewVisibility(R.id.scouter_codex_pet, View.VISIBLE)
-            views.setViewVisibility(R.id.scouter_codex_pet_hide, View.VISIBLE)
-            views.setViewVisibility(
-                R.id.scouter_codex_pet_next,
-                if (ScouterCodexPet.hasMultiplePets(context)) View.VISIBLE else View.GONE
-            )
+            views.setViewVisibility(R.id.scouter_codex_pet_touch, View.VISIBLE)
             views.setViewVisibility(R.id.scouter_codex_pet_toggle, View.GONE)
         }
 
@@ -636,21 +622,15 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private fun petTogglePendingIntent(context: Context): PendingIntent {
-            val intent = Intent(context, ScouterWidgetProvider::class.java)
-                .setAction(ACTION_TOGGLE_PET)
-            return PendingIntent.getBroadcast(
-                context,
-                9105,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        }
-
         private fun petCyclePendingIntent(context: Context): PendingIntent {
-            val intent = Intent(context, ScouterWidgetProvider::class.java)
-                .setAction(ACTION_CYCLE_PET)
-            return PendingIntent.getBroadcast(
+            val intent = Intent(context, ScouterWidgetPromptActivity::class.java)
+                .setAction(ScouterWidgetPromptActivity.ACTION_PET_CYCLE)
+                .addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_NO_HISTORY or
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                )
+            return PendingIntent.getActivity(
                 context,
                 9106,
                 intent,
@@ -836,16 +816,12 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             }
         }
 
-        // Clean single line bound to scouter_codex_metrics: the consumed-token
-        // count plus the context gauge and short model name. The noisy
-        // FLOW/REASON/CACHE/SID/TRACE breakdown lives in ScouterDetailModal.
+        // Clean single line bound to scouter_codex_metrics: model and cost only.
+        // Consumed token/context gauges live on scouter_codex_usage so the compact
+        // widget does not show two competing usage rows.
         private fun codexMetrics(snapshot: SessionSnapshot, conversation: ScouterWidgetConversation? = null): String {
             val parts = mutableListOf<String>()
-            // Option B USAGE line: MODEL · TOK · $cost · <n>%ctx (skip blanks).
             snapshot.modelName?.takeIf { it.isNotBlank() }?.let { parts += "MODEL ${shortModelName(it)}" }
-            // "used" makes the token total unambiguous vs the rate-limit line's
-            // "left" (remaining quota) — the two were easy to confuse.
-            if (snapshot.tokensUsed > 0L) parts += "TOK ${formatTokens(snapshot.tokensUsed)} used"
             // Prefer a real cost if the source emitted one (e.g. Claude); otherwise
             // derive it from the static LiteLLM price table, since Codex never
             // emits totalCostUsd and leaves it structurally 0.
@@ -853,10 +829,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 ?: ScouterModelPricing.costUsd(snapshot.modelName, snapshot.inputTokens, snapshot.outputTokens)
             cost?.let {
                 parts += "$" + String.format(Locale.US, "%.2f", it)
-            }
-            snapshot.contextPercentRemaining?.let {
-                val used = (100.0 - it).coerceIn(0.0, 100.0)
-                parts += String.format(Locale.US, "%.0f%%ctx", used)
             }
             return parts.filter { it.isNotBlank() }.joinToString(" · ")
         }
@@ -925,7 +897,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             conversation: ScouterWidgetConversation? = null,
             usageLimited: ScouterWidgetUsageLimited? = null
         ): CharSequence {
-            val baseLine = snapshot?.let { codexUsageBaseLine(it) } ?: "TOK -- · CTX --"
+            val baseLine = codexUsageBaseLine(snapshot)
             // Live PTS poll saw a usage-limit banner: this is the most authoritative
             // signal (Codex emits no JSONL event for it), so it overrides the stale
             // structured/JSONL percentages that would otherwise read e.g. "WK 4% left".
@@ -957,19 +929,27 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             )
         }
 
-        private fun codexUsageBaseLine(snapshot: SessionSnapshot): String {
-            val observedTokens = snapshot.tokensUsed.takeIf { it > 0L }
-                ?: (snapshot.inputTokens + snapshot.outputTokens).takeIf { it > 0L }
+        private fun codexUsageBaseLine(snapshot: SessionSnapshot?): String {
+            val observedTokens = snapshot?.tokensUsed?.takeIf { it > 0L }
+                ?: snapshot?.let { (it.inputTokens + it.outputTokens).takeIf { tokens -> tokens > 0L } }
             val tokens = observedTokens?.let { formatTokens(it) } ?: "--"
-            val contextUsed = snapshot.contextPercentRemaining
+            val contextUsed = snapshot?.contextPercentRemaining
                 ?.let { (100.0 - it).coerceIn(0.0, 100.0) }
-                ?.let { String.format(Locale.US, "%.0f%%", it) }
-                ?: "--"
-            return "TOK $tokens · CTX $contextUsed"
+            val contextText = contextUsed?.let { String.format(Locale.US, "%.0f%%", it) } ?: "--%"
+            val contextCells = contextGaugeCells(contextUsed, CONTEXT_GAUGE_CELLS)
+            return "CTX [$contextCells] $contextText · TOK $tokens"
         }
 
         private fun appendUsageLine(baseLine: String, suffix: CharSequence): CharSequence =
             SpannableStringBuilder(baseLine).append(" · ").append(suffix)
+
+        private fun contextGaugeCells(usedPercent: Double?, cells: Int): String {
+            if (usedPercent == null) return ".".repeat(cells)
+            val filled = Math.round(usedPercent.coerceIn(0.0, 100.0) / 100.0 * cells)
+                .toInt()
+                .coerceIn(0, cells)
+            return "#".repeat(filled) + ".".repeat(cells - filled)
+        }
 
         // Continuous remaining display from the parsed Codex rate_limits snapshot.
         // Semantics: 5H/WK show REMAINING percent (100 - used_percent), e.g. "5H 80%"
@@ -1037,8 +1017,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         ) {
             val preview = widgetConversationPreview(codex, conversation, showStoredChoicePending)
             if (preview == null) {
-                views.setViewVisibility(R.id.scouter_codex_conversation, View.GONE)
-                views.setTextViewText(R.id.scouter_codex_conversation, "")
+                views.setViewVisibility(R.id.scouter_codex_conversation, View.INVISIBLE)
+                views.setTextViewText(R.id.scouter_codex_conversation, "\n")
                 return
             }
             views.setViewVisibility(R.id.scouter_codex_conversation, View.VISIBLE)
@@ -1534,8 +1514,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         private const val TAG = "ScouterWidget"
         private const val ACTION_CYCLE_PET =
             "expo.modules.terminalemulator.scouter.WIDGET_CYCLE_CODEX_PET"
-        private const val ACTION_TOGGLE_PET =
-            "expo.modules.terminalemulator.scouter.WIDGET_TOGGLE_CODEX_PET"
         private const val ACTION_WAIT_EXPIRY_REFRESH =
             "expo.modules.terminalemulator.scouter.WIDGET_WAIT_EXPIRY_REFRESH"
         private const val STALE_AFTER_MS = 10 * 60 * 1000L
@@ -1555,6 +1533,7 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         // count = round(remaining% / 100 * GAUGE_CELLS), so the bar itself is the
         // "remaining" indicator and no "left"/"used" word is needed.
         private const val GAUGE_CELLS = 5
+        private const val CONTEXT_GAUGE_CELLS = 10
         private val FIVE_HOUR_LIMIT_RE = Regex("""(?i)\b(?:5\s*h|5-hour|five[- ]hour)\b""")
         private val WEEKLY_LIMIT_RE = Regex("""(?i)\b(?:weekly|week)\b""")
         private val LIMIT_PERCENT_RE = Regex("""(?i)(?:<\s*)?(\d{1,3}(?:\.\d+)?)\s*%""")
