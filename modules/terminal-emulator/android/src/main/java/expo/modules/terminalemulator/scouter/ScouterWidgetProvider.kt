@@ -246,8 +246,8 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 emptyBadge = "CX",
                 emptyDetail = "STATE  WAIT [..] no Codex session",
                 emptyMetrics = listOf(
-                    "CTX [..........] --% · TOK --",
-                    "FLOW in -- / out -- · CACHE -- · RATE --"
+                    "MODEL --",
+                    "FLOW -- · CACHE -- · RATE --"
                 ).joinToString("\n")
             )
             codex?.let {
@@ -623,9 +623,14 @@ class ScouterWidgetProvider : AppWidgetProvider() {
         }
 
         private fun petCyclePendingIntent(context: Context): PendingIntent {
-            val intent = Intent(context, ScouterWidgetProvider::class.java)
-                .setAction(ACTION_CYCLE_PET)
-            return PendingIntent.getBroadcast(
+            val intent = Intent(context, ScouterWidgetPromptActivity::class.java)
+                .setAction(ScouterWidgetPromptActivity.ACTION_PET_CYCLE)
+                .addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_NO_HISTORY or
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                )
+            return PendingIntent.getActivity(
                 context,
                 9106,
                 intent,
@@ -811,16 +816,12 @@ class ScouterWidgetProvider : AppWidgetProvider() {
             }
         }
 
-        // Clean single line bound to scouter_codex_metrics: the consumed-token
-        // count plus the context gauge and short model name. The noisy
-        // FLOW/REASON/CACHE/SID/TRACE breakdown lives in ScouterDetailModal.
+        // Clean single line bound to scouter_codex_metrics: model and cost only.
+        // Consumed token/context gauges live on scouter_codex_usage so the compact
+        // widget does not show two competing usage rows.
         private fun codexMetrics(snapshot: SessionSnapshot, conversation: ScouterWidgetConversation? = null): String {
             val parts = mutableListOf<String>()
-            // Option B USAGE line: MODEL · TOK · $cost · <n>%ctx (skip blanks).
             snapshot.modelName?.takeIf { it.isNotBlank() }?.let { parts += "MODEL ${shortModelName(it)}" }
-            // "used" makes the token total unambiguous vs the rate-limit line's
-            // "left" (remaining quota) — the two were easy to confuse.
-            if (snapshot.tokensUsed > 0L) parts += "TOK ${formatTokens(snapshot.tokensUsed)} used"
             // Prefer a real cost if the source emitted one (e.g. Claude); otherwise
             // derive it from the static LiteLLM price table, since Codex never
             // emits totalCostUsd and leaves it structurally 0.
@@ -828,10 +829,6 @@ class ScouterWidgetProvider : AppWidgetProvider() {
                 ?: ScouterModelPricing.costUsd(snapshot.modelName, snapshot.inputTokens, snapshot.outputTokens)
             cost?.let {
                 parts += "$" + String.format(Locale.US, "%.2f", it)
-            }
-            snapshot.contextPercentRemaining?.let {
-                val used = (100.0 - it).coerceIn(0.0, 100.0)
-                parts += String.format(Locale.US, "%.0f%%ctx", used)
             }
             return parts.filter { it.isNotBlank() }.joinToString(" · ")
         }
