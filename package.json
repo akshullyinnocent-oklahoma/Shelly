@@ -1,16 +1,16 @@
 {
-  "name": "shelly-terminal",
-  "version": "5.3.8",
+  "name": "Shelly-Shellz-terminal",
+  "version": "5.3.9",
   "description": "AI-powered terminal IDE for Android",
   "license": "GPL-3.0-or-later",
-  "author": "RYO ITABASHI",
-  "homepage": "https://github.com/RYOITABASHI/Shelly#readme",
+  "author": "Ak",
+  "homepage": "https://github.com/akshullyinnocent-oklahoma/Shelly#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/RYOITABASHI/Shelly"
+    "url": "https://github.com/akshullyinnocent-oklahoma/Shelly"
   },
   "bugs": {
-    "url": "https://github.com/RYOITABASHI/Shelly/issues"
+    "url": "https://github.com/akshullyinnocent-oklahoma/Shelly/issues"
   },
   "keywords": [
     "terminal",
@@ -25,7 +25,7 @@
     "codex",
     "llm"
   ],
-  "private": true,
+  "private": false,
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
